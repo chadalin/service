@@ -187,7 +187,7 @@ document.addEventListener('alpine:init', () => {
             }
             
             try {
-                const response = await fetch(`{{ route('diagnostic.models', '') }}/${this.selectedBrand}`);
+                const response = await fetch('/diagnostic/models/' + this.selectedBrand);
                 const models = await response.json();
                 
                 let options = '<option value="">Выберите модель</option>';

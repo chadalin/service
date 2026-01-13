@@ -40,21 +40,21 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::get('/search', [SearchController::class, 'index'])->name('search.index');
     Route::post('/search', [SearchController::class, 'search'])->name('search');
     Route::get('/search/advanced', [SearchController::class, 'advancedSearch'])->name('search.advanced');
+
+    // Categories - ПЕРЕМЕСТИЛИ ВНУТРЬ admin группы
+    Route::get('/categories', [CategoryController::class, 'index'])->name('categories.index');
+    Route::get('/categories/create', [CategoryController::class, 'create'])->name('categories.create');
+    Route::post('/categories', [CategoryController::class, 'store'])->name('categories.store');
+    Route::get('/categories/{category}/edit', [CategoryController::class, 'edit'])->name('categories.edit');
+    Route::put('/categories/{category}', [CategoryController::class, 'update'])->name('categories.update');
+    Route::delete('/categories/{category}', [CategoryController::class, 'destroy'])->name('categories.destroy');
 });
 
-// Cars data
+// Cars data - ОСТАВЛЯЕМ ВНЕ admin группы
 Route::get('/cars/brands', [CarController::class, 'brands'])->name('cars.brands');
 Route::get('/cars/models', [CarController::class, 'models'])->name('cars.models');
 Route::get('/cars/import', [CarController::class, 'importForm'])->name('cars.import');
 Route::post('/cars/import', [CarController::class, 'import'])->name('cars.import');
-
-// Categories
-Route::get('/admin/categories', [CategoryController::class, 'index'])->name('categories.index');
-Route::get('/admin/categories/create', [CategoryController::class, 'create'])->name('categories.create');
-Route::post('/admin/categories', [CategoryController::class, 'store'])->name('categories.store');
-Route::get('/admin/categories/{category}/edit', [CategoryController::class, 'edit'])->name('categories.edit');
-Route::put('/admin/categories/{category}', [CategoryController::class, 'update'])->name('categories.update');
-Route::delete('/admin/categories/{category}', [CategoryController::class, 'destroy'])->name('categories.destroy');
 
 // Chat
 Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
@@ -109,8 +109,4 @@ Route::middleware(['auth'])->prefix('admin/diagnostic')->name('admin.diagnostic.
     Route::put('/rules/{rule}', [DiagnosticRuleController::class, 'update'])->name('rules.update');
     Route::delete('/rules/{rule}', [DiagnosticRuleController::class, 'destroy'])->name('rules.destroy');
     Route::get('/rules/models/{brandId}', [DiagnosticRuleController::class, 'getModels'])->name('rules.models');
-    
-    // Кейсы (можно добавить позже)
-    // Route::get('/cases', [Admin\CaseController::class, 'index'])->name('cases.index');
-    // Route::get('/cases/{case}', [Admin\CaseController::class, 'show'])->name('cases.show');
 });
