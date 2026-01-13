@@ -66,72 +66,116 @@
 
 @push('scripts')
 <script>
-document.getElementById('brand_id').addEventListener('change', function() {
-    const brandId = this.value;
+document.addEventListener('DOMContentLoaded', function() {
+    const brandSelect = document.getElementById('brand_id');
     const modelSelect = document.getElementById('car_model_id');
-    
-    if (brandId) {
-        modelSelect.disabled = false;
-        modelSelect.innerHTML = '<option value="">Загрузка моделей...</option>';
+
+    if (brandSelect && modelSelect) {
+        console.log("✅ Chat page loaded, brand select found");
         
-        fetch(`/chat/models/${brandId}`)
-            .then(response => response.json())
-            .then(models => {
+        brandSelect.addEventListener('change', function() {
+            const brandId = this.value;
+            console.log("Brand changed to:", brandId);
+            
+            if (brandId) {
+                modelSelect.disabled = false;
+                modelSelect.innerHTML = '<option value="">Загрузка моделей...</option>';
+                
+                // Делаем AJAX запрос
+                fetch(`/chat/models/${brandId}`)
+                    .then(response => {
+                        console.log("Response status:", response.status);
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
+                        }
+                        return response.json();
+                    })
+                    .then(models => {
+                        console.log("Models loaded:", models);
+                        modelSelect.innerHTML = '<option value="">Все модели</option>';
+                        
+                        if (models.length === 0) {
+                            modelSelect.innerHTML += '<option value="">Нет моделей</option>';
+                            return;
+                        }
+                        
+                        models.forEach(model => {
+                            const years = model.year_from && model.year_to ? 
+                                ` (${model.year_from}-${model.year_to})` : '';
+                            const displayName = model.name_cyrillic ? 
+                                `${model.name} / ${model.name_cyrillic}${years}` : 
+                                `${model.name}${years}`;
+                                
+                            modelSelect.innerHTML += 
+                                `<option value="${model.id}">${displayName}</option>`;
+                        });
+                    })
+                    .catch(error => {
+                        console.error('Error loading models:', error);
+                        modelSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
+                    });
+            } else {
+                modelSelect.disabled = true;
                 modelSelect.innerHTML = '<option value="">Все модели</option>';
-                models.forEach(model => {
-                    const years = model.year_from && model.year_to ? 
-                        ` (${model.year_from}-${model.year_to})` : '';
-                    modelSelect.innerHTML += 
-                        `<option value="${model.id}">${model.name} ${model.name_cyrillic}${years}</option>`;
-                });
+            }
+        });
+        
+        // Инициализация если есть выбранный бренд
+        if (brandSelect.value) {
+            brandSelect.dispatchEvent(new Event('change'));
+        }
+    } else {
+        console.error("❌ Brand or model select not found!");
+    }
+
+    // Обработчик формы поиска
+    const searchForm = document.getElementById('searchForm');
+    if (searchForm) {
+        searchForm.addEventListener('submit', function(e) {
+            e.preventDefault();
+            console.log("Search form submitted");
+            
+            const searchBtn = document.getElementById('searchBtn');
+            const spinner = document.getElementById('searchSpinner');
+            const results = document.getElementById('searchResults');
+            
+            searchBtn.disabled = true;
+            spinner.classList.remove('d-none');
+            results.innerHTML = '<div class="text-center py-3"><div class="spinner-border"></div><p>Ищем...</p></div>';
+            
+            const formData = new FormData(this);
+            
+            fetch('/chat/search', {
+                method: 'POST',
+                headers: {
+                    'X-Requested-With': 'XMLHttpRequest',
+                    'X-CSRF-TOKEN': '{{ csrf_token() }}'
+                },
+                body: formData
+            })
+            .then(response => {
+                console.log("Search response status:", response.status);
+                return response.json();
+            })
+            .then(data => {
+                console.log("Search results:", data);
+                
+                if (data.success) {
+                    displayResults(data);
+                } else {
+                    results.innerHTML = '<div class="alert alert-danger">Ошибка поиска</div>';
+                }
             })
             .catch(error => {
-                modelSelect.innerHTML = '<option value="">Ошибка загрузки</option>';
-                console.error('Error loading models:', error);
+                console.error('Search error:', error);
+                results.innerHTML = '<div class="alert alert-danger">Ошибка соединения</div>';
+            })
+            .finally(() => {
+                searchBtn.disabled = false;
+                spinner.classList.add('d-none');
             });
-    } else {
-        modelSelect.disabled = true;
-        modelSelect.innerHTML = '<option value="">Сначала выберите бренд</option>';
+        });
     }
-});
-
-document.getElementById('searchForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const searchBtn = document.getElementById('searchBtn');
-    const spinner = document.getElementById('searchSpinner');
-    const results = document.getElementById('searchResults');
-    
-    searchBtn.disabled = true;
-    spinner.classList.remove('d-none');
-    results.innerHTML = '<div class="text-center py-3"><div class="spinner-border"></div></div>';
-    
-    const formData = new FormData(this);
-    
-    fetch('/chat/search', {
-        method: 'POST',
-        headers: {
-            'X-Requested-With': 'XMLHttpRequest',
-            'X-CSRF-TOKEN': '{{ csrf_token() }}'
-        },
-        body: formData
-    })
-    .then(response => response.json())
-    .then(data => {
-        if (data.success) {
-            displayResults(data);
-        } else {
-            results.innerHTML = '<div class="alert alert-danger">Ошибка поиска</div>';
-        }
-    })
-    .catch(error => {
-        console.error('Error:', error);
-        results.innerHTML = '<div class="alert alert-danger">Ошибка при выполнении поиска</div>';
-    })
-    .finally(() => {
-        searchBtn.disabled = false;
-        spinner.classList.add('d-none');
-    });
 });
 
 function displayResults(data) {
@@ -141,17 +185,12 @@ function displayResults(data) {
         results.innerHTML = `
             <div class="text-center text-muted py-5">
                 <p>По запросу "${data.query}" ничего не найдено</p>
-                <p class="small">Попробуйте изменить параметры поиска</p>
             </div>
         `;
         return;
     }
     
-    let html = `
-        <div class="mb-3">
-            <p>Найдено документов: <strong>${data.count}</strong></p>
-        </div>
-    `;
+    let html = `<div class="mb-3"><p>Найдено: <strong>${data.count}</strong></p></div>`;
     
     data.results.forEach(doc => {
         html += `
@@ -159,13 +198,10 @@ function displayResults(data) {
                 <div class="card-body">
                     <h6 class="card-title">${doc.title}</h6>
                     <p class="card-text text-muted small">
-                        ${doc.car_model.brand.name} ${doc.car_model.name} • ${doc.category.name}
+                        ${doc.car_model?.brand?.name || ''} ${doc.car_model?.name || ''} 
+                        • ${doc.category?.name || ''}
                     </p>
                     <p class="card-text">${doc.content_text ? doc.content_text.substring(0, 200) + '...' : 'Нет описания'}</p>
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">${new Date(doc.created_at).toLocaleDateString()}</small>
-                        <span class="badge bg-secondary">${doc.file_type.toUpperCase()}</span>
-                    </div>
                 </div>
             </div>
         `;

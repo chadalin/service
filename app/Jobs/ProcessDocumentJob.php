@@ -8,8 +8,8 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use App\Models\Document;
-use App\Services\DocumentProcessor;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class ProcessDocumentJob implements ShouldQueue
 {
@@ -17,6 +17,7 @@ class ProcessDocumentJob implements ShouldQueue
 
     public $document;
     public $tries = 3;
+    public $timeout = 300; // 5 минут
 
     public function __construct(Document $document)
     {
@@ -26,42 +27,66 @@ class ProcessDocumentJob implements ShouldQueue
     public function handle()
     {
         try {
-            Log::info("🔄 Starting document processing job for ID: {$this->document->id}");
+            Log::info("🔄 Starting job for document ID: {$this->document->id}");
             
             // Обновляем статус на processing
             $this->document->update(['status' => 'processing']);
             
-            $processor = new DocumentProcessor();
-            
-            Log::info("📄 Processing document: {$this->document->title}");
-            Log::info("📁 File path: {$this->document->file_path}");
-            Log::info("📝 File type: {$this->document->file_type}");
+            // Создаем экземпляр процессора
+            $processor = new \App\Services\DocumentProcessor();
             
             // Обрабатываем документ
-            $processor->processDocument($this->document);
+            $success = $processor->processDocument($this->document);
             
             // Проверяем результат
             $this->document->refresh();
             
-            if ($this->document->status === 'processed') {
-                Log::info("✅ Document {$this->document->id} processed successfully!");
-                Log::info("📊 Content length: " . strlen($this->document->content_text ?? ''));
+            if ($success && $this->document->status === 'processed') {
+                Log::info("✅ SUCCESS: Document {$this->document->id} processed");
+                
+                // Отладочная информация
+                $hasContent = !empty($this->document->content_text);
+                $hasKeywords = !empty($this->document->keywords);
+                
+                Log::info("📊 Has content: " . ($hasContent ? 'YES' : 'NO'));
+                Log::info("📏 Content length: " . ($hasContent ? strlen($this->document->content_text) : '0'));
+                Log::info("🔑 Has keywords: " . ($hasKeywords ? 'YES' : 'NO'));
+                
+                if ($hasKeywords) {
+                    $keywords = json_decode($this->document->keywords, true);
+                    Log::info("🗝️ Keywords count: " . count($keywords));
+                }
             } else {
-                Log::error("❌ Document {$this->document->id} processing failed. Status: {$this->document->status}");
+                Log::error("❌ FAILED: Document status is {$this->document->status}");
             }
             
-        } catch (\Exception $e) {
-            Log::error("💥 Error processing document {$this->document->id}: " . $e->getMessage());
-            Log::error("📋 Stack trace: " . $e->getTraceAsString());
+        } catch (Throwable $e) {
+            Log::error("💥 JOB ERROR: " . $e->getMessage());
+            Log::error("📄 Stack trace: " . $e->getTraceAsString());
             
-            $this->document->update(['status' => 'error']);
+            $this->document->update([
+                'status' => 'error',
+                'content_text' => 'Error: ' . $e->getMessage()
+            ]);
+            
+            // Повторно выбрасываем исключение для failed()
             throw $e;
         }
     }
 
-    public function failed(\Exception $exception)
+    public function failed(Throwable $exception)
     {
         Log::error("🚨 Job failed for document {$this->document->id}: " . $exception->getMessage());
-        $this->document->update(['status' => 'error']);
+        Log::error("📄 Stack trace: " . $exception->getTraceAsString());
+        
+        // Пытаемся обновить статус документа
+        try {
+            $this->document->update([
+                'status' => 'error',
+                'content_text' => 'Job failed: ' . $exception->getMessage()
+            ]);
+        } catch (Throwable $e) {
+            Log::error("⚠️ Could not update document status: " . $e->getMessage());
+        }
     }
 }

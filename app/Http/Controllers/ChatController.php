@@ -8,6 +8,7 @@ use App\Models\CarModel;
 use App\Models\Document;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use App\Services\SimpleSearchEngine;
 
 class ChatController extends Controller
 {

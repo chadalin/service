@@ -14,7 +14,7 @@ class DocumentController extends Controller
 {
     public function index()
     {
-        $documents = Document::with(['carModel.brand', 'category', 'uploadedBy'])->latest()->paginate(20);
+        $documents = Document::with(['carModel.brand', 'RepairCategory', 'uploadedBy'])->latest()->paginate(20);
         return view('admin.documents.index', compact('documents'));
     }
 
@@ -103,5 +103,103 @@ class DocumentController extends Controller
             ->get(['id', 'name', 'name_cyrillic', 'year_from', 'year_to']);
 
         return response()->json($models);
+    }
+
+     public function show(Document $document)
+    {
+        // Загружаем связи
+        $document->load(['carModel.brand', 'RepairCategory', 'uploadedByUser']);
+        
+        // Декодируем JSON поля
+        $document->keywords = is_string($document->keywords) ? 
+            json_decode($document->keywords, true) : $document->keywords;
+        $document->sections = is_string($document->sections) ? 
+            json_decode($document->sections, true) : $document->sections;
+        $document->metadata = is_string($document->metadata) ? 
+            json_decode($document->metadata, true) : $document->metadata;
+            
+        // Похожие документы
+        $similarDocuments = Document::with(['carModel.brand', 'category'])
+            ->where('id', '!=', $document->id)
+            ->where(function($query) use ($document) {
+                if ($document->car_model_id) {
+                    $query->where('car_model_id', $document->car_model_id);
+                }
+                if ($document->category_id) {
+                    $query->orWhere('category_id', $document->category_id);
+                }
+            })
+            ->where('status', 'processed')
+            ->limit(5)
+            ->get();
+        
+        return view('documents.show', compact('document', 'similarDocuments'));
+    }
+    
+    /**
+     * Предпросмотр файла
+     */
+    public function preview(Document $document)
+    {
+        $filePath = $this->getFilePath($document);
+        
+        if (!file_exists($filePath)) {
+            return response()->json(['error' => 'File not found'], 404);
+        }
+        
+        $mimeType = mime_content_type($filePath);
+        
+        return response()->file($filePath, [
+            'Content-Type' => $mimeType,
+            'Content-Disposition' => 'inline; filename="' . $document->original_filename . '"'
+        ]);
+    }
+    
+    /**
+     * Скачивание файла
+     */
+    public function download(Document $document)
+    {
+        $filePath = $this->getFilePath($document);
+        
+        if (!file_exists($filePath)) {
+            abort(404, 'File not found');
+        }
+        
+        return response()->download($filePath, $document->original_filename);
+    }
+    
+    /**
+     * Репроцессинг документа
+     */
+    public function reprocess(Document $document)
+    {
+        $document->update(['status' => 'pending']);
+        
+        ProcessDocumentJob::dispatch($document)->onQueue('documents');
+        
+        return redirect()->route('admin.documents.show', $document)
+            ->with('success', 'Документ поставлен в очередь на обработку');
+    }
+    
+    /**
+     * Вспомогательный метод для получения пути к файлу
+     */
+    private function getFilePath(Document $document): string
+    {
+        $paths = [
+            storage_path('app/public/' . $document->file_path),
+            storage_path('app/' . $document->file_path),
+            public_path('storage/' . $document->file_path),
+            $document->file_path, // абсолютный путь
+        ];
+        
+        foreach ($paths as $path) {
+            if (file_exists($path)) {
+                return $path;
+            }
+        }
+        
+        throw new \Exception("File not found for document {$document->id}");
     }
 }

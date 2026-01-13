@@ -41,6 +41,29 @@
                         <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Удалить документ?')">Удалить</button>
                     </form>
                 </td>
+
+                <td>
+    <div class="btn-group btn-group-sm">
+        <a href="{{ route('admin.documents.show', $document) }}" 
+           class="btn btn-outline-primary">
+            <i class="fas fa-eye"></i>
+        </a>
+        <a href="{{ route('admin.documents.download', $document) }}" 
+           class="btn btn-outline-secondary">
+            <i class="fas fa-download"></i>
+        </a>
+        <form action="{{ route('admin.documents.destroy', $document) }}" 
+              method="POST" 
+              class="d-inline"
+              onsubmit="return confirm('Удалить этот документ?')">
+            @csrf
+            @method('DELETE')
+            <button type="submit" class="btn btn-outline-danger">
+                <i class="fas fa-trash"></i>
+            </button>
+        </form>
+    </div>
+</td>
             </tr>
             @endforeach
         </tbody>

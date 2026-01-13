@@ -1,0 +1,21 @@
+
+   ParseError 
+
+  syntax error, unexpected token "protected", expecting end of file
+
+  at app\Http\Controllers\SearchController.php:13
+    [90m  9[0m[90m▕ [0m[35;1muse App\Models\CarModel;[0m
+    [90m 10[0m[90m▕ [0m[35;1muse Illuminate\Http\Request;[0m
+    [90m 11[0m[90m▕ [0m[35;1muse App\Services\SemanticSearchEngine;[0m
+    [90m 12[0m[90m▕ [0m
+[31;1m  ➜ [0m[3;1m 13[0m[90m▕ [0m[35;1mprotected [0m[39;1m$semanticEngine[0m[35;1m;[0m
+    [90m 14[0m[90m▕ [0m[35;1mclass [0m[39;1mSearchController [0m[35;1mextends [0m[39;1mController[0m
+    [90m 15[0m[90m▕ [0m[35;1m{[0m
+    [90m 16[0m[90m▕ [0m[35;1m    protected [0m[39;1m$searchEngine[0m[35;1m;[0m
+    [90m 17[0m[90m▕ [0m[35;1m    protected [0m[39;1m$chatService[0m[35;1m;[0m
+
+  1   vendor\composer\ClassLoader.php:427
+
+  2   [internal]:0
+      Composer\Autoload\ClassLoader::loadClass("App\Http\Controllers\SearchController")
+

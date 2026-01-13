@@ -8,7 +8,7 @@ use Illuminate\Database\Eloquent\Model;
 class RepairCategory extends Model
 {
     use HasFactory;
-
+    protected $table = 'repair_categories'; 
     protected $fillable = ['name', 'description', 'parent_id'];
 
     public function parent()
