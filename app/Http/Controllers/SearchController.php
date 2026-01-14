@@ -10,7 +10,7 @@ use App\Models\CarModel;
 use Illuminate\Http\Request;
 use App\Services\SemanticSearchEngine;
 
-protected $semanticEngine;
+//protected $semanticEngine;
 class SearchController extends Controller
 {
     protected $searchEngine;

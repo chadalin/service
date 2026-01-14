@@ -132,3 +132,4 @@ class ImportCarsData extends Command
     return 0;
 }
 }
+// php artisan cars:import  команда для запуска импорта
