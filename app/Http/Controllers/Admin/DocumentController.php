@@ -12,9 +12,17 @@ use Illuminate\Support\Facades\Storage;
 use App\Jobs\ProcessDocumentJob;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
+use App\Services\ManualParserService;
 
 class DocumentController extends Controller
 {
+
+    protected $manualParser;
+
+    public function __construct()
+    {
+        $this->manualParser = new ManualParserService();
+    }
     public function index()
     {
         $documents = Document::with(['carModel.brand', 'category', 'uploadedBy'])->latest()->paginate(20);
@@ -636,5 +644,66 @@ class DocumentController extends Controller
                 'error' => $e->getMessage()
             ]);
         }
+    }
+
+    public function reprocess($id)
+    {
+        $document = Document::findOrFail($id);
+        
+        try {
+            // Парсим документ
+            $result = $this->manualParser->parseDocument($document);
+            
+            if ($result) {
+                // Создаем поисковый индекс
+                $this->manualParser->createSearchIndex($document);
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Документ успешно обработан и проиндексирован'
+                ]);
+            } else {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ошибка при обработке документа'
+                ], 500);
+            }
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Массовая индексация документов
+     */
+    public function batchIndex()
+    {
+        $documents = Document::where('status', '!=', 'processed')
+            ->orWhereNull('search_indexed')
+            ->limit(100)
+            ->get();
+        
+        $processed = 0;
+        $errors = 0;
+        
+        foreach ($documents as $document) {
+            try {
+                $this->manualParser->parseDocument($document);
+                $this->manualParser->createSearchIndex($document);
+                $processed++;
+            } catch (\Exception $e) {
+                $errors++;
+                Log::error("Ошибка индексации документа {$document->id}: " . $e->getMessage());
+            }
+        }
+        
+        return response()->json([
+            'success' => true,
+            'message' => "Обработано: {$processed}, Ошибок: {$errors}"
+        ]);
     }
 }

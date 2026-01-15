@@ -165,3 +165,26 @@ Route::get('/test-search', function() {
     
     return view('test-search', compact('brands', 'models'));
 })->middleware('auth');
+
+
+Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {
+    // Маршрут для загрузки моделей
+    Route::get('/search/models/{brandId}', [SearchController::class, 'getModels'])
+        ->name('search.models');
+    
+    // Массовая индексация документов
+    Route::post('/documents/batch-index', [DocumentController::class, 'batchIndex'])
+        ->name('documents.batch-index');
+    
+    // Переиндексация конкретного документа
+    Route::post('/documents/{document}/reindex', [DocumentController::class, 'reprocess'])
+        ->name('documents.reindex');
+    
+    // Семантический поиск
+    Route::post('/search/semantic', [SearchController::class, 'semanticSearch'])
+        ->name('search.semantic');
+    
+    // Анализ запроса
+    Route::post('/search/analyze-query', [SearchController::class, 'analyzeQuery'])
+        ->name('search.analyze-query');
+});

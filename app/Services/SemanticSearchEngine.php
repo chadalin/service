@@ -3,164 +3,304 @@
 namespace App\Services;
 
 use App\Models\Document;
+use App\Models\DiagnosticCase;
+use App\Models\DiagnosticSymptom;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Log;
+use OpenAI;
 
 class SemanticSearchEngine
 {
-    protected $similarityThreshold = 0.3;
-
-    public function semanticSearch(string $query, ?int $carModelId = null, ?int $categoryId = null)
+    protected $openai;
+    
+    public function __construct()
     {
-        $processedQuery = $this->preprocessText($query);
-        $queryEmbedding = $this->textToEmbedding($processedQuery);
-        
-        $documents = Document::with(['carModel.brand', 'category'])
-            ->where('status', 'processed')
-            ->when($carModelId, function($q) use ($carModelId) {
-                return $q->where('car_model_id', $carModelId);
-            })
-            ->when($categoryId, function($q) use ($categoryId) {
-                return $q->where('category_id', $categoryId);
-            })
-            ->get()
-            ->map(function($document) use ($queryEmbedding) {
-                $docEmbedding = $this->textToEmbedding($this->preprocessText($document->content_text));
-                $similarity = $this->cosineSimilarity($queryEmbedding, $docEmbedding);
-                
-                $document->semantic_similarity = $similarity;
-                $document->combined_score = $this->calculateCombinedScore($document, $similarity);
-                
-                return $document;
-            })
-            ->filter(function($document) {
-                return $document->semantic_similarity > $this->similarityThreshold;
-            })
-            ->sortByDesc('combined_score')
-            ->values();
-
-        return $documents;
+        $this->openai = OpenAI::client(config('services.openai.api_key'));
     }
-
-    private function preprocessText(string $text): string
+    
+    /**
+     * Семантический поиск с использованием OpenAI Embeddings
+     */
+    public function semanticSearch($query, $modelId = null, $categoryId = null)
     {
-        // Приводим к нижнему регистру
-        $text = mb_strtolower($text);
-        
-        // Удаляем стоп-слова
-        $stopWords = ['и', 'в', 'на', 'с', 'по', 'для', 'из', 'от', 'до', 'за', 'к', 'у', 'о', 'об', 'не'];
-        $words = preg_split('/\s+/', $text);
-        $words = array_filter($words, function($word) use ($stopWords) {
-            return !in_array($word, $stopWords) && mb_strlen($word) > 2;
-        });
-        
-        // Лемматизация (упрощенная)
-        $words = array_map([$this, 'stemWord'], $words);
-        
-        return implode(' ', $words);
+        try {
+            // Генерируем эмбеддинг для запроса
+            $queryEmbedding = $this->generateEmbedding($query);
+            
+            // Ищем в документах
+            $documentResults = $this->searchDocumentsWithEmbedding($queryEmbedding, $modelId, $categoryId);
+            
+            // Ищем в диагностических кейсах
+            $caseResults = $this->searchCasesWithEmbedding($queryEmbedding, $modelId);
+            
+            // Объединяем результаты
+            $allResults = collect([])
+                ->merge($documentResults)
+                ->merge($caseResults)
+                ->sortByDesc('semantic_similarity')
+                ->values();
+            
+            return $allResults;
+            
+        } catch (\Exception $e) {
+            Log::error('Semantic search error: ' . $e->getMessage());
+            return collect([]);
+        }
     }
-
-    private function stemWord(string $word): string
+    
+    /**
+     * Генерация эмбеддинга текста
+     */
+    protected function generateEmbedding($text)
     {
-        // Упрощенная stemmer для русского языка
-        $suffixes = [
-            'ов', 'ев', 'ёв', 'ин', 'ын', 'ых', 'их', 'ого', 'его', 'ому', 'ему', 
-            'ыми', 'ими', 'ах', 'ях', 'ами', 'ями', 'ии', 'ие', 'ью', 'ую', 'ой', 'ей',
-            'ем', 'им', 'ом', 'ый', 'ий', 'ой', 'ая', 'яя', 'ое', 'ее', 'ость', 'ств'
-        ];
-        
-        foreach ($suffixes as $suffix) {
-            if (Str::endsWith($word, $suffix)) {
-                $word = Str::beforeLast($word, $suffix);
-                break;
-            }
+        try {
+            $response = $this->openai->embeddings()->create([
+                'model' => 'text-embedding-ada-002',
+                'input' => $text,
+            ]);
+            
+            return $response->embeddings[0]->embedding;
+            
+        } catch (\Exception $e) {
+            Log::error('Embedding generation error: ' . $e->getMessage());
+            
+            // Возвращаем пустой массив в случае ошибки
+            return [];
+        }
+    }
+    
+    /**
+     * Поиск документов с использованием эмбеддингов
+     */
+    protected function searchDocumentsWithEmbedding($queryEmbedding, $modelId = null, $categoryId = null)
+    {
+        if (empty($queryEmbedding)) {
+            return collect([]);
         }
         
-        return $word;
+        $documents = Document::query()
+            ->with(['carModel.brand', 'category'])
+            ->where('status', 'processed');
+        
+        if ($modelId) {
+            $documents->where('car_model_id', $modelId);
+        }
+        
+        if ($categoryId) {
+            $documents->where('category_id', $categoryId);
+        }
+        
+        $documents = $documents->limit(100)->get();
+        
+        // Рассчитываем косинусное сходство для каждого документа
+        return $documents->map(function($doc) use ($queryEmbedding) {
+            $docEmbedding = $this->getDocumentEmbedding($doc);
+            $similarity = $this->cosineSimilarity($queryEmbedding, $docEmbedding);
+            
+            return [
+                'id' => $doc->id,
+                'type' => 'document',
+                'title' => $doc->title,
+                'content_text' => $this->extractRelevantSnippet($doc->content_text, $queryEmbedding),
+                'car_model' => $doc->carModel,
+                'category' => $doc->category,
+                'semantic_similarity' => $similarity,
+                'created_at' => $doc->created_at,
+                'url' => route('admin.documents.show', $doc->id)
+            ];
+        })->filter(function($item) {
+            return $item['semantic_similarity'] > 0.3; // Минимальный порог сходства
+        })->sortByDesc('semantic_similarity');
     }
-
-    private function textToEmbedding(string $text): array
+    
+    /**
+     * Получение эмбеддинга документа
+     */
+    protected function getDocumentEmbedding(Document $document)
     {
-        // Упрощенное создание embedding (в реальном проекте используйте AI API)
-        $words = array_unique(explode(' ', $text));
-        $embedding = [];
-        
-        // Создаем простой бинарный вектор на основе ключевых слов
-        $keywords = $this->getTechnicalKeywords();
-        
-        foreach ($keywords as $keyword) {
-            $embedding[] = in_array($keyword, $words) ? 1 : 0;
+        // Проверяем, есть ли сохраненный эмбеддинг
+        if ($document->embedding) {
+            return json_decode($document->embedding, true);
         }
         
-        // Добавляем TF-IDF like features
-        $wordFreq = array_count_values(explode(' ', $text));
-        $totalWords = count(explode(' ', $text));
+        // Генерируем новый эмбеддинг
+        $text = $document->title . ' ' . $document->keywords . ' ' . 
+                substr($document->content_text, 0, 2000);
         
-        foreach ($wordFreq as $word => $freq) {
-            if (in_array($word, $keywords)) {
-                $tf = $freq / $totalWords;
-                $embedding[array_search($word, $keywords)] = $tf;
-            }
-        }
+        $embedding = $this->generateEmbedding($text);
+        
+        // Сохраняем для будущего использования
+        $document->update([
+            'embedding' => json_encode($embedding)
+        ]);
         
         return $embedding;
     }
-
-    private function getTechnicalKeywords(): array
+    
+    /**
+     * Поиск диагностических кейсов с эмбеддингами
+     */
+    protected function searchCasesWithEmbedding($queryEmbedding, $modelId = null)
     {
-        return [
-            'двигатель', 'трансмиссия', 'тормоз', 'подвеска', 'рулевой', 'электрика',
-            'замена', 'ремонт', 'диагностика', 'настройка', 'регулировка', 'установка',
-            'масло', 'фильтр', 'свеча', 'аккумулятор', 'генератор', 'стартер',
-            'топливо', 'охлаждение', 'выхлоп', 'кузов', 'салон', 'кондиционер',
-            'неисправность', 'проблема', 'ошибка', 'код', 'датчик', 'сигнал'
-        ];
-    }
-
-    private function cosineSimilarity(array $vec1, array $vec2): float
-    {
-        $dotProduct = 0;
-        $norm1 = 0;
-        $norm2 = 0;
-        
-        for ($i = 0; $i < count($vec1); $i++) {
-            $dotProduct += $vec1[$i] * $vec2[$i];
-            $norm1 += $vec1[$i] * $vec1[$i];
-            $norm2 += $vec2[$i] * $vec2[$i];
+        if (!class_exists(DiagnosticCase::class) || empty($queryEmbedding)) {
+            return collect([]);
         }
         
-        $norm1 = sqrt($norm1);
-        $norm2 = sqrt($norm2);
+        $cases = DiagnosticCase::query()
+            ->with(['carModel.brand', 'symptoms'])
+            ->where('status', 'resolved');
         
-        if ($norm1 == 0 || $norm2 == 0) {
+        if ($modelId) {
+            $cases->where('car_model_id', $modelId);
+        }
+        
+        $cases = $cases->limit(50)->get();
+        
+        return $cases->map(function($case) use ($queryEmbedding) {
+            $text = $case->problem_description . ' ' . $case->diagnosis . ' ' . $case->solution;
+            $caseEmbedding = $this->generateEmbedding($text);
+            $similarity = $this->cosineSimilarity($queryEmbedding, $caseEmbedding);
+            
+            return [
+                'id' => $case->id,
+                'type' => 'diagnostic_case',
+                'title' => 'Диагностический кейс: ' . substr($case->problem_description, 0, 50),
+                'content_text' => "Проблема: {$case->problem_description}\nДиагноз: {$case->diagnosis}",
+                'car_model' => $case->carModel,
+                'semantic_similarity' => $similarity,
+                'created_at' => $case->created_at,
+                'url' => route('diagnostic.report.show', $case->id)
+            ];
+        })->filter(function($item) {
+            return $item['semantic_similarity'] > 0.3;
+        });
+    }
+    
+    /**
+     * Расчет косинусного сходства
+     */
+    protected function cosineSimilarity($vectorA, $vectorB)
+    {
+        if (empty($vectorA) || empty($vectorB) || count($vectorA) !== count($vectorB)) {
             return 0;
         }
         
-        return $dotProduct / ($norm1 * $norm2);
-    }
-
-    private function calculateCombinedScore(Document $document, float $semanticScore): float
-    {
-        // Комбинируем семантическую релевантность с другими факторами
-        $titleBonus = Str::contains(mb_strtolower($document->title), mb_strtolower($document->title)) ? 0.2 : 0;
-        $recencyBonus = $this->calculateRecencyBonus($document);
+        $dotProduct = 0;
+        $normA = 0;
+        $normB = 0;
         
-        return ($semanticScore * 0.7) + ($titleBonus * 0.2) + ($recencyBonus * 0.1);
-    }
-
-    private function calculateRecencyBonus(Document $document): float
-    {
-        $daysAgo = $document->created_at->diffInDays(now());
+        for ($i = 0; $i < count($vectorA); $i++) {
+            $dotProduct += $vectorA[$i] * $vectorB[$i];
+            $normA += $vectorA[$i] * $vectorA[$i];
+            $normB += $vectorB[$i] * $vectorB[$i];
+        }
         
-        if ($daysAgo < 30) return 0.1;      // Новые документы
-        if ($daysAgo < 90) return 0.05;     // Не очень старые
-        return 0;                           // Старые документы
+        if ($normA == 0 || $normB == 0) {
+            return 0;
+        }
+        
+        return $dotProduct / (sqrt($normA) * sqrt($normB));
     }
-
-    public function findSimilarDocuments(Document $document, int $limit = 5)
+    
+    /**
+     * Извлечение релевантного фрагмента текста
+     */
+    protected function extractRelevantSnippet($text, $queryEmbedding, $snippetLength = 300)
     {
-        return $this->semanticSearch($document->content_text, $document->car_model_id, $document->category_id)
-            ->where('id', '!=', $document->id)
-            ->take($limit);
+        // Разбиваем текст на предложения
+        $sentences = preg_split('/(?<=[.!?])\s+/', $text);
+        
+        $bestSentence = '';
+        $bestScore = 0;
+        
+        foreach ($sentences as $sentence) {
+            if (strlen($sentence) > 20) {
+                $sentenceEmbedding = $this->generateEmbedding($sentence);
+                $score = $this->cosineSimilarity($queryEmbedding, $sentenceEmbedding);
+                
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $bestSentence = $sentence;
+                }
+            }
+        }
+        
+        if (!empty($bestSentence)) {
+            return $bestSentence;
+        }
+        
+        // Если не нашли подходящее предложение, возвращаем начало текста
+        return substr($text, 0, $snippetLength) . '...';
+    }
+    
+    /**
+     * Интеллектуальный анализ запроса
+     */
+    public function analyzeQuery($query)
+    {
+        try {
+            $response = $this->openai->chat()->create([
+                'model' => 'gpt-3.5-turbo',
+                'messages' => [
+                    [
+                        'role' => 'system',
+                        'content' => 'Ты - эксперт по автомобилям. Анализируй запрос пользователя и определяй:
+                        1. Тип проблемы (двигатель, трансмиссия, электрика и т.д.)
+                        2. Срочность (срочно/не срочно)
+                        3. Уровень сложности (легкий/средний/сложный)
+                        4. Ключевые слова для поиска
+                        5. Рекомендуемые категории поиска
+                        
+                        Ответ в формате JSON.'
+                    ],
+                    [
+                        'role' => 'user',
+                        'content' => $query
+                    ]
+                ],
+                'temperature' => 0.3,
+            ]);
+            
+            $analysis = json_decode($response->choices[0]->message->content, true);
+            
+            return [
+                'original_query' => $query,
+                'analysis' => $analysis,
+                'enhanced_query' => $this->enhanceQuery($query, $analysis),
+                'suggested_categories' => $analysis['categories'] ?? []
+            ];
+            
+        } catch (\Exception $e) {
+            Log::error('Query analysis error: ' . $e->getMessage());
+            
+            // Возвращаем базовый анализ в случае ошибки
+            return [
+                'original_query' => $query,
+                'analysis' => [
+                    'problem_type' => 'unknown',
+                    'urgency' => 'normal',
+                    'complexity' => 'medium',
+                    'keywords' => explode(' ', $query),
+                    'categories' => []
+                ],
+                'enhanced_query' => $query,
+                'suggested_categories' => []
+            ];
+        }
+    }
+    
+    /**
+     * Улучшение поискового запроса
+     */
+    protected function enhanceQuery($query, $analysis)
+    {
+        $keywords = $analysis['keywords'] ?? [];
+        
+        if (!empty($keywords)) {
+            $enhanced = $query . ' ' . implode(' ', array_slice($keywords, 0, 5));
+            return trim($enhanced);
+        }
+        
+        return $query;
     }
 }
