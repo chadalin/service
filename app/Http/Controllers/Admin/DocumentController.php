@@ -10,6 +10,8 @@ use App\Models\RepairCategory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use App\Jobs\ProcessDocumentJob;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 class DocumentController extends Controller
 {
@@ -20,127 +22,130 @@ class DocumentController extends Controller
     }
 
     public function create()
-{
-    $brandsCount = Brand::count();
-    
-    if ($brandsCount === 0) {
-        return redirect()->route('admin.cars.import')
-            ->with('warning', 'Сначала необходимо импортировать базу автомобилей');
+    {
+        $brandsCount = Brand::count();
+        
+        if ($brandsCount === 0) {
+            return redirect()->route('admin.cars.import')
+                ->with('warning', 'Сначала необходимо импортировать базу автомобилей');
+        }
+
+        // Загружаем все бренды
+        $brands = Brand::orderBy('name')->get();
+        
+        // Загружаем все модели сгруппированные по brand_id
+        $models = CarModel::orderBy('name')->get()
+            ->groupBy('brand_id')
+            ->map(function($group) {
+                return $group->map(function($model) {
+                    return [
+                        'id' => $model->id,
+                        'name' => $model->name_cyrillic ?? $model->name,
+                        'year_from' => $model->year_from,
+                        'year_to' => $model->year_to
+                    ];
+                })->values();
+            });
+        
+        $categories = RepairCategory::all();
+        
+        Log::info('Brands count: ' . $brands->count());
+        Log::info('Models count by brand: ' . json_encode($models->map(function($m) {
+            return count($m);
+        })));
+        
+        return view('admin.documents.create', compact('brands', 'models', 'categories'));
     }
 
-    // Загружаем все бренды
-    $brands = Brand::orderBy('name')->get();
-    
-    // Загружаем все модели сгруппированные по brand_id
-    $models = CarModel::orderBy('name')->get()
-        ->groupBy('brand_id')
-        ->map(function($group) {
-            return $group->map(function($model) {
-                return [
-                    'id' => $model->id,
-                    'name' => $model->name_cyrillic ?? $model->name,
-                    'year_from' => $model->year_from,
-                    'year_to' => $model->year_to
-                ];
-            })->values(); // добавляем values() для чистого массива
-        });
-    
-    $categories = RepairCategory::all();
-    
-    \Log::info('Brands count: ' . $brands->count());
-    \Log::info('Models count by brand: ' . json_encode($models->map(function($m) {
-        return count($m);
-    })));
-    
-    return view('admin.documents.create', compact('brands', 'models', 'categories'));
-}
-
-   public function store(Request $request)
-{
-    // Если это чанковая загрузка
-    if ($request->has('uploaded_file_name') && $request->has('uploaded_file_path')) {
+    public function store(Request $request)
+    {
+        // Если это чанковая загрузка
+        if ($request->has('uploaded_file_name') && $request->has('uploaded_file_path')) {
+            $request->validate([
+                'title' => 'required|string|max:255',
+                'brand_id' => 'required|exists:brands,id',
+                'car_model_id' => 'required|exists:car_models,id',
+                'category_id' => 'required|exists:repair_categories,id',
+                'uploaded_file_name' => 'required|string',
+                'uploaded_file_path' => 'required|string',
+            ]);
+            
+            try {
+                // Создаем запись в БД
+                $document = Document::create([
+                    'title' => $request->title,
+                    'car_model_id' => $request->car_model_id,
+                    'category_id' => $request->category_id,
+                    'original_filename' => $request->uploaded_file_name,
+                    'file_type' => pathinfo($request->uploaded_file_name, PATHINFO_EXTENSION),
+                    'file_path' => $request->uploaded_file_path,
+                    'uploaded_by' => auth()->id(),
+                    'status' => 'processing'
+                ]);
+                
+                // Запускаем обработку в фоне
+                ProcessDocumentJob::dispatch($document)->onQueue('documents');
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Документ успешно загружен',
+                    'redirect' => route('admin.documents.index')
+                ]);
+                
+            } catch (\Exception $e) {
+                Log::error("Error saving chunked document: " . $e->getMessage());
+                
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Ошибка сохранения документа: ' . $e->getMessage()
+                ], 500);
+            }
+        }
+        
+        // Обычная загрузка
         $request->validate([
             'title' => 'required|string|max:255',
             'brand_id' => 'required|exists:brands,id',
             'car_model_id' => 'required|exists:car_models,id',
             'category_id' => 'required|exists:repair_categories,id',
-            'uploaded_file_name' => 'required|string',
-            'uploaded_file_path' => 'required|string',
+            'document' => 'required|file|mimes:pdf,doc,docx,txt|max:51200'
         ]);
         
         try {
-            // Создаем запись в БД
+            $file = $request->file('document');
+            
+            if ($file->getSize() > 50 * 1024 * 1024) {
+                return redirect()->back()
+                    ->with('error', 'Файл слишком большой. Максимальный размер: 50MB')
+                    ->withInput();
+            }
+            
+            $path = $file->store('documents');
+            
             $document = Document::create([
                 'title' => $request->title,
                 'car_model_id' => $request->car_model_id,
                 'category_id' => $request->category_id,
-                'original_filename' => $request->uploaded_file_name,
-                'file_type' => pathinfo($request->uploaded_file_name, PATHINFO_EXTENSION),
-                'file_path' => $request->uploaded_file_path,
+                'original_filename' => $file->getClientOriginalName(),
+                'file_type' => $file->getClientOriginalExtension(),
+                'file_path' => $path,
                 'uploaded_by' => auth()->id(),
                 'status' => 'processing'
             ]);
             
-            return response()->json([
-                'success' => true,
-                'message' => 'Документ успешно загружен',
-                'redirect' => route('admin.documents.index')
-            ]);
+            ProcessDocumentJob::dispatch($document)->onQueue('documents');
             
+            return redirect()->route('admin.documents.index')
+                ->with('success', 'Документ загружен и обрабатывается');
+                
         } catch (\Exception $e) {
-            \Log::error("Error saving chunked document: " . $e->getMessage());
+            Log::error("Error uploading document: " . $e->getMessage());
             
-            return response()->json([
-                'success' => false,
-                'message' => 'Ошибка сохранения документа: ' . $e->getMessage()
-            ], 500);
-        }
-    }
-    
-    // Обычная загрузка (ваш существующий код)
-    $request->validate([
-        'title' => 'required|string|max:255',
-        'brand_id' => 'required|exists:brands,id',
-        'car_model_id' => 'required|exists:car_models,id',
-        'category_id' => 'required|exists:repair_categories,id',
-        'document' => 'required|file|mimes:pdf,doc,docx,txt|max:51200'
-    ]);
-    
-    try {
-        $file = $request->file('document');
-        
-        if ($file->getSize() > 50 * 1024 * 1024) {
             return redirect()->back()
-                ->with('error', 'Файл слишком большой. Максимальный размер: 50MB')
+                ->with('error', 'Ошибка загрузки документа: ' . $e->getMessage())
                 ->withInput();
         }
-        
-        $path = $file->store('documents');
-        
-        $document = Document::create([
-            'title' => $request->title,
-            'car_model_id' => $request->car_model_id,
-            'category_id' => $request->category_id,
-            'original_filename' => $file->getClientOriginalName(),
-            'file_type' => $file->getClientOriginalExtension(),
-            'file_path' => $path,
-            'uploaded_by' => auth()->id(),
-            'status' => 'processing'
-        ]);
-        
-        ProcessDocumentJob::dispatchSync($document);
-        
-        return redirect()->route('admin.documents.index')
-            ->with('success', 'Документ загружен и обработан успешно');
-            
-    } catch (\Exception $e) {
-        \Log::error("Error uploading document: " . $e->getMessage());
-        
-        return redirect()->back()
-            ->with('error', 'Ошибка загрузки документа: ' . $e->getMessage())
-            ->withInput();
     }
-}
 
     public function destroy(Document $document)
     {
@@ -159,10 +164,8 @@ class DocumentController extends Controller
 
     public function show(Document $document)
     {
-        // Загружаем связи
         $document->load(['carModel.brand', 'category', 'uploadedBy']);
         
-        // Декодируем JSON поля
         $document->keywords = is_string($document->keywords) ? 
             json_decode($document->keywords, true) : $document->keywords;
         $document->sections = is_string($document->sections) ? 
@@ -170,7 +173,6 @@ class DocumentController extends Controller
         $document->metadata = is_string($document->metadata) ? 
             json_decode($document->metadata, true) : $document->metadata;
             
-        // Похожие документы
         $similarDocuments = Document::with(['carModel.brand', 'category'])
             ->where('id', '!=', $document->id)
             ->where(function($query) use ($document) {
@@ -247,110 +249,333 @@ class DocumentController extends Controller
      * AJAX загрузка больших файлов (чанками)
      */
    public function uploadChunk(Request $request)
-    {
-        $request->validate([
+{
+    Log::info('Upload chunk started', [
+        'chunkIndex' => $request->input('chunkIndex'),
+        'totalChunks' => $request->input('totalChunks'),
+        'fileName' => $request->input('fileName'),
+        'fileSize' => $request->input('fileSize')
+    ]);
+    
+    try {
+        // Проверяем данные
+        $validator = Validator::make($request->all(), [
             'file' => 'required|file',
-            'chunkIndex' => 'required|integer',
-            'totalChunks' => 'required|integer',
-            'fileName' => 'required|string|max:255',
-            'fileSize' => 'required|integer',
+            'chunkIndex' => 'required|integer|min:0',
+            'totalChunks' => 'required|integer|min:1',
+            'fileName' => 'required|string|max:500',
+            'fileSize' => 'required|integer|min:1',
             'title' => 'required|string|max:255',
             'brand_id' => 'required|exists:brands,id',
             'car_model_id' => 'required|exists:car_models,id',
             'category_id' => 'required|exists:repair_categories,id',
         ]);
         
-        try {
-            // Проверяем общий размер файла
-            if ($request->fileSize > 500 * 1024 * 1024) { // 500MB
+        if ($validator->fails()) {
+            Log::error('Validation failed', $validator->errors()->toArray());
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка валидации: ' . $validator->errors()->first()
+            ], 422);
+        }
+        
+        $chunk = $request->file('file');
+        $chunkIndex = (int)$request->input('chunkIndex');
+        $totalChunks = (int)$request->input('totalChunks');
+        $fileName = $request->input('fileName');
+        $fileSize = (int)$request->input('fileSize');
+        
+        // Проверяем общий размер файла (500MB максимум)
+        if ($fileSize > 500 * 1024 * 1024) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Файл слишком большой. Максимальный размер: 500MB'
+            ], 400);
+        }
+        
+        // Проверяем размер чанка (не более 10MB)
+        if ($chunk->getSize() > 10 * 1024 * 1024) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Чанк слишком большой. Максимальный размер чанка: 10MB'
+            ], 400);
+        }
+        
+        // Получаем все данные
+        $title = $request->input('title');
+        $car_model_id = $request->input('car_model_id');
+        $category_id = $request->input('category_id'); // Получаем category_id
+        $brand_id = $request->input('brand_id'); // Получаем brand_id для логирования
+        
+        // Проверяем, что category_id действительно существует
+        if (!RepairCategory::where('id', $category_id)->exists()) {
+            Log::error('Category not found', ['category_id' => $category_id]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Категория не найдена'
+            ], 400);
+        }
+        
+        // Проверяем, что car_model_id существует
+        if (!CarModel::where('id', $car_model_id)->exists()) {
+            Log::error('Car model not found', ['car_model_id' => $car_model_id]);
+            return response()->json([
+                'success' => false,
+                'message' => 'Модель автомобиля не найдена'
+            ], 400);
+        }
+        
+        Log::info('Validation passed', [
+            'title' => $title,
+            'car_model_id' => $car_model_id,
+            'category_id' => $category_id,
+            'brand_id' => $brand_id
+        ]);
+        
+        // ВАЖНО: Используем постоянный идентификатор сессии загрузки
+        $uploadId = $request->input('upload_id', md5($fileName . '_' . $fileSize . '_' . auth()->id()));
+        
+        // Сохраняем upload_id в сессии для последующих чанков
+        if ($chunkIndex === 0) {
+            // Для первого чанка создаем новый upload_id
+            $uploadId = uniqid('upload_', true);
+            session(['current_upload_id' => $uploadId]);
+            session(['upload_data' => [
+                'title' => $title,
+                'car_model_id' => $car_model_id,
+                'category_id' => $category_id,
+                'fileName' => $fileName,
+                'fileSize' => $fileSize
+            ]]);
+        } else {
+            // Для последующих чанков берем upload_id из сессии
+            $uploadId = session('current_upload_id', md5($fileName . '_' . $fileSize . '_' . auth()->id()));
+            // Берем данные из сессии
+            $uploadData = session('upload_data', []);
+            $title = $uploadData['title'] ?? $title;
+            $car_model_id = $uploadData['car_model_id'] ?? $car_model_id;
+            $category_id = $uploadData['category_id'] ?? $category_id;
+        }
+        
+        $tempDir = storage_path('app/temp/' . $uploadId);
+        
+        // Создаем временную директорию
+        if (!file_exists($tempDir)) {
+            mkdir($tempDir, 0755, true);
+        }
+        
+        // Сохраняем чанк
+        $chunkPath = $tempDir . "/chunk_{$chunkIndex}";
+        $chunk->move($tempDir, "chunk_{$chunkIndex}");
+        
+        Log::info('Chunk saved', [
+            'uploadId' => $uploadId,
+            'chunkIndex' => $chunkIndex,
+            'tempDir' => $tempDir,
+            'chunkPath' => $chunkPath,
+            'chunkSize' => filesize($chunkPath)
+        ]);
+        
+        // Также сохраняем метаданные о загрузке
+        $uploadInfo = [
+            'fileName' => $fileName,
+            'fileSize' => $fileSize,
+            'totalChunks' => $totalChunks,
+            'uploadedChunks' => [],
+            'uploadStartTime' => time(),
+            'title' => $title,
+            'car_model_id' => $car_model_id,
+            'category_id' => $category_id,
+            'brand_id' => $brand_id
+        ];
+        
+        // Загружаем существующую информацию или создаем новую
+        $infoPath = $tempDir . '/upload_info.json';
+        if (file_exists($infoPath)) {
+            $uploadInfo = json_decode(file_get_contents($infoPath), true);
+        }
+        
+        // Добавляем текущий чанк в список загруженных
+        if (!in_array($chunkIndex, $uploadInfo['uploadedChunks'])) {
+            $uploadInfo['uploadedChunks'][] = $chunkIndex;
+            sort($uploadInfo['uploadedChunks']);
+        }
+        
+        // Обновляем данные формы
+        $uploadInfo['title'] = $title;
+        $uploadInfo['car_model_id'] = $car_model_id;
+        $uploadInfo['category_id'] = $category_id;
+        $uploadInfo['brand_id'] = $brand_id;
+        
+        // Сохраняем обновленную информацию
+        file_put_contents($infoPath, json_encode($uploadInfo));
+        
+        // Если это последний чанк, объединяем файл
+        if ($chunkIndex == $totalChunks - 1) {
+            Log::info('Last chunk received, merging file', [
+                'uploadId' => $uploadId,
+                'tempDir' => $tempDir,
+                'totalChunks' => $totalChunks,
+                'title' => $title,
+                'car_model_id' => $car_model_id,
+                'category_id' => $category_id
+            ]);
+            
+            // Проверяем, что все чанки на месте
+            $uploadedChunks = $uploadInfo['uploadedChunks'];
+            $missingChunks = [];
+            for ($i = 0; $i < $totalChunks; $i++) {
+                if (!in_array($i, $uploadedChunks)) {
+                    $missingChunks[] = $i;
+                }
+            }
+            
+            if (!empty($missingChunks)) {
+                Log::error('Missing chunks: ' . implode(',', $missingChunks), [
+                    'uploadedChunks' => $uploadedChunks
+                ]);
                 return response()->json([
                     'success' => false,
-                    'message' => 'Файл слишком большой. Максимальный размер: 500MB'
+                    'message' => 'Отсутствуют чанки: ' . implode(',', $missingChunks),
+                    'uploadedChunks' => $uploadedChunks,
+                    'missingChunks' => $missingChunks
                 ], 400);
             }
             
-            $chunk = $request->file('file');
-            $chunkIndex = $request->chunkIndex;
-            $totalChunks = $request->totalChunks;
-            $fileName = $request->fileName;
-            
-            // Создаем безопасное имя файла
-            $safeFileName = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName);
-            $tempDir = storage_path('app/temp/' . md5($safeFileName));
-            
-            // Создаем временную директорию
-            if (!file_exists($tempDir)) {
-                mkdir($tempDir, 0755, true);
+            // Проверяем физическое наличие всех чанков
+            for ($i = 0; $i < $totalChunks; $i++) {
+                $chunkPath = $tempDir . "/chunk_{$i}";
+                if (!file_exists($chunkPath)) {
+                    Log::error('Chunk file not found', [
+                        'chunkIndex' => $i,
+                        'chunkPath' => $chunkPath
+                    ]);
+                    throw new \Exception("Файл чанка {$i} не найден");
+                }
             }
             
-            // Сохраняем чанк
-            $chunkPath = $tempDir . "/chunk_{$chunkIndex}";
-            $chunk->move($tempDir, "chunk_{$chunkIndex}");
+            Log::info('All chunks present, starting merge');
             
-            // Если это последний чанк, объединяем файл
-            if ($chunkIndex == $totalChunks - 1) {
-                // Создаем уникальное имя для финального файла
-                $finalFileName = uniqid() . '_' . $safeFileName;
-                $finalPath = storage_path('app/documents/' . $finalFileName);
+            // Создаем уникальное имя для финального файла
+            $finalFileName = uniqid() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName);
+            $finalPath = storage_path('app/documents/' . $finalFileName);
+            
+            // Создаем директорию для документов, если её нет
+            $documentsDir = storage_path('app/documents');
+            if (!file_exists($documentsDir)) {
+                mkdir($documentsDir, 0755, true);
+            }
+            
+            // Открываем финальный файл для записи
+            $finalFile = fopen($finalPath, 'wb');
+            if (!$finalFile) {
+                throw new \Exception('Не удалось создать файл: ' . $finalPath);
+            }
+            
+            $totalSize = 0;
+            // Объединяем все чанки
+            for ($i = 0; $i < $totalChunks; $i++) {
+                $chunkPath = $tempDir . "/chunk_{$i}";
+                $chunkSize = filesize($chunkPath);
                 
-                // Открываем финальный файл для записи
-                $finalFile = fopen($finalPath, 'wb');
-                
-                // Объединяем все чанки
-                for ($i = 0; $i < $totalChunks; $i++) {
-                    $chunkPath = $tempDir . "/chunk_{$i}";
-                    if (file_exists($chunkPath)) {
-                        $chunkContent = file_get_contents($chunkPath);
-                        fwrite($finalFile, $chunkContent);
-                        unlink($chunkPath); // Удаляем чанк
-                    }
+                $chunkContent = file_get_contents($chunkPath);
+                if ($chunkContent === false) {
+                    throw new \Exception("Не удалось прочитать чанк {$i}");
                 }
                 
-                fclose($finalFile);
+                $written = fwrite($finalFile, $chunkContent);
+                if ($written === false) {
+                    throw new \Exception("Не удалось записать чанк {$i}");
+                }
                 
-                // Удаляем временную директорию
-                @rmdir($tempDir);
-                
-                // Создаем запись в БД
-                $document = Document::create([
-                    'title' => $request->title,
-                    'car_model_id' => $request->car_model_id,
-                    'category_id' => $request->category_id,
-                    'original_filename' => $fileName,
-                    'file_type' => pathinfo($fileName, PATHINFO_EXTENSION),
-                    'file_path' => 'documents/' . $finalFileName,
-                    'uploaded_by' => auth()->id(),
-                    'status' => 'processing'
-                ]);
-                
-                // Запускаем обработку в фоне
-                ProcessDocumentJob::dispatch($document)->onQueue('documents');
-                
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Файл успешно загружен и обрабатывается',
-                    'document_id' => $document->id,
-                    'file_path' => 'documents/' . $finalFileName
-                ]);
+                $totalSize += $written;
+                unlink($chunkPath); // Удаляем чанк
             }
+            
+            fclose($finalFile);
+            
+            // Проверяем размер итогового файла
+            $finalFileSize = filesize($finalPath);
+            if ($finalFileSize != $fileSize) {
+                Log::error('File size mismatch', [
+                    'expected' => $fileSize,
+                    'actual' => $finalFileSize,
+                    'totalSize' => $totalSize
+                ]);
+                unlink($finalPath); // Удаляем неполный файл
+                throw new \Exception("Размер файла не совпадает: ожидалось {$fileSize}, получено {$finalFileSize}");
+            }
+            
+            Log::info('File merged successfully', [
+                'finalPath' => $finalPath,
+                'fileSize' => $finalFileSize,
+                'originalSize' => $fileSize
+            ]);
+            
+            // Логируем данные для создания документа
+            Log::info('Creating document record', [
+                'title' => $title,
+                'car_model_id' => $car_model_id,
+                'category_id' => $category_id,
+                'original_filename' => $fileName,
+                'file_type' => strtolower(pathinfo($fileName, PATHINFO_EXTENSION)),
+                'file_path' => 'documents/' . $finalFileName
+            ]);
+            
+            // Создаем запись в БД с ВСЕМИ полями
+            $document = Document::create([
+                'title' => $title,
+                'car_model_id' => $car_model_id,
+                'category_id' => $category_id, // ВАЖНО: добавляем category_id
+                'original_filename' => $fileName,
+                'file_type' => strtolower(pathinfo($fileName, PATHINFO_EXTENSION)),
+                'file_path' => 'documents/' . $finalFileName,
+                'uploaded_by' => auth()->id(),
+                'status' => 'processing'
+            ]);
+            
+            Log::info('Document created successfully', ['document_id' => $document->id]);
+            
+            // Удаляем временные файлы
+            if (file_exists($infoPath)) {
+                unlink($infoPath);
+            }
+            if (is_dir($tempDir) && count(scandir($tempDir)) == 2) { // только . и ..
+                @rmdir($tempDir);
+            }
+            
+            // Очищаем сессию
+            session()->forget(['current_upload_id', 'upload_data']);
+            
+            // Запускаем обработку в фоне
+            ProcessDocumentJob::dispatch($document)->onQueue('documents');
             
             return response()->json([
                 'success' => true,
-                'message' => 'Чанк загружен',
-                'chunkIndex' => $chunkIndex,
-                'totalChunks' => $totalChunks
+                'message' => 'Файл успешно загружен и обрабатывается',
+                'document_id' => $document->id,
+                'file_path' => 'documents/' . $finalFileName
             ]);
-            
-        } catch (\Exception $e) {
-            \Log::error('Error uploading chunk: ' . $e->getMessage());
-            \Log::error($e->getTraceAsString());
-            
-            return response()->json([
-                'success' => false,
-                'message' => 'Ошибка загрузки: ' . $e->getMessage()
-            ], 500);
         }
+        
+        return response()->json([
+            'success' => true,
+            'message' => 'Чанк загружен',
+            'chunkIndex' => $chunkIndex,
+            'totalChunks' => $totalChunks,
+            'upload_id' => $uploadId  // Возвращаем upload_id клиенту
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Error uploading chunk: ' . $e->getMessage());
+        Log::error($e->getTraceAsString());
+        
+        return response()->json([
+            'success' => false,
+            'message' => 'Ошибка загрузки: ' . $e->getMessage()
+        ], 500);
     }
+}
     
     /**
      * Проверка существования файла (для возобновляемой загрузки)
@@ -364,18 +589,21 @@ class DocumentController extends Controller
         
         try {
             $fileName = $request->fileName;
+            $fileSize = $request->fileSize;
             $safeFileName = time() . '_' . preg_replace('/[^a-zA-Z0-9._-]/', '_', $fileName);
-            $tempDir = storage_path('app/temp/' . md5($safeFileName));
+            $fileHash = md5($safeFileName . '_' . $fileSize);
+            $tempDir = storage_path('app/temp/' . $fileHash);
             
             $uploadedChunks = [];
             
-            if (file_exists($tempDir)) {
+            if (file_exists($tempDir) && is_dir($tempDir)) {
                 $files = scandir($tempDir);
                 foreach ($files as $file) {
                     if (preg_match('/chunk_(\d+)/', $file, $matches)) {
                         $uploadedChunks[] = (int)$matches[1];
                     }
                 }
+                sort($uploadedChunks);
             }
             
             // Проверяем, существует ли уже полный файл
@@ -394,12 +622,12 @@ class DocumentController extends Controller
             return response()->json([
                 'exists' => false,
                 'uploadedChunks' => $uploadedChunks,
-                'resumable' => true,
+                'resumable' => !empty($uploadedChunks),
                 'tempDir' => $tempDir
             ]);
             
         } catch (\Exception $e) {
-            \Log::error('Error checking file: ' . $e->getMessage());
+            Log::error('Error checking file: ' . $e->getMessage());
             
             return response()->json([
                 'exists' => false,

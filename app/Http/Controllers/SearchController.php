@@ -9,25 +9,65 @@ use App\Models\Brand;
 use App\Models\CarModel;
 use Illuminate\Http\Request;
 use App\Services\SemanticSearchEngine;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Validator;
 
 //protected $semanticEngine;
 class SearchController extends Controller
 {
     protected $searchEngine;
     protected $chatService;
-    $this->semanticEngine = new SemanticSearchEngine();
+     protected $semanticEngine;
+   // $this->semanticEngine = new SemanticSearchEngine();
 
     public function __construct()
     {
         $this->searchEngine = new SearchEngine();
         $this->chatService = new ChatService();
+        $this->semanticEngine = new SemanticSearchEngine(); 
     }
 
-    public function index()
-    {
-        $brands = Brand::orderBy('name')->get();
-        return view('search.index', compact('brands'));
+   // В контроллере SearchController добавьте
+public function index()
+{
+    $brandsCount = Brand::count();
+    
+    if ($brandsCount === 0) {
+        return redirect()->route('admin.cars.import')
+            ->with('warning', 'Сначала необходимо импортировать базу автомобилей');
     }
+
+    // Загружаем все бренды
+    $brands = Brand::orderBy('name')->get();
+    
+    // Загружаем все модели сгруппированные по brand_id (точно как в DocumentController)
+    $models = CarModel::orderBy('name')->get()
+        ->groupBy('brand_id')
+        ->map(function($group) {
+            return $group->map(function($model) {
+                return [
+                    'id' => $model->id,
+                    'name' => $model->name_cyrillic ?? $model->name,
+                    'year_from' => $model->year_from,
+                    'year_to' => $model->year_to
+                ];
+            })->values();
+        });
+    
+    \Log::info('Search page - Brands count: ' . $brands->count());
+    \Log::info('Search page - Models groups: ' . $models->count());
+    
+    // Для отладки - проверяем первый бренд
+    if ($models->count() > 0) {
+        $firstBrandId = $models->keys()->first();
+        $firstBrand = Brand::find($firstBrandId);
+        $firstBrandModels = $models[$firstBrandId];
+        \Log::info('First brand: ' . ($firstBrand ? $firstBrand->name : 'Unknown') . 
+                  ' (ID: ' . $firstBrandId . ') has ' . count($firstBrandModels) . ' models');
+    }
+    
+    return view('search.index', compact('brands', 'models'));
+}
 
     public function search(Request $request)
     {
