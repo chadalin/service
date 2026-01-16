@@ -2,165 +2,98 @@
 
 namespace App\Services;
 
-use App\Models\Document;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
 
 class ChatService
 {
-    protected $searchEngine;
-
-    public function __construct()
+    public function processQuery($query)
     {
-        $this->searchEngine = new SearchEngine();
-    }
-
-    public function processQuery(string $query): array
-    {
-        $analysis = $this->analyzeQuery($query);
+        // Простая обработка запроса без AI
+        $processed = $this->normalizeQuery($query);
         
         return [
             'original_query' => $query,
-            'processed_query' => $analysis['processed_query'],
-            'intent' => $analysis['intent'],
-            'keywords' => $analysis['keywords'],
-            'diagnosis' => $this->generateDiagnosis($analysis),
-            'estimated_repair_time' => $this->estimateRepairTime($analysis),
-            'repair_complexity' => $this->estimateComplexity($analysis)
+            'processed_query' => $processed,
+            'keywords' => $this->extractKeywords($processed),
+            'intent' => $this->detectIntent($query),
+            'complexity' => $this->estimateComplexity($query),
         ];
     }
-
-    private function analyzeQuery(string $query): array
+    
+    protected function normalizeQuery($query)
     {
-        $query = mb_strtolower(trim($query));
+        // Приводим к нижнему регистру
+        $query = mb_strtolower($query, 'UTF-8');
         
-        // Определяем намерение
-        $intent = $this->detectIntent($query);
+        // Удаляем лишние пробелы
+        $query = preg_replace('/\s+/', ' ', $query);
         
-        // Извлекаем ключевые слова
-        $keywords = $this->extractKeywords($query);
+        // Удаляем знаки препинания, кроме дефиса
+        $query = preg_replace('/[^\p{L}\p{N}\s-]/u', ' ', $query);
         
-        // Обрабатываем синонимы
-        $processedQuery = $this->expandWithSynonyms($query);
-
-        return [
-            'original_query' => $query,
-            'processed_query' => $processedQuery,
-            'intent' => $intent,
-            'keywords' => $keywords
-        ];
+        return trim($query);
     }
-
-    private function detectIntent(string $query): string
+    
+    protected function extractKeywords($query)
     {
+        $words = explode(' ', $query);
+        
+        // Список стоп-слов
+        $stopWords = ['и', 'в', 'на', 'с', 'по', 'для', 'или', 'но', 'а', 'же'];
+        
+        $keywords = array_filter($words, function($word) use ($stopWords) {
+            return mb_strlen($word, 'UTF-8') > 2 && !in_array($word, $stopWords);
+        });
+        
+        return array_values($keywords);
+    }
+    
+    protected function detectIntent($query)
+    {
+        $query = mb_strtolower($query, 'UTF-8');
+        
         $intents = [
-            'diagnosis' => ['не заводится', 'стучит', 'шумит', 'гремит', 'вибрация', 'дым', 'течет', 'не работает'],
-            'repair' => ['замена', 'ремонт', 'установка', 'настройка', 'регулировка', 'чистка'],
-            'maintenance' => ['обслуживание', 'тюнинг', 'диагностика', 'проверка'],
-            'parts' => ['купить', 'запчасть', 'деталь', 'артикул', 'цена', 'стоимость']
+            'problem' => ['не работает', 'сломал', 'поломка', 'ошибка', 'неисправность', 'проблема'],
+            'diagnostic' => ['почему', 'причина', 'диагностика', 'проверить', 'тест'],
+            'repair' => ['как починить', 'ремонт', 'замена', 'установка', 'настройка'],
+            'manual' => ['инструкция', 'руководство', 'схема', 'диаграмма', 'описание'],
+            'specification' => ['характеристики', 'параметры', 'данные', 'spec', 'технические'],
         ];
-
-        foreach ($intents as $intent => $patterns) {
-            foreach ($patterns as $pattern) {
-                if (Str::contains($query, $pattern)) {
+        
+        foreach ($intents as $intent => $keywords) {
+            foreach ($keywords as $keyword) {
+                if (str_contains($query, $keyword)) {
                     return $intent;
                 }
             }
         }
-
+        
         return 'general';
     }
-
-    private function extractKeywords(string $query): array
+    
+    protected function estimateComplexity($query)
     {
-        $stopWords = ['как', 'что', 'почему', 'где', 'когда', 'для', 'на', 'в', 'с', 'по', 'и', 'или', 'но', 'не'];
-        
-        $words = preg_split('/\s+/', $query);
-        $words = array_filter($words, function($word) use ($stopWords) {
-            return !in_array($word, $stopWords) && mb_strlen($word) > 2;
-        });
-        
-        return array_values($words);
-    }
-
-    private function expandWithSynonyms(string $query): string
-    {
-        $synonyms = [
-            'замена' => ['поменять', 'установка новой', 'монтаж'],
-            'ремонт' => ['починка', 'восстановление', 'fix'],
-            'двигатель' => ['мотор', 'движок'],
-            'тормоз' => ['brake', 'стоп'],
-            'масло' => ['oil', 'смазка']
+        $complexityWords = [
+            'сложный' => 3,
+            'сложная' => 3,
+            'проблема' => 2,
+            'неисправность' => 2,
+            'ремонт' => 2,
+            'замена' => 2,
+            'простой' => 1,
+            'быстрый' => 1,
+            'легкий' => 1,
         ];
-
-        foreach ($synonyms as $word => $synonymList) {
-            if (Str::contains($query, $word)) {
-                $query .= ' ' . implode(' ', $synonymList);
+        
+        $score = 1; // По умолчанию средняя сложность
+        
+        foreach ($complexityWords as $word => $value) {
+            if (str_contains(mb_strtolower($query, 'UTF-8'), $word)) {
+                $score = max($score, $value);
             }
         }
-
-        return $query;
-    }
-
-    private function generateDiagnosis(array $analysis): string
-    {
-        $keywords = implode(' ', $analysis['keywords']);
         
-        $diagnosisPatterns = [
-            'не заводится' => 'Возможные проблемы: стартер, аккумулятор, топливная система, зажигание',
-            'стучит' => 'Возможные причины: износ подвески, проблемы с двигателем, выхлопной системой',
-            'течет' => 'Необходимо проверить: системы охлаждения, масляную систему, тормозную жидкость',
-            'перегревается' => 'Проверьте: систему охлаждения, термостат, радиатор, уровень антифриза',
-            'вибрация' => 'Возможные причины: разбалансировка колес, проблемы с ШРУСами, опорами двигателя'
-        ];
-
-        foreach ($diagnosisPatterns as $pattern => $diagnosis) {
-            if (Str::contains($keywords, $pattern)) {
-                return $diagnosis;
-            }
-        }
-
-        return 'Требуется диагностика для точного определения проблемы';
-    }
-
-    private function estimateRepairTime(array $analysis): string
-    {
-        $complexity = $this->estimateComplexity($analysis);
-        
-        return match($complexity) {
-            'low' => '1-2 часа',
-            'medium' => '3-5 часов', 
-            'high' => '6-8 часов',
-            'very_high' => '1-2 дня',
-            default => 'Требуется диагностика'
-        };
-    }
-
-    private function estimateComplexity(array $analysis): string
-    {
-        $complexKeywords = ['двигатель', 'трансмиссия', 'блок', 'турбина', 'редуктор'];
-        $mediumKeywords = ['тормоз', 'подвеска', 'рулевое', 'стартер', 'генератор'];
-        $simpleKeywords = ['лампочка', 'фильтр', 'щетки', 'зеркало', 'ручка'];
-        
-        foreach ($analysis['keywords'] as $keyword) {
-            if (in_array($keyword, $complexKeywords)) return 'high';
-            if (in_array($keyword, $mediumKeywords)) return 'medium';
-            if (in_array($keyword, $simpleKeywords)) return 'low';
-        }
-
-        return 'medium';
-    }
-
-    public function suggestQuestions(string $query): array
-    {
-        $analysis = $this->analyzeQuery($query);
-        
-        $suggestions = [
-            "Диагностика {$analysis['processed_query']}",
-            "Стоимость ремонта {$analysis['processed_query']}",
-            "Причины {$analysis['processed_query']}",
-            "Как предотвратить {$analysis['processed_query']}"
-        ];
-
-        return array_slice($suggestions, 0, 3);
+        return $score;
     }
 }

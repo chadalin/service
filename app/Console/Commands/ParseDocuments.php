@@ -4,16 +4,16 @@ namespace App\Console\Commands;
 
 use Illuminate\Console\Command;
 use App\Models\Document;
-use App\Services\DocumentIndexer;
+use App\Services\FileParserService;
 
-class IndexDocuments extends Command
+class ParseDocuments extends Command
 {
-    protected $signature = 'documents:index {--limit=10} {--all}';
-    protected $description = 'Индексация документов';
+    protected $signature = 'documents:parse {--limit=10} {--all}';
+    protected $description = 'Парсинг документов';
 
-    public function handle(DocumentIndexer $indexer)
+    public function handle(FileParserService $parser)
     {
-        $query = Document::readyForIndexing();
+        $query = Document::readyForParsing();
         
         if ($this->option('all')) {
             $documents = $query->get();
@@ -24,11 +24,11 @@ class IndexDocuments extends Command
         $total = $documents->count();
         
         if ($total === 0) {
-            $this->info('Нет документов для индексации');
+            $this->info('Нет документов для парсинга');
             return 0;
         }
         
-        $this->info("Найдено документов для индексации: {$total}");
+        $this->info("Найдено документов для парсинга: {$total}");
         
         $bar = $this->output->createProgressBar($total);
         $success = 0;
@@ -36,17 +36,16 @@ class IndexDocuments extends Command
         
         foreach ($documents as $document) {
             try {
-                $result = $indexer->indexDocument($document);
+                $result = $parser->parseDocument($document);
                 if ($result['success']) {
                     $success++;
-                    $this->info("  → {$document->title}: {$result['section']} → {$result['system']}");
                 } else {
                     $errors++;
-                    $this->error("  → Ошибка документа {$document->id}: " . $result['message']);
+                    $this->error("Ошибка документа {$document->id}: " . $result['message']);
                 }
             } catch (\Exception $e) {
                 $errors++;
-                $this->error("  → Исключение документа {$document->id}: " . $e->getMessage());
+                $this->error("Исключение документа {$document->id}: " . $e->getMessage());
             }
             
             $bar->advance();
@@ -55,7 +54,7 @@ class IndexDocuments extends Command
         $bar->finish();
         $this->newLine();
         
-        $this->info("Индексация завершена!");
+        $this->info("Парсинг завершен!");
         $this->info("Успешно: {$success}, Ошибок: {$errors}");
         
         return 0;

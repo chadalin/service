@@ -225,15 +225,7 @@ class DocumentController extends Controller
         return response()->download($filePath, $document->original_filename);
     }
     
-    public function reprocess(Document $document)
-    {
-        $document->update(['status' => 'pending']);
-        
-        ProcessDocumentJob::dispatch($document)->onQueue('documents');
-        
-        return redirect()->route('admin.documents.show', $document)
-            ->with('success', 'Документ поставлен в очередь на обработку');
-    }
+   
     
     private function getFilePath(Document $document): string
     {

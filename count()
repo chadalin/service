@@ -1,0 +1,1 @@
+"Индексировано: " . \App\Models\Document::where('search_indexed', true)- . "\n";

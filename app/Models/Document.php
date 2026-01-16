@@ -12,39 +12,51 @@ class Document extends Model
 {
     //use Searchable;
     
-    protected $fillable = [
+      protected $fillable = [
         'car_model_id',
-        'repair_categories',
+        'category_id', 
         'title',
         'content_text',
-        'search_vector',
         'keywords',
         'original_filename',
         'file_type',
         'file_path',
         'source_url',
-        'uploaded_by', // это поле есть в таблице
+        'uploaded_by',
         'status',
         'embedding',
-        'sections',
-        'metadata',
-        'word_count',
-        'has_images',
-        'parsed_at',
+        'search_indexed',
+        'is_parsed',
+        'parsing_quality',
+        'detected_section',
+        'detected_system',
+        'detected_component',
+        'search_count',
+        'view_count',
+        'average_relevance',
+        'search_vector',
+        'keywords_text',
     ];
     
     protected $casts = [
-        'keywords' => 'array',
-        'sections' => 'array',
-        'metadata' => 'array',
+        'search_indexed' => 'boolean',
+        'is_parsed' => 'boolean',
+        'parsing_quality' => 'float',
+        'search_count' => 'integer',
+        'view_count' => 'integer',
+        'average_relevance' => 'float',
         'embedding' => 'array',
-        'created_at' => 'datetime',
-        'updated_at' => 'datetime',
-        'parsed_at' => 'datetime',
-        'word_count' => 'integer',
-        'has_images' => 'boolean',
     ];
     
+
+    // Статусы документа
+    const STATUS_UPLOADED = 'uploaded';
+    const STATUS_PROCESSING = 'processing';
+    const STATUS_PARSED = 'parsed';
+    const STATUS_INDEXED = 'indexed';
+    const STATUS_PROCESSED = 'processed';
+    const STATUS_PARSE_ERROR = 'parse_error';
+    const STATUS_INDEX_ERROR = 'index_error';
     /**
      * Get the indexable data array for the model.
      */
@@ -192,5 +204,49 @@ class Document extends Model
     public function user()
     {
         return $this->belongsTo(User::class, 'uploaded_by');
+    }
+
+    public function ngrams()
+    {
+        return $this->hasMany(DocumentNgram::class);
+    }
+    
+    /**
+     * Scope для документов, готовых к парсингу
+     */
+    public function scopeReadyForParsing($query)
+    {
+        return $query->whereIn('status', ['uploaded', 'processing'])
+                    ->where('is_parsed', false)
+                    ->whereNotNull('file_path');
+    }
+    
+    /**
+     * Scope для документов, готовых к индексации
+     */
+    public function scopeReadyForIndexing($query)
+    {
+        return $query->where('is_parsed', true)
+                    ->where('search_indexed', false)
+                    ->whereNotNull('content_text')
+                    ->where('status', '!=', 'indexed');
+    }
+    
+    /**
+     * Получить статус в читаемом формате
+     */
+    public function getStatusLabelAttribute()
+    {
+        $labels = [
+            'uploaded' => 'Загружен',
+            'processing' => 'В обработке',
+            'parsed' => 'Распарсен',
+            'indexed' => 'Проиндексирован',
+            'processed' => 'Обработан',
+            'parse_error' => 'Ошибка парсинга',
+            'index_error' => 'Ошибка индексации',
+        ];
+        
+        return $labels[$this->status] ?? $this->status;
     }
 }

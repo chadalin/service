@@ -9,11 +9,13 @@ use App\Http\Controllers\ChatController;
 use App\Http\Controllers\SearchController;
 use App\Http\Controllers\DemoController;
 use App\Http\Controllers\HomeController;
+use App\Http\Controllers\Admin\DocumentProcessingController;
 use App\Http\Controllers\Diagnostic\DiagnosticController;
 use App\Http\Controllers\Diagnostic\ReportController;
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
 use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleController;
 use Illuminate\Support\Facades\Route;
+use App\Http\Controllers\ProjectInfoController;
 
 // Главная посадочная страница (B2C)
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -35,7 +37,20 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
     
-    // Documents Routes
+    // Обработка документов - ДОЛЖЕН БЫТЬ ПЕРЕД ДРУГИМИ МАРШРУТАМИ ДОКУМЕНТОВ
+     Route::prefix('documents-processing')->name('documents.processing.')->group(function () {
+        Route::get('/', [DocumentProcessingController::class, 'index'])->name('index');
+        
+        Route::post('/parse/{id}', [DocumentProcessingController::class, 'parseDocument'])->name('parse');
+        Route::post('/index/{id}', [DocumentProcessingController::class, 'indexDocument'])->name('index');
+        Route::post('/process/{id}', [DocumentProcessingController::class, 'processDocument'])->name('process');
+        Route::post('/parse-multiple', [DocumentProcessingController::class, 'parseMultiple'])->name('parse.multiple');
+        Route::post('/index-multiple', [DocumentProcessingController::class, 'indexMultiple'])->name('index.multiple');
+        Route::get('/status/{id}', [DocumentProcessingController::class, 'getStatus'])->name('status');
+        Route::post('/reset/{id}', [DocumentProcessingController::class, 'resetStatus'])->name('reset');
+    });
+    
+    // Documents Routes (ОСНОВНЫЕ)
     Route::prefix('documents')->name('documents.')->group(function () {
         Route::get('/', [DocumentController::class, 'index'])->name('index');
         Route::get('/create', [DocumentController::class, 'create'])->name('create');
@@ -106,6 +121,39 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::delete('/rules/{rule}', [DiagnosticRuleController::class, 'destroy'])->name('rules.destroy');
         Route::get('/rules/models/{brandId}', [DiagnosticRuleController::class, 'getModels'])->name('rules.models');
     });
+    
+    // Тестовый поиск
+    Route::get('/test-search', function() {
+        $brands = \App\Models\Brand::orderBy('name')->get();
+        $models = \App\Models\CarModel::orderBy('name')->get()
+            ->groupBy('brand_id')
+            ->map(function($group) {
+                return $group->map(function($model) {
+                    return [
+                        'id' => $model->id,
+                        'name' => $model->name_cyrillic ?? $model->name,
+                        'year_from' => $model->year_from,
+                        'year_to' => $model->year_to
+                    ];
+                })->values();
+            });
+        
+        \Log::info('Test search - Brands:', $brands->pluck('name')->toArray());
+        
+        return view('test-search', compact('brands', 'models'));
+    })->name('test.search');
+    
+    // Дополнительные AJAX маршруты
+    Route::get('/search/models/{brandId}', [SearchController::class, 'getModels'])
+        ->name('search.models');
+    Route::post('/documents/batch-index', [DocumentController::class, 'batchIndex'])
+        ->name('documents.batch-index');
+    Route::post('/documents/{document}/reindex', [DocumentController::class, 'reprocess'])
+        ->name('documents.reindex');
+    Route::post('/search/semantic', [SearchController::class, 'semanticSearch'])
+        ->name('search.semantic');
+    Route::post('/search/analyze-query', [SearchController::class, 'analyzeQuery'])
+        ->name('search.analyze-query');
 });
 
 // ===============================================
@@ -146,45 +194,9 @@ Route::redirect('/', '/admin/dashboard')->middleware('auth');
 
 
 
-Route::get('/test-search', function() {
-    $brands = \App\Models\Brand::orderBy('name')->get();
-    $models = \App\Models\CarModel::orderBy('name')->get()
-        ->groupBy('brand_id')
-        ->map(function($group) {
-            return $group->map(function($model) {
-                return [
-                    'id' => $model->id,
-                    'name' => $model->name_cyrillic ?? $model->name,
-                    'year_from' => $model->year_from,
-                    'year_to' => $model->year_to
-                ];
-            })->values();
-        });
-    
-    \Log::info('Test search - Brands:', $brands->pluck('name')->toArray());
-    
-    return view('test-search', compact('brands', 'models'));
-})->middleware('auth');
-
-
-Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {
-    // Маршрут для загрузки моделей
-    Route::get('/search/models/{brandId}', [SearchController::class, 'getModels'])
-        ->name('search.models');
-    
-    // Массовая индексация документов
-    Route::post('/documents/batch-index', [DocumentController::class, 'batchIndex'])
-        ->name('documents.batch-index');
-    
-    // Переиндексация конкретного документа
-    Route::post('/documents/{document}/reindex', [DocumentController::class, 'reprocess'])
-        ->name('documents.reindex');
-    
-    // Семантический поиск
-    Route::post('/search/semantic', [SearchController::class, 'semanticSearch'])
-        ->name('search.semantic');
-    
-    // Анализ запроса
-    Route::post('/search/analyze-query', [SearchController::class, 'analyzeQuery'])
-        ->name('search.analyze-query');
-});
+// Маршрут для показа структуры проекта
+Route::get('/project-info', [ProjectInfoController::class, 'showProjectInfo']);
+Route::get('/project-info/database', [ProjectInfoController::class, 'showDatabaseStructure']);
+Route::get('/project-info/models', [ProjectInfoController::class, 'showModels']);
+Route::get('/project-info/controllers', [ProjectInfoController::class, 'showControllers']);
+Route::get('/project-info/all', [ProjectInfoController::class, 'showAllInfo']);
