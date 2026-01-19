@@ -189,7 +189,10 @@
                         onclick="selectPlan('basic')"
                         class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 text-xs rounded-lg transition-colors">
                     Получить
-                </button>
+                </button><a href="{{ route('consultation.order.form', ['case' => $case->id, 'type' => 'basic']) }}" 
+   class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 text-xs rounded-lg transition-colors text-center">
+    Получить
+</a>
             </div>
             
             <!-- Премиум -->
@@ -220,11 +223,10 @@
                         <span>Чат с помощником</span>
                     </li>
                 </ul>
-                <button type="button" 
-                        onclick="selectPlan('premium')"
-                        class="w-full bg-purple-600 hover:bg-purple-700 text-white font-medium py-2 text-xs rounded-lg transition-colors">
-                    Выбрать
-                </button>
+                <a href="{{ route('consultation.order.form', ['case' => $case->id, 'type' => 'basic']) }}" 
+   class="w-full bg-blue-600 hover:bg-blue-700 text-white font-medium py-2 text-xs rounded-lg transition-colors text-center">
+    Получить
+</a>
             </div>
             
             <!-- Эксперт -->
@@ -252,11 +254,10 @@
                         <span>Гарантия точности</span>
                     </li>
                 </ul>
-                <button type="button" 
-                        onclick="selectPlan('expert')"
-                        class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 text-xs rounded-lg transition-colors">
-                    Консультация
-                </button>
+               <a href="{{ route('consultation.order.form', ['case' => $case->id, 'type' => 'expert']) }}" 
+   class="w-full bg-green-600 hover:bg-green-700 text-white font-medium py-2 text-xs rounded-lg transition-colors text-center">
+    Консультация
+</a>
             </div>
         </div>
     </div>
