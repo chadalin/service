@@ -16,6 +16,7 @@ use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptom
 use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleController;
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProjectInfoController;
+use App\Http\Controllers\Diagnostic\ConsultationController;
 
 // Главная посадочная страница (B2C)
 Route::get('/', [HomeController::class, 'index'])->name('home');
@@ -172,21 +173,28 @@ Route::middleware(['auth'])->prefix('diagnostic')->name('diagnostic.')->group(fu
     // Шаги диагностики
     Route::get('/', [DiagnosticController::class, 'step1'])->name('start');
     Route::post('/step2', [DiagnosticController::class, 'step2'])->name('step2');
+    
+    // GET роуты для отображения шагов (если нужны)
+    Route::get('/step2', [DiagnosticController::class, 'showStep2'])->name('step2.show');
+    Route::get('/step3', [DiagnosticController::class, 'showStep3'])->name('step3.show');
+    
     Route::post('/step3', [DiagnosticController::class, 'step3'])->name('step3');
+     Route::post('/step3/process', [DiagnosticController::class, 'processStep3'])->name('step3.process'); // POST для обработки
     Route::post('/analyze', [DiagnosticController::class, 'analyze'])->name('analyze');
     Route::get('/result/{case}', [DiagnosticController::class, 'result'])->name('result');
     
     // Консультации
     Route::post('/consultation/{case}/order', [DiagnosticController::class, 'orderConsultation'])->name('consultation.order');
     
-    // Отчёты
+    // AJAX для диагностики
+    Route::get('/models/{brandId}', [DiagnosticController::class, 'getModels'])->name('models');
+});
+
+// Отчёты
     Route::get('/report/{case}', [ReportController::class, 'show'])->name('report.show');
     Route::get('/report/{case}/pdf', [ReportController::class, 'pdf'])->name('report.pdf');
     Route::post('/report/{case}/send', [ReportController::class, 'sendEmail'])->name('report.send');
     
-    // AJAX для диагностики
-    Route::get('/models/{brandId}', [DiagnosticController::class, 'getModels'])->name('models');
-});
 
 // Главная страница перенаправляет на логин
 Route::redirect('/', '/login')->middleware('guest');
@@ -200,3 +208,15 @@ Route::get('/project-info/database', [ProjectInfoController::class, 'showDatabas
 Route::get('/project-info/models', [ProjectInfoController::class, 'showModels']);
 Route::get('/project-info/controllers', [ProjectInfoController::class, 'showControllers']);
 Route::get('/project-info/all', [ProjectInfoController::class, 'showAllInfo']);
+
+
+
+// Consultation Routes
+Route::middleware(['auth'])->prefix('consultation')->name('consultation.')->group(function () {
+    Route::get('/order/{case}/{type?}', [ConsultationController::class, 'showOrderForm'])->name('order.form');
+    Route::post('/order/{case}', [ConsultationController::class, 'orderConsultation'])->name('order');
+    Route::get('/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])->name('confirmation');
+});
+
+// Обновим существующий роут диагностики
+Route::post('/diagnostic/consultation/{case}/order', [ConsultationController::class, 'orderConsultation'])->name('diagnostic.consultation.order');

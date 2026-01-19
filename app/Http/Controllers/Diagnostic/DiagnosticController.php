@@ -7,7 +7,7 @@ use App\Models\Brand;
 use App\Models\CarModel;
 use App\Models\Diagnostic\Symptom;
 use App\Models\Diagnostic\Rule;
-use App\Models\Diagnostic\Case as DiagnosticCase;
+use App\Models\Diagnostic\DiagnosticCase;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 
@@ -18,10 +18,13 @@ class DiagnosticController extends Controller
       //  $this->middleware('auth');
     }
 
-    public function step1()
+     public function step1()
     {
-        $symptoms = Symptom::where('is_active', true)->get();
-        $brands = Brand::all();
+        $symptoms = Symptom::where('is_active', true)
+            ->orderBy('frequency', 'desc')
+            ->get(['id', 'name', 'description', 'frequency']);
+            
+        $brands = Brand::orderBy('name')->get(['id', 'name']);
         
         return view('diagnostic.step1', [
             'symptoms' => $symptoms,
@@ -33,7 +36,9 @@ class DiagnosticController extends Controller
     
     public function getModels(Request $request, $brandId)
     {
-        $models = CarModel::where('brand_id', $brandId)->get();
+        $models = CarModel::where('brand_id', $brandId)
+            ->orderBy('name')
+            ->get(['id', 'name']);
         return response()->json($models);
     }
     
@@ -41,34 +46,31 @@ class DiagnosticController extends Controller
     {
         $request->validate([
             'symptoms' => 'required|array',
+            'symptoms.*' => 'integer|exists:diagnostic_symptoms,id',
             'brand_id' => 'required|exists:brands,id',
             'model_id' => 'nullable|exists:car_models,id',
+            'description' => 'nullable|string|max:1000',
         ]);
         
-        $request->session()->put([
-            'diagnostic.symptoms' => $request->symptoms,
-            'diagnostic.brand_id' => $request->brand_id,
-            'diagnostic.model_id' => $request->model_id,
+        // Сохраняем в сессию
+        $request->session()->put('diagnostic.step1', [
+            'symptoms' => $request->symptoms,
+            'brand_id' => $request->brand_id,
+            'model_id' => $request->model_id,
+            'description' => $request->description,
         ]);
         
-        return view('diagnostic.step2', [
-            'showProgress' => true,
-            'currentStep' => 2
-        ]);
+        // Перенаправляем на шаг 3 (GET)
+        return redirect()->route('diagnostic.step3');
     }
     
-    public function step3(Request $request)
+    public function showstep3(Request $request)
     {
-        $request->validate([
-            'year' => 'required|integer|min:1990|max:' . date('Y'),
-            'engine_type' => 'required|string',
-            'vin' => 'nullable|string|max:17',
-            'mileage' => 'nullable|integer',
-        ]);
-        
-        $request->session()->put([
-            'diagnostic.car_data' => $request->only(['year', 'engine_type', 'vin', 'mileage']),
-        ]);
+        // Проверяем данные шага 1
+        if (!$request->session()->has('diagnostic.step1')) {
+            return redirect()->route('diagnostic.start')
+                ->with('error', 'Пожалуйста, сначала выберите симптомы и автомобиль');
+        }
         
         return view('diagnostic.step3', [
             'showProgress' => true,
@@ -76,22 +78,53 @@ class DiagnosticController extends Controller
         ]);
     }
     
+    public function processStep3(Request $request)
+    {
+        $request->validate([
+            'year' => 'required|integer|min:1990|max:' . date('Y'),
+            'engine_type' => 'required|string',
+            'vin' => 'nullable|string|max:17',
+            'mileage' => 'nullable|integer|min:0|max:1000000',
+            'maintenance_history' => 'nullable|string',
+        ]);
+        
+        // Сохраняем данные шага 3
+        $request->session()->put('diagnostic.step3', [
+            'year' => $request->year,
+            'engine_type' => $request->engine_type,
+            'vin' => $request->vin,
+            'mileage' => $request->mileage,
+            'maintenance_history' => $request->maintenance_history,
+        ]);
+        
+        // Перенаправляем на страницу загрузки файлов
+        return view('diagnostic.step3_files', [
+            'showProgress' => true,
+            'currentStep' => 3
+        ]);
+    }
+    
     public function analyze(Request $request)
     {
-        $symptoms = $request->session()->get('diagnostic.symptoms', []);
-        $brandId = $request->session()->get('diagnostic.brand_id');
-        $modelId = $request->session()->get('diagnostic.model_id');
-        $carData = $request->session()->get('diagnostic.car_data', []);
+        // Получаем все данные из сессии
+        $step1Data = $request->session()->get('diagnostic.step1', []);
+        $step3Data = $request->session()->get('diagnostic.step3', []);
         
-        if (empty($symptoms) || !$brandId) {
+        if (empty($step1Data['symptoms']) || !$step1Data['brand_id']) {
             return redirect()->route('diagnostic.start')->with('error', 'Недостаточно данных для анализа');
         }
         
+        // Приводим к правильному типу
+        $symptoms = array_map('intval', (array) $step1Data['symptoms']);
+        $brandId = (int) $step1Data['brand_id'];
+        $modelId = isset($step1Data['model_id']) ? (int) $step1Data['model_id'] : null;
+        
         // Найти подходящие правила
-        $rules = Rule::findMatchingRules($symptoms, $brandId, $modelId, $carData);
+        $rules = Rule::findMatchingRules($symptoms, $brandId, $modelId, $step3Data);
         
         if ($rules->isEmpty()) {
-            return redirect()->back()->with('error', 'Не удалось найти подходящие решения. Попробуйте описать проблему более подробно.');
+            // Если нет правил, создаем базовый результат
+            return $this->createBasicAnalysis($brandId, $modelId, $symptoms, $step3Data, $step1Data['description'] ?? '', $request);
         }
         
         // Создать кейс
@@ -100,12 +133,12 @@ class DiagnosticController extends Controller
             'rule_id' => $rules->first()->id,
             'brand_id' => $brandId,
             'model_id' => $modelId,
-            'engine_type' => $carData['engine_type'] ?? null,
-            'year' => $carData['year'] ?? null,
-            'vin' => $carData['vin'] ?? null,
-            'mileage' => $carData['mileage'] ?? null,
+            'engine_type' => $step3Data['engine_type'] ?? null,
+            'year' => $step3Data['year'] ?? null,
+            'vin' => $step3Data['vin'] ?? null,
+            'mileage' => $step3Data['mileage'] ?? null,
             'symptoms' => $symptoms,
-            'description' => $request->description,
+            'description' => $step1Data['description'] ?? null,
             'status' => 'analyzing',
         ]);
         
@@ -129,10 +162,8 @@ class DiagnosticController extends Controller
         
         // Очистить сессию
         $request->session()->forget([
-            'diagnostic.symptoms',
-            'diagnostic.brand_id', 
-            'diagnostic.model_id',
-            'diagnostic.car_data'
+            'diagnostic.step1',
+            'diagnostic.step3'
         ]);
         
         return redirect()->route('diagnostic.result', $case->id);
@@ -147,42 +178,70 @@ class DiagnosticController extends Controller
             abort(403, 'Доступ запрещён');
         }
         
-        $report = $case->activeReport();
-        
         return view('diagnostic.result', [
             'case' => $case,
-            'report' => $report,
             'showProgress' => true,
             'currentStep' => 4
         ]);
     }
     
-    public function orderConsultation(Request $request, $caseId)
+    private function createBasicAnalysis($brandId, $modelId, $symptoms, $carData, $description, $request)
     {
-        $case = DiagnosticCase::findOrFail($caseId);
-        $type = $request->input('type', 'basic');
-        
-        // Проверка прав доступа
-        if ($case->user_id !== Auth::id()) {
-            abort(403, 'Доступ запрещён');
-        }
-        
-        // Рассчитать цену
-        $price = $case->rule->calculatePrice(
-            $type === 'expert' ? 1.5 : ($type === 'premium' ? 1.2 : 1)
-        );
-        
-        // Создать запись о консультации
-        $consultation = $case->consultation()->create([
+        // Создаем базовый кейс без правила
+        $case = DiagnosticCase::create([
             'user_id' => Auth::id(),
-            'type' => $type,
-            'price' => $price,
-            'status' => 'pending',
+            'rule_id' => null, // null для случаев без правила
+            'brand_id' => $brandId,
+            'model_id' => $modelId,
+            'engine_type' => $carData['engine_type'] ?? null,
+            'year' => $carData['year'] ?? null,
+            'vin' => $carData['vin'] ?? null,
+            'mileage' => $carData['mileage'] ?? null,
+            'symptoms' => $symptoms,
+            'description' => $description,
+            'status' => 'report_ready',
         ]);
         
-        // Перенаправить на оплату
-        return redirect()->route('payment.checkout', $consultation->id)
-            ->with('success', 'Консультация создана. Переходите к оплате.');
+        // Обработать загруженные файлы
+        if ($request->hasFile('files')) {
+            $uploadedFiles = [];
+            foreach ($request->file('files') as $file) {
+                $path = $file->store('diagnostic/' . $case->id, 'public');
+                $uploadedFiles[] = [
+                    'name' => $file->getClientOriginalName(),
+                    'path' => $path,
+                    'type' => $file->getMimeType(),
+                ];
+            }
+            $case->update(['uploaded_files' => $uploadedFiles]);
+        }
+        
+        // Генерируем базовый результат
+        $analysisResult = [
+            'possible_causes' => [
+                'Необходима дополнительная диагностика',
+                'Рекомендуется проверить электронные системы автомобиля',
+                'Возможны проблемы с датчиками или исполнительными механизмами'
+            ],
+            'required_data' => [
+                'Коды ошибок OBD2',
+                'Фото приборной панели',
+                'Информация о поведении автомобиля'
+            ],
+            'diagnostic_steps' => [
+                'Считать коды ошибок с помощью диагностического сканера',
+                'Проверить основные датчики системы',
+                'Провести визуальный осмотр моторного отсека'
+            ],
+            'complexity_level' => 5,
+            'estimated_time' => 90,
+            'estimated_price' => 3000,
+            'recommended_consultation' => 'expert',
+        ];
+        
+        $case->completeAnalysis($analysisResult);
+        
+        return redirect()->route('diagnostic.result', $case->id);
     }
     
     private function generateAnalysis(DiagnosticCase $case, $rules): array
