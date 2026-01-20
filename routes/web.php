@@ -7,7 +7,7 @@ use App\Http\Controllers\Admin\CarController;
 use App\Http\Controllers\Admin\CategoryController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\SearchController;
-use App\Http\Controllers\DemoController;
+//                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       use App\Http\Controllers\DemoController;
 use App\Http\Controllers\HomeController;
 use App\Http\Controllers\Admin\DocumentProcessingController;
 use App\Http\Controllers\Diagnostic\DiagnosticController;
@@ -17,9 +17,10 @@ use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleContro
 use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProjectInfoController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
+use App\Http\Controllers\Admin\ExpertController;
 
 // Главная посадочная страница (B2C)
-Route::get('/', [HomeController::class, 'index'])->name('home');
+Route::get('/index', [HomeController::class, 'index'])->name('home');
 
 // Посадочная страница для сервисов (B2B)
 Route::get('/services', [HomeController::class, 'landing'])->name('services.landing');
@@ -94,14 +95,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::get('/models', [CarController::class, 'models'])->name('models');
     });
     
-    // Demo Requests Routes
-    Route::prefix('demo-requests')->name('demo.')->group(function () {
-        Route::get('/', [DemoController::class, 'adminIndex'])->name('index');
-        Route::get('/{id}', [DemoController::class, 'adminShow'])->name('show');
-        Route::put('/{id}/status', [DemoController::class, 'updateStatus'])->name('update-status');
-        Route::delete('/{id}', [DemoController::class, 'destroy'])->name('destroy');
-        Route::get('/export', [DemoController::class, 'export'])->name('export');
-    });
+
     
     // Diagnostic Admin Routes
     Route::prefix('diagnostic')->name('diagnostic.')->group(function () {
@@ -143,6 +137,10 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         
         return view('test-search', compact('brands', 'models'));
     })->name('test.search');
+
+    Route::get('/diagnostic/consultation/order-form', function() {
+    return redirect()->route('diagnostic.start')->with('info', 'Пожалуйста, сначала создайте диагностический случай');
+})->name('diagnostic.consultation.order-form')->middleware('auth');
     
     // Дополнительные AJAX маршруты
     Route::get('/search/models/{brandId}', [SearchController::class, 'getModels'])
@@ -191,9 +189,13 @@ Route::middleware(['auth'])->prefix('diagnostic')->name('diagnostic.')->group(fu
 });
 
 // Отчёты
-    Route::get('/report/{case}', [ReportController::class, 'show'])->name('report.show');
-    Route::get('/report/{case}/pdf', [ReportController::class, 'pdf'])->name('report.pdf');
-    Route::post('/report/{case}/send', [ReportController::class, 'sendEmail'])->name('report.send');
+  // Отчеты
+Route::prefix('diagnostic/report')->group(function () {
+    Route::get('/', [ReportController::class, 'index'])->name('diagnostic.report.index');
+    Route::get('/{case}', [ReportController::class, 'show'])->name('diagnostic.report.show');
+    Route::get('/{case}/pdf', [ReportController::class, 'pdf'])->name('diagnostic.report.pdf');
+    Route::post('/{case}/send-email', [ReportController::class, 'sendEmail'])->name('diagnostic.report.send-email');
+});
     
 
 // Главная страница перенаправляет на логин
@@ -217,6 +219,105 @@ Route::middleware(['auth'])->prefix('consultation')->name('consultation.')->grou
     Route::post('/order/{case}', [ConsultationController::class, 'orderConsultation'])->name('order');
     Route::get('/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])->name('confirmation');
 });
+// Консультации
+Route::prefix('diagnostic/consultation')->group(function () {
+    // Клиентские маршруты
+    Route::get('/order/{case}/{type?}', [ConsultationController::class, 'showOrderForm'])->name('diagnostic.consultation.order');
+    Route::post('/order/{case}', [ConsultationController::class, 'orderConsultation'])->name('diagnostic.consultation.order.submit');
+    Route::get('/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])->name('diagnostic.consultation.confirmation');
+    Route::get('/', [ConsultationController::class, 'index'])->name('diagnostic.consultation.index');
+    Route::get('/{consultation}', [ConsultationController::class, 'showClient'])->name('diagnostic.consultation.show');
+    Route::post('/{consultation}/feedback', [ConsultationController::class, 'addFeedback'])->name('diagnostic.consultation.feedback');
+    
+    // Экспертные маршруты
+    Route::prefix('expert')->group(function () {
+        Route::get('/', [ConsultationController::class, 'expertDashboard'])->name('diagnostic.consultation.expert.dashboard');
+        Route::get('/{consultation}', [ConsultationController::class, 'showExpert'])->name('diagnostic.consultation.expert.show');
+        Route::post('/{consultation}/start', [ConsultationController::class, 'startExpertConsultation'])->name('diagnostic.consultation.expert.start');
+        Route::post('/{consultation}/analysis', [ConsultationController::class, 'addAnalysis'])->name('diagnostic.consultation.expert.analysis');
+        Route::post('/{consultation}/request-data', [ConsultationController::class, 'requestData'])->name('diagnostic.consultation.expert.request-data');
+        Route::post('/{consultation}/complete', [ConsultationController::class, 'completeConsultation'])->name('diagnostic.consultation.expert.complete');
+    });
+    
+    // Общие маршруты для чата
+    Route::post('/{consultation}/message', [ConsultationController::class, 'sendMessage'])->name('diagnostic.consultation.message');
+    Route::post('/{consultation}/upload', [ConsultationController::class, 'uploadFile'])->name('diagnostic.consultation.upload');
+    Route::get('/{consultation}/messages', [ConsultationController::class, 'getMessages'])->name('diagnostic.consultation.messages');
+    Route::post('/{consultation}/read', [ConsultationController::class, 'markAsRead'])->name('diagnostic.consultation.read');
+});
 
-// Обновим существующий роут диагностики
-Route::post('/diagnostic/consultation/{case}/order', [ConsultationController::class, 'orderConsultation'])->name('diagnostic.consultation.order');
+
+// Административные маршруты для консультаций
+Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
+    Route::prefix('consultations')->group(function () {
+        Route::get('/', [ConsultationController::class, 'index'])->name('admin.consultations.index');
+        Route::get('/pending', [ConsultationController::class, 'pending'])->name('admin.consultations.pending');
+        Route::get('/in-progress', [ConsultationController::class, 'inProgress'])->name('admin.consultations.in-progress');
+        Route::get('/{consultation}', [ConsultationController::class, 'show'])->name('admin.consultations.show');
+        Route::get('/consultation/order', [ConsultationController::class, 'showOrderForm'])->name('consultation.order-form');
+        Route::get('/consultation/{consultation}', [ConsultationController::class, 'showClient'])->name('consultation.show-client');
+        Route::post('/{consultation}/assign', [ConsultationController::class, 'assignExpert'])->name('admin.consultations.assign');
+        Route::post('/{consultation}/cancel', [ConsultationController::class, 'cancel'])->name('admin.consultations.cancel');
+        Route::get('/statistics', [ConsultationController::class, 'statistics'])->name('admin.consultations.statistics');
+    });
+    
+    Route::prefix('experts')->group(function () {
+        Route::get('/', [ExpertController::class, 'index'])->name('admin.experts.index');
+        Route::get('/create', [ExpertController::class, 'create'])->name('admin.experts.create');
+        Route::post('/', [ExpertController::class, 'store'])->name('admin.experts.store');
+        Route::get('/{expert}/edit', [ExpertController::class, 'edit'])->name('admin.experts.edit');
+        Route::put('/{expert}', [ExpertController::class, 'update'])->name('admin.experts.update');
+        Route::delete('/{expert}', [ExpertController::class, 'destroy'])->name('admin.experts.destroy');
+        Route::post('/{expert}/toggle-status', [ExpertController::class, 'toggleStatus'])->name('admin.experts.toggle-status');
+    });
+});
+
+// Экспертные маршруты
+Route::middleware(['auth', 'expert'])->prefix('expert')->group(function () {
+    Route::get('/profile', [ExpertController::class, 'profile'])->name('expert.profile.edit');
+    Route::put('/profile', [ExpertController::class, 'updateProfile'])->name('expert.profile.update');
+    Route::get('/schedule', [ExpertController::class, 'schedule'])->name('expert.schedule.index');
+    Route::put('/schedule', [ExpertController::class, 'updateSchedule'])->name('expert.schedule.update');
+    Route::get('/analytics', [ExpertController::class, 'analytics'])->name('expert.analytics.index');
+});
+
+// API для уведомлений
+Route::middleware('auth')->prefix('api')->group(function () {
+    Route::get('/consultations/unread-count', function() {
+        $user = auth()->user();
+        $count = 0;
+        
+        if ($user->is_expert) {
+            $count += \App\Models\Diagnostic\Consultation::where('expert_id', $user->id)
+                ->where('status', 'in_progress')
+                ->whereHas('messages', function($query) use ($user) {
+                    $query->where('user_id', '!=', $user->id)
+                          ->where('is_read', false);
+                })
+                ->count();
+        }
+        
+        $count += \App\Models\Diagnostic\Consultation::where('user_id', $user->id)
+            ->where('status', 'in_progress')
+            ->whereHas('messages', function($query) use ($user) {
+                $query->where('user_id', '!=', $user->id)
+                      ->where('is_read', false);
+            })
+            ->count();
+            
+        return response()->json(['unread_count' => $count]);
+    });
+    
+    Route::get('/expert/pending-consultations', function() {
+        $user = auth()->user();
+        if (!$user->is_expert) {
+            return response()->json(['count' => 0]);
+        }
+        
+        $count = \App\Models\Diagnostic\Consultation::whereNull('expert_id')
+            ->where('status', 'pending')
+            ->count();
+            
+        return response()->json(['count' => $count]);
+    });
+});

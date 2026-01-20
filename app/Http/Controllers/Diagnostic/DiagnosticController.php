@@ -185,7 +185,24 @@ class DiagnosticController extends Controller
         ]);
     }
     
-    private function createBasicAnalysis($brandId, $modelId, $symptoms, $carData, $description, $request)
+   
+    
+    private function generateAnalysis(DiagnosticCase $case, $rules): array
+    {
+        $rule = $rules->first();
+        
+        return [
+            'possible_causes' => $rule->possible_causes ?? [],
+            'required_data' => $rule->required_data ?? [],
+            'diagnostic_steps' => $rule->diagnostic_steps ?? [],
+            'complexity_level' => $rule->complexity_level ?? 1,
+            'estimated_time' => $rule->estimated_time ?? 60,
+            'estimated_price' => $rule->base_consultation_price * ($rule->complexity_level / 5),
+            'recommended_consultation' => $case->getRecommendedConsultationType(),
+        ];
+    }
+
+     private function createBasicAnalysis($brandId, $modelId, $symptoms, $carData, $description, $request)
     {
         // Создаем базовый кейс без правила
         $case = DiagnosticCase::create([
@@ -242,20 +259,5 @@ class DiagnosticController extends Controller
         $case->completeAnalysis($analysisResult);
         
         return redirect()->route('diagnostic.result', $case->id);
-    }
-    
-    private function generateAnalysis(DiagnosticCase $case, $rules): array
-    {
-        $rule = $rules->first();
-        
-        return [
-            'possible_causes' => $rule->possible_causes ?? [],
-            'required_data' => $rule->required_data ?? [],
-            'diagnostic_steps' => $rule->diagnostic_steps ?? [],
-            'complexity_level' => $rule->complexity_level ?? 1,
-            'estimated_time' => $rule->estimated_time ?? 60,
-            'estimated_price' => $rule->base_consultation_price * ($rule->complexity_level / 5),
-            'recommended_consultation' => $case->getRecommendedConsultationType(),
-        ];
     }
 }

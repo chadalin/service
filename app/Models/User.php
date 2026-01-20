@@ -51,4 +51,43 @@ class User extends Authenticatable
     {
         return $this->pin_expires_at && $this->pin_expires_at->isFuture();
     }
+
+
+     // Добавьте эти методы для работы с консультациями
+    public function consultations(): HasMany
+    {
+        return $this->hasMany(\App\Models\Diagnostic\Consultation::class, 'user_id');
+    }
+    
+    public function expertConsultations(): HasMany
+    {
+        return $this->hasMany(\App\Models\Diagnostic\Consultation::class, 'expert_id');
+    }
+    
+    public function getUnreadConsultationMessagesCountAttribute(): int
+    {
+        return \App\Models\Diagnostic\Consultation::where('user_id', $this->id)
+            ->orWhere('expert_id', $this->id)
+            ->whereHas('messages', function($query) {
+                $query->where('user_id', '!=', $this->id)
+                      ->whereNull('read_at');
+            })
+            ->count();
+    }
+    
+    public function getPendingConsultationsCountAttribute(): int
+    {
+        if (!$this->is_expert && !$this->is_admin) {
+            return 0;
+        }
+        
+        return \App\Models\Diagnostic\Consultation::whereNull('expert_id')
+            ->where('status', 'pending')
+            ->count();
+    }
+    
+    public function getIsAdminAttribute(): bool
+    {
+        return $this->role === 'admin';
+    }
 }

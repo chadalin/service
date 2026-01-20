@@ -2,26 +2,21 @@
 
 namespace App\Models\Diagnostic;
 
-use App\Models\User;
-use App\Models\Brand;
-use App\Models\CarModel;
 use Illuminate\Database\Eloquent\Model;
-use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\Relations\HasOne;
 
 class DiagnosticCase extends Model
 {
-    use SoftDeletes;
-    
     protected $table = 'diagnostic_cases';
     
-    protected $primaryKey = 'id';
+    // Используем UUID в качестве первичного ключа
     protected $keyType = 'string';
     public $incrementing = false;
     
     protected $fillable = [
+        'id', // Добавляем id для UUID
         'user_id', 'rule_id', 'brand_id', 'model_id',
         'engine_type', 'year', 'vin', 'mileage',
         'symptoms', 'description', 'uploaded_files',
@@ -33,6 +28,10 @@ class DiagnosticCase extends Model
         'symptoms' => 'array',
         'uploaded_files' => 'array',
         'analysis_result' => 'array',
+        'price_estimate' => 'decimal:2',
+        'time_estimate' => 'integer',
+        'year' => 'integer',
+        'mileage' => 'integer',
     ];
     
     protected static function boot()
@@ -40,13 +39,15 @@ class DiagnosticCase extends Model
         parent::boot();
         
         static::creating(function ($model) {
-            $model->id = (string) \Illuminate\Support\Str::uuid();
+            if (empty($model->id)) {
+                $model->id = (string) \Illuminate\Support\Str::uuid();
+            }
         });
     }
     
     public function user(): BelongsTo
     {
-        return $this->belongsTo(User::class);
+        return $this->belongsTo(\App\Models\User::class);
     }
     
     public function rule(): BelongsTo
@@ -56,57 +57,33 @@ class DiagnosticCase extends Model
     
     public function brand(): BelongsTo
     {
-        return $this->belongsTo(Brand::class);
+        return $this->belongsTo(\App\Models\Brand::class, 'brand_id', 'id');
     }
     
     public function model(): BelongsTo
     {
-        return $this->belongsTo(CarModel::class);
-    }
-    
-    public function consultation(): HasOne
-    {
-        return $this->hasOne(Consultation::class);
+        return $this->belongsTo(\App\Models\CarModel::class, 'model_id', 'id');
     }
     
     public function reports(): HasMany
     {
-        return $this->hasMany(Report::class);
+        return $this->hasMany(Report::class, 'case_id');
     }
     
-    public function scannerLogs(): HasMany
+    public function activeReport(): HasOne
     {
-        return $this->hasMany(ScannerLog::class);
+        return $this->hasOne(Report::class, 'case_id')->latest();
     }
     
-    // Получить активный отчёт
-    public function activeReport()
+    public function consultations(): HasMany
     {
-        return $this->reports()->latest()->first();
+        return $this->hasMany(Consultation::class, 'case_id');
     }
     
-    // Перейти к следующему шагу
-    public function nextStep(): void
-    {
-        $this->increment('step');
-        $this->save();
-    }
-    
-    // Завершить анализ
-    public function completeAnalysis(array $result): void
-    {
-        $this->update([
-            'status' => 'report_ready',
-            'analysis_result' => $result,
-            'price_estimate' => $result['estimated_price'] ?? null,
-            'time_estimate' => $result['estimated_time'] ?? null,
-        ]);
-    }
-    
-    // Получить рекомендуемый тип консультации
+    // Получить тип рекомендуемой консультации
     public function getRecommendedConsultationType(): string
     {
-        $complexity = $this->rule->complexity_level ?? 1;
+        $complexity = $this->analysis_result['complexity_level'] ?? 1;
         
         if ($complexity >= 7) {
             return 'expert';
@@ -116,4 +93,88 @@ class DiagnosticCase extends Model
         
         return 'basic';
     }
+    
+    // Завершить анализ и создать отчет
+    public function completeAnalysis(array $analysisResult): void
+    {
+        // Создаем отчет на основе анализа
+        $report = $this->reports()->create([
+            'report_type' => 'free',
+            'summary' => [
+                'Диагностика выполнена на основе выбранных симптомов',
+                'Ориентировочное время диагностики: ' . ($analysisResult['estimated_time'] ?? 60) . ' минут',
+                'Сложность проблемы: ' . ($analysisResult['complexity_level'] ?? 1) . '/10',
+            ],
+            'possible_causes' => $analysisResult['possible_causes'] ?? [],
+            'diagnostic_plan' => $analysisResult['diagnostic_steps'] ?? [],
+            'estimated_costs' => [
+                'diagnostic' => 1500,
+                'work' => $analysisResult['estimated_price'] ?? 3000,
+                'total_parts' => $analysisResult['estimated_price'] ? $analysisResult['estimated_price'] * 2 : 6000,
+                'total' => ($analysisResult['estimated_price'] ?? 3000) * 3,
+                'note' => 'Цены ориентировочные, могут отличаться в зависимости от региона и конкретного сервиса',
+            ],
+            'recommended_actions' => [
+                [
+                    'title' => 'Выполнить первичную диагностику',
+                    'description' => 'Следовать плану диагностики',
+                    'priority' => 'high',
+                ],
+                [
+                    'title' => 'При необходимости - обратиться к эксперту',
+                    'description' => 'Заказать консультацию специалиста',
+                    'priority' => 'medium',
+                ],
+            ],
+        ]);
+        
+        $this->update([
+            'status' => 'report_ready',
+            'analysis_result' => $analysisResult,
+            'price_estimate' => $analysisResult['estimated_price'] ?? 0,
+            'time_estimate' => $analysisResult['estimated_time'] ?? 60,
+        ]);
+    }
+    
+    // Создать базовый отчет если его нет
+    public function createBasicReport(): Report
+{
+    if ($this->reports()->exists()) {
+        return $this->activeReport;
+    }
+    
+    $priceEstimate = is_numeric($this->price_estimate) ? (float) $this->price_estimate : 3000;
+    
+    return $this->reports()->create([
+        'report_type' => 'free',
+        'summary' => [
+            'Диагностика выполнена на основе выбранных симптомов',
+            'Ориентировочное время диагностики: ' . ($this->time_estimate ?? 60) . ' минут',
+            'Сложность проблемы: ' . (($this->analysis_result['complexity_level'] ?? 1) ?: 1) . '/10',
+        ],
+        'possible_causes' => $this->analysis_result['possible_causes'] ?? [
+            'Необходима дополнительная диагностика',
+            'Рекомендуется проверить электронные системы автомобиля',
+        ],
+        'diagnostic_plan' => $this->analysis_result['diagnostic_steps'] ?? [
+            'Считать коды ошибок с помощью диагностического сканера',
+            'Проверить основные датчики системы',
+            'Провести визуальный осмотр моторного отсека',
+        ],
+        'estimated_costs' => [
+            'diagnostic' => 1500,
+            'work' => $priceEstimate,
+            'total_parts' => $priceEstimate * 2,
+            'total' => $priceEstimate * 3,
+            'note' => 'Цены ориентировочные, могут отличаться в зависимости от региона и конкретного сервиса',
+        ],
+        'recommended_actions' => [
+            [
+                'title' => 'Выполнить первичную диагностику',
+                'description' => 'Следовать плану диагностики',
+                'priority' => 'high',
+            ],
+        ],
+    ]);
+}
 }

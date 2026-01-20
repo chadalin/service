@@ -198,9 +198,9 @@
                 <div>
                     <h4 class="font-bold mb-4">Услуги</h4>
                     <ul class="space-y-2 text-sm text-gray-300">
-                        <li><a href="#" class="hover:text-blue-300">Дистанционная диагностика</a></li>
+                        <li><a href="{{ route('home') }}" class="hover:text-blue-300">Дистанционная диагностика</a></li>
                         <li><a href="#" class="hover:text-blue-300">Консультации экспертов</a></li>
-                        <li><a href="#" class="hover:text-blue-300">Для сервисов (B2B)</a></li>
+                        <li><a href="{{ route('services.landing') }}" class="hover:text-blue-300">Для сервисов (B2B)</a></li>
                     </ul>
                 </div>
                 
