@@ -109,7 +109,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         
         // Правила
         Route::get('/rules', [DiagnosticRuleController::class, 'index'])->name('rules.index');
-        Route::get('/rules/create', [DiagnosticRuleController::class, 'create'])->name('rules.create');
+        Route::get('/admin/rules/create', [DiagnosticRuleController::class, 'create'])->name('rules.create');
         Route::post('/rules', [DiagnosticRuleController::class, 'store'])->name('rules.store');
         Route::get('/rules/{rule}/edit', [DiagnosticRuleController::class, 'edit'])->name('rules.edit');
         Route::put('/rules/{rule}', [DiagnosticRuleController::class, 'update'])->name('rules.update');
