@@ -540,6 +540,14 @@
                         <i class="bi bi-diagram-3 me-2"></i>🧩 Правила диагностики
                     </a>
                 </li>
+
+                @if(auth()->check())
+    <li class="nav-item">
+        <a class="nav-link" href="{{ route('diagnostic.ai.search.page') }}">
+            <i class="bi bi-robot me-1"></i> AI поиск
+        </a>
+    </li>
+@endif
                 @if(auth()->user()->is_admin)
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.users.*') ? 'active' : '' }}" 
