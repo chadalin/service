@@ -1,24 +1,14 @@
 <?php
 
-namespace App\Providers;
-
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
 {
-    /**
-     * Register any application services.
-     */
-    public function register(): void
+    public function boot()
     {
-        //
-    }
-
-    /**
-     * Bootstrap any application services.
-     */
-    public function boot(): void
-    {
-        //
+        // Регистрируем функцию для использования в шаблонах
+        \Illuminate\Support\Facades\Blade::directive('getCaseSymptoms', function ($expression) {
+            return "<?php echo getCaseSymptoms($expression); ?>";
+        });
     }
 }

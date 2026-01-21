@@ -11,6 +11,7 @@
         "laravel/framework": "^12.0",
         "laravel/tinker": "^2.10.1",
         "openai-php/client": "^0.18.0",
+        "phpoffice/phpspreadsheet": "*",
         "phpoffice/phpword": "^1.4",
         "setasign/fpdi": "^2.6",
         "smalot/pdfparser": "^2.12",
@@ -30,7 +31,11 @@
             "App\\": "app/",
             "Database\\Factories\\": "database/factories/",
             "Database\\Seeders\\": "database/seeders/"
-        }
+        
+        },
+        "files": [
+            "app/helpers.php"
+        ]
     },
     "autoload-dev": {
         "psr-4": {
@@ -89,4 +94,8 @@
     },
     "minimum-stability": "stable",
     "prefer-stable": true
+
+    
+
+   
 }

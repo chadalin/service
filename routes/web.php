@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProjectInfoController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\ExpertController;
+use App\Http\Controllers\Admin\SymptomImportController;
 
 // Главная посадочная страница (B2C)
 Route::get('/index', [HomeController::class, 'index'])->name('home');
@@ -228,6 +229,8 @@ Route::prefix('diagnostic/consultation')->group(function () {
     Route::get('/', [ConsultationController::class, 'index'])->name('diagnostic.consultation.index');
     Route::get('/{consultation}', [ConsultationController::class, 'showClient'])->name('diagnostic.consultation.show');
     Route::post('/{consultation}/feedback', [ConsultationController::class, 'addFeedback'])->name('diagnostic.consultation.feedback');
+    Route::delete('/{id}/cancel', [ConsultationController::class, 'cancel'])->name('diagnostic.consultation.cancel');
+    
     
     // Экспертные маршруты
     Route::prefix('expert')->group(function () {
@@ -244,6 +247,18 @@ Route::prefix('diagnostic/consultation')->group(function () {
     Route::post('/{consultation}/upload', [ConsultationController::class, 'uploadFile'])->name('diagnostic.consultation.upload');
     Route::get('/{consultation}/messages', [ConsultationController::class, 'getMessages'])->name('diagnostic.consultation.messages');
     Route::post('/{consultation}/read', [ConsultationController::class, 'markAsRead'])->name('diagnostic.consultation.read');
+    
+});
+
+Route::middleware(['auth'])->group(function () {
+    // ... другие маршруты
+    
+    // Чат консультации
+    Route::post('/diagnostic/consultation/{id}/message', [ConsultationController::class, 'sendMessage'])
+        ->name('diagnostic.consultation.message');
+    
+    Route::get('/diagnostic/consultation/{id}/messages', [ConsultationController::class, 'getMessages'])
+        ->name('diagnostic.consultation.messages');
 });
 
 
@@ -259,6 +274,7 @@ Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
         Route::post('/{consultation}/assign', [ConsultationController::class, 'assignExpert'])->name('admin.consultations.assign');
         Route::post('/{consultation}/cancel', [ConsultationController::class, 'cancel'])->name('admin.consultations.cancel');
         Route::get('/statistics', [ConsultationController::class, 'statistics'])->name('admin.consultations.statistics');
+        
     });
     
     Route::prefix('experts')->group(function () {
@@ -320,4 +336,17 @@ Route::middleware('auth')->prefix('api')->group(function () {
             
         return response()->json(['count' => $count]);
     });
+});
+
+
+
+// routes/web.php
+Route::middleware(['auth'])->prefix('admin')->group(function() {
+    // Импорт симптомов и правил
+    Route::get('/symptoms/import', [SymptomImportController::class, 'index'])
+        ->name('admin.symptoms.import.page');
+    Route::post('/symptoms/import', [SymptomImportController::class, 'import'])
+        ->name('admin.symptoms.import');
+    Route::get('/symptoms/import/template', [SymptomImportController::class, 'downloadTemplate'])
+        ->name('admin.symptoms.import.template');
 });

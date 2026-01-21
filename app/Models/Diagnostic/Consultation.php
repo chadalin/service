@@ -3,6 +3,7 @@
 namespace App\Models\Diagnostic;
 
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\SoftDeletes;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
@@ -192,5 +193,10 @@ class Consultation extends Model
     public function scopeScheduled($query)
     {
         return $query->where('status', 'scheduled');
+    }
+
+      public function report(): HasOne
+    {
+        return $this->hasOne(Report::class, 'consultation_id');
     }
 }

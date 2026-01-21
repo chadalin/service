@@ -1,256 +1,367 @@
-@extends('layouts.consultation')
+@extends('layouts.app')
 
-@section('title', 'Мои консультации')
+@section('title', 'Мои диагностические случаи')
 
 @section('content')
-<div class="max-w-7xl mx-auto">
-    <!-- Заголовок и кнопка создания -->
-    <div class="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
-        <div>
-            <h1 class="text-3xl font-bold text-gray-800 mb-2">Мои консультации</h1>
-            <p class="text-gray-600">Управление вашими диагностическими консультациями</p>
-        </div>
-        
-        @php
-            // Ищем активный случай для создания консультации
-            use App\Models\Diagnostic\DiagnosticCase;
-            $activeCase = DiagnosticCase::where('user_id', auth()->id())
-                ->whereIn('status', ['report_ready', 'consultation_pending'])
-                ->latest()
-                ->first();
-        @endphp
-        
-        @if($activeCase)
-            <a href="{{ route('consultation.order.form', ['case' => $activeCase->id]) }}" 
-               class="btn-primary inline-flex items-center">
-                <i class="fas fa-plus-circle mr-2"></i>
-                Новая консультация
-            </a>
-        @else
-            <div class="space-y-2">
-                <a href="{{ route('diagnostic.start') }}" 
-                   class="btn-primary inline-flex items-center">
-                    <i class="fas fa-stethoscope mr-2"></i>
-                    Начать диагностику
-                </a>
-                <p class="text-sm text-gray-500">Сначала создайте диагностический случай</p>
-            </div>
-        @endif
-    </div>
-
-    <!-- Фильтры и статистика -->
-    <div class="grid grid-cols-1 lg:grid-cols-3 gap-6 mb-8">
-        <!-- Статистика -->
-        <div class="bg-white rounded-xl shadow-sm p-6">
-            <h3 class="font-semibold text-gray-700 mb-4">Статистика</h3>
-            <div class="grid grid-cols-2 gap-4">
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-blue-600">{{ $consultations->total() }}</div>
-                    <div class="text-sm text-gray-500">Всего</div>
+<div class="container-fluid py-4">
+    <div class="row">
+        <div class="col-md-3 mb-4">
+            <!-- Фильтр по статусам -->
+            <div class="card">
+                <div class="card-header">
+                    <h6 class="mb-0">Фильтр по статусу</h6>
                 </div>
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-green-600">
-                        {{ $consultations->where('status', 'completed')->count() }}
-                    </div>
-                    <div class="text-sm text-gray-500">Завершено</div>
-                </div>
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-purple-600">
-                        {{ $consultations->where('status', 'in_progress')->count() }}
-                    </div>
-                    <div class="text-sm text-gray-500">В работе</div>
-                </div>
-                <div class="text-center">
-                    <div class="text-2xl font-bold text-yellow-600">
-                        {{ $consultations->where('status', 'pending')->count() }}
-                    </div>
-                    <div class="text-sm text-gray-500">Ожидание</div>
-                </div>
-            </div>
-        </div>
-
-        <!-- Фильтры -->
-        <div class="bg-white rounded-xl shadow-sm p-6 col-span-1 lg:col-span-2">
-            <h3 class="font-semibold text-gray-700 mb-4">Фильтры</h3>
-            <div class="flex flex-wrap gap-2">
-                <a href="?status=all" 
-                   class="px-4 py-2 rounded-full {{ $status == 'all' ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
-                    Все
-                </a>
-                <a href="?status=pending" 
-                   class="px-4 py-2 rounded-full {{ $status == 'pending' ? 'bg-yellow-100 text-yellow-700 border border-yellow-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
-                    Ожидание
-                </a>
-                <a href="?status=scheduled" 
-                   class="px-4 py-2 rounded-full {{ $status == 'scheduled' ? 'bg-blue-100 text-blue-700 border border-blue-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
-                    Запланирована
-                </a>
-                <a href="?status=in_progress" 
-                   class="px-4 py-2 rounded-full {{ $status == 'in_progress' ? 'bg-purple-100 text-purple-700 border border-purple-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
-                    В процессе
-                </a>
-                <a href="?status=completed" 
-                   class="px-4 py-2 rounded-full {{ $status == 'completed' ? 'bg-green-100 text-green-700 border border-green-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
-                    Завершена
-                </a>
-                <a href="?status=cancelled" 
-                   class="px-4 py-2 rounded-full {{ $status == 'cancelled' ? 'bg-red-100 text-red-700 border border-red-300' : 'bg-gray-100 text-gray-700 hover:bg-gray-200' }}">
-                    Отменена
-                </a>
-            </div>
-        </div>
-    </div>
-
-    <!-- Список консультаций -->
-    @if($consultations->count() > 0)
-        <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-            @foreach($consultations as $consultation)
-                <div class="consultation-card p-6">
-                    <div class="flex justify-between items-start mb-4">
-                        <div>
-                            <div class="flex items-center space-x-2 mb-2">
-                                <span class="status-badge status-{{ $consultation->status }}">
-                                    @switch($consultation->status)
-                                        @case('pending') ⏳ Ожидание @break
-                                        @case('scheduled') 📅 Запланирована @break
-                                        @case('in_progress') 🔄 В работе @break
-                                        @case('completed') ✅ Завершена @break
-                                        @case('cancelled') ❌ Отменена @break
-                                    @endswitch
-                                </span>
-                                <span class="type-badge type-{{ $consultation->type }}">
-                                    @switch($consultation->type)
-                                        @case('basic') Базовая @break
-                                        @case('premium') Премиум @break
-                                        @case('expert') Экспертная @break
-                                    @endswitch
-                                </span>
-                            </div>
-                            <h3 class="font-bold text-lg text-gray-800">Консультация #{{ $consultation->id }}</h3>
-                            <p class="text-sm text-gray-600 mt-1">
-                                @if($consultation->case)
-                                    {{ $consultation->case->brand->name ?? '' }} {{ $consultation->case->model->name ?? '' }}
-                                @endif
-                            </p>
-                        </div>
-                        <div class="text-right">
-                            <div class="text-lg font-bold text-gray-800">
-                                {{ number_format($consultation->price, 0) }} ₽
-                            </div>
-                        </div>
-                    </div>
-
-                    <div class="space-y-3 mb-6">
-                        <div class="flex items-center text-sm text-gray-600">
-                            <i class="fas fa-user-tie mr-2 w-5"></i>
-                            <span>
-                                @if($consultation->expert)
-                                    {{ $consultation->expert->name }}
-                                @else
-                                    <span class="text-yellow-600">Эксперт не назначен</span>
-                                @endif
+                <div class="card-body">
+                    <div class="list-group">
+                        <a href="?status=all" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'all' ? 'active' : '' }}">
+                            Все случаи
+                            <span class="badge bg-{{ $status === 'all' ? 'light text-dark' : 'primary' }} rounded-pill">
+                                {{ $statusStats['all'] }}
                             </span>
-                        </div>
-                        
-                        <div class="flex items-center text-sm text-gray-600">
-                            <i class="fas fa-calendar-alt mr-2 w-5"></i>
-                            <span>
-                                Создана: {{ $consultation->created_at->format('d.m.Y') }}
-                            </span>
-                        </div>
-                        
-                        @if($consultation->scheduled_at)
-                            <div class="flex items-center text-sm text-gray-600">
-                                <i class="fas fa-clock mr-2 w-5"></i>
-                                <span>
-                                    Назначена: {{ \Carbon\Carbon::parse($consultation->scheduled_at)->format('d.m.Y H:i') }}
-                                </span>
-                            </div>
-                        @endif
-                    </div>
-
-                    <div class="flex justify-between items-center pt-4 border-t border-gray-100">
-                        <a href="{{ route('diagnostic.consultation.show', $consultation) }}" 
-                           class="text-blue-600 hover:text-blue-800 font-medium inline-flex items-center">
-                            <i class="fas fa-eye mr-1"></i> Подробнее
                         </a>
-                        
-                        @if(in_array($consultation->status, ['pending', 'scheduled']))
-                            <form action="{{ route('diagnostic.consultation.cancel', $consultation) }}" 
-                                  method="POST" 
-                                  onsubmit="return confirm('Вы уверены, что хотите отменить консультацию?')">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="text-red-600 hover:text-red-800 text-sm">
-                                    <i class="fas fa-times mr-1"></i> Отменить
-                                </button>
-                            </form>
-                        @endif
+                        <a href="?status=draft" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'draft' ? 'active' : '' }}">
+                            Черновики
+                            <span class="badge bg-{{ $status === 'draft' ? 'light text-dark' : 'secondary' }} rounded-pill">
+                                {{ $statusStats['draft'] }}
+                            </span>
+                        </a>
+                        <a href="?status=analyzing" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'analyzing' ? 'active' : '' }}">
+                            В анализе
+                            <span class="badge bg-{{ $status === 'analyzing' ? 'light text-dark' : 'info' }} rounded-pill">
+                                {{ $statusStats['analyzing'] }}
+                            </span>
+                        </a>
+                        <a href="?status=report_ready" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'report_ready' ? 'active' : '' }}">
+                            Готовы к консультации
+                            <span class="badge bg-{{ $status === 'report_ready' ? 'light text-dark' : 'success' }} rounded-pill">
+                                {{ $statusStats['report_ready'] }}
+                            </span>
+                        </a>
+                        <a href="?status=consultation_pending" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'consultation_pending' ? 'active' : '' }}">
+                            Ожидают консультации
+                            <span class="badge bg-{{ $status === 'consultation_pending' ? 'light text-dark' : 'warning' }} rounded-pill">
+                                {{ $statusStats['consultation_pending'] }}
+                            </span>
+                        </a>
+                        <a href="?status=consultation_in_progress" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'consultation_in_progress' ? 'active' : '' }}">
+                            Консультация
+                            <span class="badge bg-{{ $status === 'consultation_in_progress' ? 'light text-dark' : 'primary' }} rounded-pill">
+                                {{ $statusStats['consultation_in_progress'] }}
+                            </span>
+                        </a>
+                        <a href="?status=completed" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'completed' ? 'active' : '' }}">
+                            Завершенные
+                            <span class="badge bg-{{ $status === 'completed' ? 'light text-dark' : 'dark' }} rounded-pill">
+                                {{ $statusStats['completed'] }}
+                            </span>
+                        </a>
+                        <a href="?status=archived" 
+                           class="list-group-item list-group-item-action d-flex justify-content-between align-items-center {{ $status === 'archived' ? 'active' : '' }}">
+                            Архив
+                            <span class="badge bg-{{ $status === 'archived' ? 'light text-dark' : 'light text-dark' }} rounded-pill">
+                                {{ $statusStats['archived'] }}
+                            </span>
+                        </a>
                     </div>
                 </div>
-            @endforeach
-        </div>
-
-        <!-- Пагинация -->
-        <div class="mt-8">
-            {{ $consultations->links('vendor.pagination.tailwind') }}
-        </div>
-    @else
-        <!-- Пустой список -->
-        <div class="text-center py-12">
-            <div class="mb-6">
-                <i class="fas fa-comments text-gray-300 text-6xl"></i>
             </div>
-            <h3 class="text-xl font-semibold text-gray-700 mb-2">Консультаций пока нет</h3>
-            <p class="text-gray-600 mb-6 max-w-md mx-auto">
-                У вас еще нет диагностических консультаций. Начните с создания диагностического случая.
-            </p>
-            <a href="{{ route('diagnostic.start') }}" class="btn-primary inline-flex items-center">
-                <i class="fas fa-stethoscope mr-2"></i>
-                Начать диагностику
-            </a>
+            
+            <!-- Быстрые действия -->
+            <div class="card mt-3">
+                <div class="card-header">
+                    <h6 class="mb-0">Быстрые действия</h6>
+                </div>
+                <div class="card-body">
+                    <a href="{{ route('diagnostic.start') }}" class="btn btn-primary w-100 mb-2">
+                        <i class="bi bi-plus-circle me-2"></i>Новая диагностика
+                    </a>
+                    @if($statusStats['report_ready'] > 0)
+                        <a href="?status=report_ready" class="btn btn-success w-100 mb-2">
+                            <i class="bi bi-chat-dots me-2"></i>Заказать консультацию ({{ $statusStats['report_ready'] }})
+                        </a>
+                    @endif
+                </div>
+            </div>
         </div>
-    @endif
+        
+        <div class="col-md-9">
+            <div class="card">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <h5 class="mb-0">
+                        @switch($status)
+                            @case('all') Все диагностические случаи @break
+                            @case('draft') Черновики @break
+                            @case('analyzing') В анализе @break
+                            @case('report_ready') Готовы к консультации @break
+                            @case('consultation_pending') Ожидают консультации @break
+                            @case('consultation_in_progress') Консультации в процессе @break
+                            @case('completed') Завершенные @break
+                            @case('archived') Архив @break
+                            @default Все диагностические случаи
+                        @endswitch
+                        <span class="text-muted ms-2">({{ $consultations->total() }})</span>
+                    </h5>
+                    <div class="dropdown">
+                        <button class="btn btn-outline-secondary btn-sm dropdown-toggle" type="button" 
+                                data-bs-toggle="dropdown" aria-expanded="false">
+                            <i class="bi bi-sort-down"></i> Сортировка
+                        </button>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="?status={{ $status }}&sort=newest">Сначала новые</a></li>
+                            <li><a class="dropdown-item" href="?status={{ $status }}&sort=oldest">Сначала старые</a></li>
+                            <li><a class="dropdown-item" href="?status={{ $status }}&sort=brand">По марке авто</a></li>
+                        </ul>
+                    </div>
+                </div>
+                
+                <div class="card-body">
+                    @if($consultations->count() > 0)
+                        <div class="table-responsive">
+                            <table class="table table-hover">
+                                <thead>
+                                    <tr>
+                                        <th>ID</th>
+                                        <th>Автомобиль</th>
+                                        <th>Год</th>
+                                        <th>Пробег</th>
+                                        <th>Симптомы</th>
+                                        <th>Статус</th>
+                                        <th>Консультация</th>
+                                        <th>Создан</th>
+                                        <th>Действия</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach($consultations as $case)
+                                    @php
+                                        // Получаем активную консультацию для этого кейса
+                                        // Нужно загрузить консультации через with в контроллере
+                                        // Добавьте это в ваш метод контроллера:
+                                        // ->with(['brand', 'model', 'consultations' => function($q) {
+                                        //     $q->with('expert')->latest();
+                                        // }])
+                                        $activeConsultation = $case->consultations->first();
+                                    @endphp
+                                    <tr>
+                                        <td>
+                                            <strong>#{{ substr($case->id, 0, 8) }}</strong>
+                                        </td>
+                                        <td>
+                                            @if($case->brand && $case->model)
+                                                <strong>{{ $case->brand->name }}</strong><br>
+                                                <small>{{ $case->model->name }}</small>
+                                            @else
+                                                <em class="text-muted">Не указан</em>
+                                            @endif
+                                        </td>
+                                        <td>{{ $case->year ?? '—' }}</td>
+                                        <td>
+                                            @if($case->mileage)
+                                                <span class="badge bg-light text-dark">
+                                                    {{ number_format($case->mileage) }} км
+                                                </span>
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
+                                        <td>
+                                            @php
+                                                $caseSymptoms = getCaseSymptoms($case->symptoms ?? []);
+                                            @endphp
+                                            @if(count($caseSymptoms) > 0)
+                                                <span class="badge bg-light text-dark" 
+                                                      data-bs-toggle="tooltip" 
+                                                      title="{{ implode(', ', $caseSymptoms) }}">
+                                                    {{ count($caseSymptoms) }} симптомов
+                                                </span>
+                                            @else
+                                                —
+                                            @endif
+                                        </td>
+                                        <td>
+                                            @php
+                                                $statusColors = [
+                                                    'draft' => 'secondary',
+                                                    'analyzing' => 'info',
+                                                    'report_ready' => 'success',
+                                                    'consultation_pending' => 'warning',
+                                                    'consultation_in_progress' => 'primary',
+                                                    'completed' => 'dark',
+                                                    'archived' => 'light'
+                                                ];
+                                                $statusLabels = [
+                                                    'draft' => 'Черновик',
+                                                    'analyzing' => 'Анализ',
+                                                    'report_ready' => 'Готов к консультации',
+                                                    'consultation_pending' => 'Ожидает консультации',
+                                                    'consultation_in_progress' => 'Консультация',
+                                                    'completed' => 'Завершен',
+                                                    'archived' => 'Архив'
+                                                ];
+                                            @endphp
+                                            <span class="badge bg-{{ $statusColors[$case->status] ?? 'secondary' }}">
+                                                {{ $statusLabels[$case->status] ?? $case->status }}
+                                            </span>
+                                        </td>
+                                        <td>
+                                            @if($activeConsultation)
+                                                @php
+                                                    $consultationStatusColors = [
+                                                        'pending' => 'warning',
+                                                        'scheduled' => 'info',
+                                                        'in_progress' => 'success',
+                                                        'completed' => 'secondary',
+                                                        'cancelled' => 'danger'
+                                                    ];
+                                                    $consultationStatusLabels = [
+                                                        'pending' => 'Ожидает оплаты',
+                                                        'scheduled' => 'Запланирована',
+                                                        'in_progress' => 'В процессе',
+                                                        'completed' => 'Завершена',
+                                                        'cancelled' => 'Отменена'
+                                                    ];
+                                                @endphp
+                                                <div class="d-flex flex-column">
+                                                    <a href="{{ route('diagnostic.consultation.show', $activeConsultation->id) }}" 
+                                                       class="btn btn-sm btn-outline-primary mb-1">
+                                                        <i class="bi bi-chat-left-text me-1"></i> Чат
+                                                    </a>
+                                                    <small class="text-muted">
+                                                        <span class="badge bg-{{ $consultationStatusColors[$activeConsultation->status] ?? 'secondary' }}">
+                                                            {{ $consultationStatusLabels[$activeConsultation->status] ?? $activeConsultation->status }}
+                                                        </span>
+                                                        @if($activeConsultation->expert)
+                                                            <br><small>Эксперт: {{ $activeConsultation->expert->name }}</small>
+                                                        @endif
+                                                    </small>
+                                                </div>
+                                            @elseif($case->status === 'report_ready')
+                                                <a href="{{ route('consultation.order.form', ['case' => $case->id]) }}" 
+                                                   class="btn btn-sm btn-outline-warning">
+                                                    <i class="bi bi-chat-dots me-1"></i> Заказать
+                                                </a>
+                                            @elseif($case->consultations && $case->consultations->isNotEmpty())
+                                                @php
+                                                    $lastConsultation = $case->consultations->first();
+                                                @endphp
+                                                <a href="{{ route('diagnostic.consultation.show', $lastConsultation->id) }}" 
+                                                   class="btn btn-sm btn-outline-secondary">
+                                                    <i class="bi bi-clock-history me-1"></i> История
+                                                </a>
+                                            @else
+                                                <span class="text-muted">—</span>
+                                            @endif
+                                        </td>
+                                        <td>{{ $case->created_at->format('d.m.Y') }}</td>
+                                        <td>
+                                            <div class="btn-group btn-group-sm">
+                                                <a href="{{ route('diagnostic.result', $case->id) }}" 
+                                                   class="btn btn-outline-info" 
+                                                   title="Просмотр отчета"
+                                                   data-bs-toggle="tooltip">
+                                                    <i class="bi bi-eye"></i>
+                                                </a>
+                                                
+                                                @if(in_array($case->status, ['report_ready', 'consultation_pending']))
+                                                    <a href="{{ route('consultation.order.form', ['case' => $case->id]) }}" 
+                                                       class="btn btn-outline-primary" 
+                                                       title="Заказать консультацию"
+                                                       data-bs-toggle="tooltip">
+                                                        <i class="bi bi-chat-dots"></i>
+                                                    </a>
+                                                @endif
+                                                
+                                                @if($case->status === 'draft')
+                                                    <a href="#" 
+                                                       class="btn btn-outline-warning" 
+                                                       title="Продолжить заполнение"
+                                                       data-bs-toggle="tooltip">
+                                                        <i class="bi bi-pencil"></i>
+                                                    </a>
+                                                @endif
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    @endforeach
+                                </tbody>
+                            </table>
+                        </div>
+                        
+                        <!-- Пагинация -->
+                        <div class="mt-3">
+                            {{ $consultations->links('vendor.pagination.simple-bootstrap-4') }}
+                        </div>
+                        
+                    @else
+                        <div class="text-center py-5">
+                            <div class="mb-3">
+                                @switch($status)
+                                    @case('draft')
+                                        <i class="bi bi-clipboard text-muted" style="font-size: 3rem;"></i>
+                                        <h5 class="text-muted mt-3">Черновиков нет</h5>
+                                        <p class="text-muted mb-4">Создайте новый диагностический случай</p>
+                                        @break
+                                    @case('report_ready')
+                                        <i class="bi bi-check-circle text-muted" style="font-size: 3rem;"></i>
+                                        <h5 class="text-muted mt-3">Нет готовых к консультации случаев</h5>
+                                        <p class="text-muted mb-4">Дождитесь завершения анализа текущих случаев</p>
+                                        @break
+                                    @case('consultation_in_progress')
+                                        <i class="bi bi-chat-dots text-muted" style="font-size: 3rem;"></i>
+                                        <h5 class="text-muted mt-3">Активных консультаций нет</h5>
+                                        <p class="text-muted mb-4">Закажите консультацию для готовых случаев</p>
+                                        @break
+                                    @default
+                                        <i class="bi bi-clipboard-x text-muted" style="font-size: 3rem;"></i>
+                                        <h5 class="text-muted mt-3">Диагностических случаев нет</h5>
+                                        <p class="text-muted mb-4">Создайте новый диагностический случай</p>
+                                @endswitch
+                            </div>
+                            <a href="{{ route('diagnostic.start') }}" class="btn btn-primary">
+                                <i class="bi bi-plus-circle me-2"></i>Создать диагностику
+                            </a>
+                        </div>
+                    @endif
+                </div>
+            </div>
+        </div>
+    </div>
 </div>
+@endsection
+
+@push('styles')
+<style>
+    .list-group-item.active {
+        background-color: #0d6efd;
+        border-color: #0d6efd;
+    }
+    
+    .table td {
+        vertical-align: middle;
+    }
+    
+    .btn-group-sm .btn {
+        padding: 0.25rem 0.5rem;
+        font-size: 0.875rem;
+    }
+</style>
+@endpush
 
 @push('scripts')
 <script>
-    // Автоматическое обновление статусов
-    document.addEventListener('DOMContentLoaded', function() {
-        // Автоматически скрываем алерты через 5 секунд
-        setTimeout(() => {
-            document.querySelectorAll('.bg-green-50, .bg-red-50, .bg-blue-50').forEach(alert => {
-                alert.style.transition = 'opacity 0.5s';
-                alert.style.opacity = '0';
-                setTimeout(() => alert.remove(), 500);
-            });
-        }, 5000);
-
-        // Обновление уведомлений каждые 30 секунд
-        function updateNotificationCount() {
-            fetch('/api/consultations/unread-count')
-                .then(response => response.json())
-                .then(data => {
-                    const badge = document.querySelector('a[href*="consultation"] .bg-red-500');
-                    if (data.unread_count > 0) {
-                        if (!badge) {
-                            const link = document.querySelector('a[href*="consultation"]');
-                            const newBadge = document.createElement('span');
-                            newBadge.className = 'absolute -top-1 -right-1 bg-red-500 text-white text-xs rounded-full w-5 h-5 flex items-center justify-center';
-                            newBadge.textContent = data.unread_count;
-                            link.appendChild(newBadge);
-                        } else if (badge.textContent != data.unread_count) {
-                            badge.textContent = data.unread_count;
-                        }
-                    } else if (badge) {
-                        badge.remove();
-                    }
-                });
-        }
-
-        // Обновляем каждые 30 секунд
-        setInterval(updateNotificationCount, 30000);
+document.addEventListener('DOMContentLoaded', function() {
+    // Инициализация тултипов
+    var tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
+    var tooltipList = tooltipTriggerList.map(function (tooltipTriggerEl) {
+        return new bootstrap.Tooltip(tooltipTriggerEl);
     });
+});
 </script>
 @endpush
-@endsection

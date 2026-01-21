@@ -59,127 +59,97 @@ class SearchController extends Controller
     }
     
     public function search(Request $request)
-{
-    $request->validate([
-        'query' => 'required|string|max:1000',
-        'brand_id' => 'nullable|integer',
-        'car_model_id' => 'nullable|integer',
-    ]);
-
-    $startTime = microtime(true);
-    $query = $request->input('query');
-    $brandId = $request->input('brand_id');
-    $modelId = $request->input('car_model_id');
-
-    // Поиск симптомов по описанию
-    $symptoms = Symptom::where('is_active', true)
-        ->where(function($q) use ($query) {
-            $q->where('name', 'like', "%{$query}%")
-              ->orWhere('description', 'like', "%{$query}%");
-        })
-        ->with(['rules' => function($q) use ($brandId, $modelId) {
-            $q->where('is_active', true);
+    {
+        try {
+            $startTime = microtime(true);
             
-            if ($brandId) {
-                $q->where('brand_id', $brandId);
+            Log::info('Search request:', $request->all());
+            
+            $request->validate([
+                'query' => 'required|string|min:2',
+                'brand_id' => 'nullable|exists:brands,id',
+                'car_model_id' => 'nullable|exists:car_models,id',
+                'category_id' => 'nullable|exists:repair_categories,id',
+                'search_type' => 'nullable|in:simple,semantic,all'
+            ]);
+            
+            // Получаем тип поиска
+            $searchType = $request->get('search_type', 'simple');
+            
+            // Анализируем запрос
+            $queryAnalysis = $this->chatService->processQuery($request->query);
+            
+            Log::info('Query analysis:', $queryAnalysis);
+            
+            $results = collect([]);
+            
+            // Простой поиск (полнотекстовый)
+            if (in_array($searchType, ['simple', 'all'])) {
+                $simpleResults = $this->simpleSearch(
+                    $request->query,
+                    $request->car_model_id,
+                    $request->category_id,
+                    $request->brand_id
+                );
+                $results = $results->merge($simpleResults);
             }
             
-            if ($modelId) {
-                $q->where('model_id', $modelId);
+            // Семантический поиск
+            if (in_array($searchType, ['semantic', 'all'])) {
+                $semanticResults = $this->semanticEngine->semanticSearch(
+                    $request->query,
+                    $request->car_model_id,
+                    $request->category_id
+                );
+                $results = $results->merge($semanticResults);
             }
             
-            $q->with(['brand', 'model']);
-        }])
-        ->get();
-
-    // Формируем результаты с правилами
-    $results = [];
-    foreach ($symptoms as $symptom) {
-        if ($symptom->rules->isEmpty()) {
-            // Если нет конкретных правил, добавляем общую информацию
-            $results[] = [
-                'type' => 'symptom',
-                'id' => $symptom->id,
-                'title' => $symptom->name,
-                'description' => $symptom->description,
-                'relevance_score' => 0.9,
-                'has_rules' => false,
-                'rules_count' => 0,
-            ];
-        } else {
-            // Добавляем симптом с правилами
-            foreach ($symptom->rules as $rule) {
-                $results[] = [
-                    'type' => 'rule',
-                    'id' => $rule->id,
-                    'symptom_id' => $symptom->id,
-                    'title' => $symptom->name,
-                    'description' => $symptom->description,
-                    'brand' => $rule->brand->name ?? null,
-                    'model' => $rule->model->name ?? null,
-                    'diagnostic_steps' => $rule->diagnostic_steps,
-                    'possible_causes' => $rule->possible_causes,
-                    'required_data' => $rule->required_data,
-                    'complexity_level' => $rule->complexity_level,
-                    'estimated_time' => $rule->estimated_time,
-                    'consultation_price' => $rule->base_consultation_price,
-                    'relevance_score' => 0.8,
-                ];
+            // Убираем дубликаты и сортируем
+            $results = $results->unique('id')->sortByDesc('relevance_score')->values();
+            
+            $executionTime = round(microtime(true) - $startTime, 4);
+            
+            // Логируем запрос
+            if (Schema::hasTable('search_queries')) {
+                SearchQuery::create([
+                    'query' => $request->query,
+                    'result_count' => $results->count(),
+                    'user_id' => auth()->id(),
+                    'user_ip' => request()->ip(),
+                    'user_agent' => request()->userAgent(),
+                    'execution_time' => $executionTime,
+                    'successful' => true,
+                    'filters' => json_encode($request->only(['brand_id', 'car_model_id', 'category_id'])),
+                    'car_model_id' => $request->car_model_id,
+                    'brand_id' => $request->brand_id,
+                    'category_id' => $request->category_id,
+                    'search_type' => $searchType,
+                ]);
             }
+            
+            return response()->json([
+                'success' => true,
+                'query_analysis' => $queryAnalysis,
+                'results' => $results,
+                'count' => $results->count(),
+                'execution_time' => $executionTime,
+                'search_type' => $searchType,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Search error: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка поиска: ' . $e->getMessage(),
+                'error' => env('APP_DEBUG') ? $e->getTraceAsString() : null
+            ], 500);
         }
     }
-     // Генерируем AI-ответ на основе найденных симптомов
-    $aiResponse = $this->generateAIResponse($query, $symptoms);
-
-    $executionTime = round((microtime(true) - $startTime) * 1000, 2);
-
-    return response()->json([
-        'success' => true,
-        'query' => $query,
-        'count' => count($results),
-        'results' => $results,
-        'ai_response' => $aiResponse,
-        'search_type' => 'symptom_search',
-        'execution_time' => $executionTime,
-    ]);
-}
     
-
-private function generateAIResponse($query, $symptoms)
-{
-    if ($symptoms->isEmpty()) {
-        return "По вашему запросу \"{$query}\" не найдено подходящих симптомов в базе данных. Попробуйте описать проблему другими словами или обратитесь к специалисту для индивидуальной диагностики.";
-    }
-
-    $response = "На основе вашего запроса \"{$query}\" найдено {$symptoms->count()} возможных проблем:\n\n";
-    
-    foreach ($symptoms as $index => $symptom) {
-        $rulesCount = $symptom->rules->count();
-        $response .= ($index + 1) . ". **{$symptom->name}**\n";
-        $response .= "   {$symptom->description}\n";
-        
-        if ($rulesCount > 0) {
-            $response .= "   Найдено {$rulesCount} правил диагностики для этой проблемы.\n";
-            
-            // Добавляем краткую информацию о правилах
-            $uniqueBrands = $symptom->rules->pluck('brand.name')->filter()->unique()->take(3);
-            if ($uniqueBrands->isNotEmpty()) {
-                $response .= "   Доступно для марок: " . $uniqueBrands->implode(', ') . "\n";
-            }
-        }
-        
-        $response .= "\n";
-    }
-
-    $response .= "\n**Рекомендации:**\n";
-    $response .= "1. Для точной диагностики укажите марку и модель автомобиля\n";
-    $response .= "2. Ознакомьтесь с возможными причинами и шагами диагностики\n";
-    $response .= "3. При необходимости закажите консультацию специалиста\n";
-
-    return $response;
-}
-
-
     /**
      * Простой поиск (альтернатива без OpenAI)
      */
