@@ -35,12 +35,19 @@
         resize: vertical;
         min-height: 120px;
         font-size: 1rem;
+        line-height: 1.5;
     }
     
     .search-btn {
         height: 56px;
         font-size: 1.1rem;
         font-weight: 600;
+        transition: all 0.3s ease;
+    }
+    
+    .search-btn:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
     }
     
     .advanced-search {
@@ -83,20 +90,122 @@
         border-left: 5px solid #4CAF50;
         transition: all 0.3s ease;
         margin-bottom: 1rem;
+        overflow: hidden;
     }
     
     .result-card:hover {
         transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
+        box-shadow: 0 5px 20px rgba(0,0,0,0.12);
     }
     
     .result-card.symptom-only {
         border-left-color: #FF9800;
     }
     
+    .result-card.rule-match {
+        border-left-color: #2196F3;
+    }
+    
     .relevance-badge {
         font-size: 0.9rem;
         padding: 0.25rem 0.75rem;
+    }
+    
+    /* Стили раскрывающихся списков */
+    .expandable-list {
+        max-height: 150px;
+        overflow: hidden;
+        transition: max-height 0.3s ease;
+        position: relative;
+    }
+    
+    .expandable-list.expanded {
+        max-height: 1000px;
+    }
+    
+    .expandable-list:not(.expanded)::after {
+        content: '';
+        position: absolute;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        height: 40px;
+        background: linear-gradient(to top, rgba(255,255,255,0.9), transparent);
+        pointer-events: none;
+    }
+    
+    .expand-btn {
+        background: none;
+        border: none;
+        color: #007bff;
+        cursor: pointer;
+        font-size: 0.9rem;
+        padding: 0.25rem 0.5rem;
+        margin-top: 0.5rem;
+        display: inline-flex;
+        align-items: center;
+        gap: 0.25rem;
+        transition: color 0.2s;
+    }
+    
+    .expand-btn:hover {
+        color: #0056b3;
+        text-decoration: underline;
+    }
+    
+    .expand-btn i {
+        transition: transform 0.3s ease;
+    }
+    
+    .expand-btn.expanded i {
+        transform: rotate(180deg);
+    }
+    
+    /* Стили для списков */
+    .diagnostic-list {
+        list-style: none;
+        padding-left: 0;
+        margin-bottom: 0;
+    }
+    
+    .diagnostic-list li {
+        padding: 0.5rem 0;
+        position: relative;
+        padding-left: 1.5rem;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .diagnostic-list li:last-child {
+        border-bottom: none;
+    }
+    
+    .diagnostic-list li:before {
+        content: '✓';
+        position: absolute;
+        left: 0;
+        color: #28a745;
+        font-weight: bold;
+    }
+    
+    .causes-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        margin-bottom: 0;
+    }
+    
+    .cause-badge {
+        background: #e3f2fd;
+        color: #1565c0;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+        transition: all 0.2s;
+    }
+    
+    .cause-badge:hover {
+        background: #bbdefb;
+        transform: scale(1.05);
     }
     
     /* Стили статистики */
@@ -145,59 +254,85 @@
         to { opacity: 1; transform: translateY(0); }
     }
     
-    /* Стили для списков */
-    .diagnostic-list {
-        list-style: none;
-        padding-left: 0;
-        margin-bottom: 0;
-    }
-    
-    .diagnostic-list li {
-        padding: 0.25rem 0;
-        position: relative;
-        padding-left: 1.5rem;
-    }
-    
-    .diagnostic-list li:before {
-        content: '✓';
-        position: absolute;
-        left: 0;
-        color: #28a745;
-        font-weight: bold;
-    }
-    
-    /* Стили для загрузки */
+    /* Загрузка */
     .loading-overlay {
         position: absolute;
         top: 0;
         left: 0;
         right: 0;
         bottom: 0;
-        background: rgba(255,255,255,0.9);
+        background: rgba(255,255,255,0.95);
         display: flex;
         align-items: center;
         justify-content: center;
         z-index: 1000;
         border-radius: 12px;
+        backdrop-filter: blur(2px);
+    }
+    
+    /* Группировка по брендам */
+    .brand-group {
+        margin-bottom: 1.5rem;
+        border: 1px solid #dee2e6;
+        border-radius: 8px;
+        overflow: hidden;
+    }
+    
+    .brand-group-header {
+        background: #f8f9fa;
+        padding: 1rem;
+        border-bottom: 1px solid #dee2e6;
+        font-weight: 600;
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+    }
+    
+    .brand-group-count {
+        background: #007bff;
+        color: white;
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
     }
     
     /* Кастомный скроллбар */
     .custom-scrollbar::-webkit-scrollbar {
-        width: 6px;
+        width: 8px;
     }
     
     .custom-scrollbar::-webkit-scrollbar-track {
         background: #f1f1f1;
-        border-radius: 3px;
+        border-radius: 4px;
     }
     
     .custom-scrollbar::-webkit-scrollbar-thumb {
         background: #888;
-        border-radius: 3px;
+        border-radius: 4px;
     }
     
     .custom-scrollbar::-webkit-scrollbar-thumb:hover {
         background: #555;
+    }
+    
+    /* Соответствие ключевых слов */
+    .matched-keywords {
+        background: #fff3cd;
+        border-left: 3px solid #ffc107;
+        padding: 0.5rem;
+        margin: 0.5rem 0;
+        border-radius: 0 4px 4px 0;
+    }
+    
+    .keyword-tag {
+        background: #ffc107;
+        color: #856404;
+        padding: 0.15rem 0.5rem;
+        border-radius: 3px;
+        font-size: 0.8rem;
+        margin-right: 0.25rem;
+        display: inline-block;
+        margin-bottom: 0.25rem;
     }
 </style>
 @endpush
@@ -295,6 +430,7 @@
                                     disabled>
                                 <option value="">Сначала выберите марку</option>
                             </select>
+                            <div class="form-text small">Оставьте пустым для поиска по всем моделям</div>
                         </div>
                     </div>
 
@@ -408,6 +544,9 @@
                         <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
                         <h5 class="text-primary">AI анализирует запрос...</h5>
                         <p class="text-muted">Ищем симптомы и правила диагностики</p>
+                        <div class="progress mt-3" style="width: 200px; height: 6px;">
+                            <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -415,7 +554,7 @@
             <div class="card-footer">
                 <small class="text-muted">
                     <i class="bi bi-lightbulb me-1"></i>
-                    <strong>Совет:</strong> Чем подробнее описание, тем точнее AI-анализ
+                    <strong>Совет:</strong> Используйте ключевые слова для более точного поиска
                 </small>
             </div>
         </div>
@@ -430,7 +569,7 @@
                 </h5>
                 <div>
                     <span class="badge bg-secondary me-2" id="resultsStats">Ожидание запроса</span>
-                    <button class="btn btn-sm btn-outline-primary" id="refreshBtn" onclick="refreshResults()">
+                    <button class="btn btn-sm btn-outline-primary" id="refreshBtn" onclick="refreshResults()" title="Обновить">
                         <i class="bi bi-arrow-clockwise"></i>
                     </button>
                 </div>
@@ -457,6 +596,23 @@
                                     • {{ $stats['rules_count'] }} правил диагностики<br>
                                     • {{ $stats['brands_count'] }} марок автомобилей
                                 </div>
+                            </div>
+                        </div>
+                        <div class="mt-4">
+                            <h6>🎯 Примеры поиска:</h6>
+                            <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="setExample('не заводится двигатель')">
+                                    не заводится двигатель
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="setExample('стук в двигателе')">
+                                    стук в двигателе
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="setExample('горит check engine')">
+                                    горит check engine
+                                </button>
+                                <button type="button" class="btn btn-sm btn-outline-primary" onclick="setExample('плохо греет печка')">
+                                    плохо греет печка
+                                </button>
                             </div>
                         </div>
                     </div>
@@ -488,6 +644,7 @@ let allModels = @json($models);
 let currentSearchData = null;
 let isLoading = false;
 let currentResults = [];
+let expandedItems = new Set();
 
 document.addEventListener('DOMContentLoaded', function() {
     console.log('AI Search page loaded');
@@ -630,6 +787,7 @@ async function performAISearch() {
     
     // Сохраняем текущие параметры
     currentSearchData = searchParams;
+    expandedItems.clear(); // Сбрасываем раскрытые элементы
     
     // Показываем состояние загрузки
     resultsDiv.innerHTML = `
@@ -637,7 +795,7 @@ async function performAISearch() {
             <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
             <h4 class="text-primary">AI анализирует проблему...</h4>
             <p class="text-muted">Ищем симптомы и правила диагностики</p>
-            <div class="progress mt-3" style="height: 6px;">
+            <div class="progress mt-3" style="height: 6px; width: 300px; margin: 0 auto;">
                 <div class="progress-bar progress-bar-striped progress-bar-animated" style="width: 100%"></div>
             </div>
         </div>
@@ -656,57 +814,68 @@ async function performAISearch() {
             body: JSON.stringify(searchParams)
         });
         
+        const data = await response.json();
+        
         if (!response.ok) {
-            throw new Error(`HTTP error! status: ${response.status}`);
+            throw new Error(data.message || `HTTP error! status: ${response.status}`);
         }
         
-        const data = await response.json();
+        if (!data.success) {
+            throw new Error(data.message || 'Ошибка сервера');
+        }
+        
         console.log('AI Search response:', data);
         
-        if (data.success) {
-            currentResults = data.results || [];
-            displayAIResults(data);
-            
-            // Обновляем статистику в футере
-            if (searchInfo) {
-                searchInfo.innerHTML = `
-                    Найдено за ${data.execution_time || '0'} мс. | 
-                    Симптомов: ${data.stats?.symptoms_found || 0} | 
-                    Правил: ${data.stats?.rules_found || 0}
-                `;
-            }
-            
-            // Показываем футер
-            resultsFooter.classList.remove('d-none');
-            
-            // Обновляем счетчик
-            const resultsStats = document.getElementById('resultsStats');
-            if (resultsStats) {
-                resultsStats.textContent = `Найдено: ${data.count}`;
-                resultsStats.className = data.count > 0 ? 'badge bg-success' : 'badge bg-secondary';
-            }
-            
-            // Показываем уведомление
-            showToast(`AI нашел ${data.count} результатов`, 'success');
-            
-        } else {
-            throw new Error(data.message || 'Ошибка AI поиска');
+        currentResults = data.results || [];
+        displayAIResults(data);
+        
+        // Обновляем статистику в футере
+        if (searchInfo) {
+            const time = data.execution_time || '0';
+            const found = data.stats?.symptoms_found || 0;
+            const rules = data.stats?.rules_found || 0;
+            searchInfo.innerHTML = `
+                Найдено за ${time} мс | Симптомов: ${found} | Правил: ${rules}
+            `;
         }
+        
+        // Показываем футер
+        resultsFooter.classList.remove('d-none');
+        
+        // Обновляем счетчик
+        const resultsStats = document.getElementById('resultsStats');
+        if (resultsStats) {
+            const count = data.count || currentResults.length || 0;
+            resultsStats.textContent = `Найдено: ${count}`;
+            resultsStats.className = count > 0 ? 'badge bg-success' : 'badge bg-secondary';
+        }
+        
+        // Показываем уведомление
+        const count = data.count || 0;
+        showToast(`AI нашел ${count} результатов`, 'success');
+        
     } catch (error) {
         console.error('AI Search error:', error);
+        
+        let errorMessage = error.message;
+        if (errorMessage.includes('422')) {
+            errorMessage = 'Ошибка валидации. Проверьте параметры поиска.';
+        } else if (errorMessage.includes('500')) {
+            errorMessage = 'Ошибка сервера. Попробуйте позже.';
+        }
         
         resultsDiv.innerHTML = `
             <div class="text-center py-5">
                 <i class="bi bi-exclamation-triangle display-1 text-danger mb-3"></i>
                 <h4 class="text-danger mb-3">Ошибка AI-поиска</h4>
-                <p class="text-muted">${error.message}</p>
+                <p class="text-muted">${errorMessage}</p>
                 <button class="btn btn-primary mt-2" onclick="performAISearch()">
                     <i class="bi bi-arrow-clockwise me-1"></i>Повторить
                 </button>
             </div>
         `;
         
-        showToast(`Ошибка: ${error.message}`, 'danger');
+        showToast(`Ошибка: ${errorMessage}`, 'danger');
     } finally {
         // Восстанавливаем UI
         isLoading = false;
@@ -721,7 +890,7 @@ async function performAISearch() {
 function displayAIResults(data) {
     const resultsDiv = document.getElementById('searchResults');
     
-    if (!data || !data.results) {
+    if (!data || (!data.results && !data.ai_response)) {
         resultsDiv.innerHTML = `
             <div class="text-center py-5">
                 <i class="bi bi-inbox display-1 text-muted mb-3"></i>
@@ -732,26 +901,10 @@ function displayAIResults(data) {
         return;
     }
 
-    const results = Array.isArray(data.results) ? data.results : [];
+    const results = data.results || [];
     const count = data.count || results.length;
+    const isGrouped = data.search_type === 'advanced' && document.getElementById('group_by_brand')?.checked;
     
-    if (count === 0) {
-        resultsDiv.innerHTML = `
-            <div class="text-center py-5">
-                <i class="bi bi-search display-1 text-muted mb-3"></i>
-                <h4 class="text-muted mb-3">Ничего не найдено</h4>
-                <p class="text-muted">
-                    AI не смог найти подходящих симптомов.<br>
-                    Попробуйте:
-                    • Изменить формулировку<br>
-                    • Убрать фильтры марки/модели<br>
-                    • Использовать другие ключевые слова
-                </p>
-            </div>
-        `;
-        return;
-    }
-
     let html = '';
     
     // AI ответ
@@ -776,12 +929,39 @@ function displayAIResults(data) {
         `;
     }
     
+    if (count === 0) {
+        html += `
+            <div class="text-center py-5">
+                <i class="bi bi-search display-1 text-muted mb-3"></i>
+                <h4 class="text-muted mb-3">Ничего не найдено</h4>
+                <p class="text-muted">
+                    AI не смог найти подходящих симптомов.<br>
+                    Попробуйте:
+                    • Изменить формулировку<br>
+                    • Убрать фильтры марки/модели<br>
+                    • Использовать другие ключевые слова
+                </p>
+            </div>
+        `;
+        
+        resultsDiv.innerHTML = html;
+        return;
+    }
+    
     // Результаты
     html += `<h5 class="mb-3">Найдено решений: <span class="badge bg-primary">${count}</span></h5>`;
     
-    results.forEach((item, index) => {
-        html += createResultCard(item, index);
-    });
+    if (isGrouped && typeof results === 'object' && !Array.isArray(results)) {
+        // Группированные результаты
+        Object.values(results).forEach((group, groupIndex) => {
+            html += createBrandGroup(group, groupIndex);
+        });
+    } else {
+        // Обычные результаты
+        results.forEach((item, index) => {
+            html += createResultCard(item, index);
+        });
+    }
     
     resultsDiv.innerHTML = html;
     
@@ -789,29 +969,27 @@ function displayAIResults(data) {
     initTooltips();
 }
 
-// Форматирование AI ответа
-function formatAIResponse(response) {
-    // Заменяем маркеры на эмодзи и форматирование
-    let formatted = response
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/🔍/g, '<i class="bi bi-search text-warning"></i>')
-        .replace(/🤖/g, '<i class="bi bi-robot text-info"></i>')
-        .replace(/🔧/g, '<i class="bi bi-tools text-primary"></i>')
-        .replace(/🚗/g, '<i class="bi bi-car-front text-success"></i>')
-        .replace(/⚠️/g, '<i class="bi bi-exclamation-triangle text-warning"></i>')
-        .replace(/⏱️/g, '<i class="bi bi-clock text-secondary"></i>')
-        .replace(/💰/g, '<i class="bi bi-cash text-success"></i>')
-        .replace(/📊/g, '<i class="bi bi-graph-up text-info"></i>')
-        .replace(/🎯/g, '<i class="bi bi-bullseye text-danger"></i>')
-        .replace(/💡/g, '<i class="bi bi-lightbulb text-warning"></i>')
-        .replace(/\n/g, '<br>');
-    
-    return formatted;
+// Создание группы по бренду
+function createBrandGroup(group, groupIndex) {
+    return `
+        <div class="brand-group fade-in" style="animation-delay: ${groupIndex * 0.1}s">
+            <div class="brand-group-header">
+                <span>${group.brand}</span>
+                <span class="brand-group-count">${group.count}</span>
+            </div>
+            <div class="p-3">
+                ${group.results.map((item, index) => createResultCard(item, index)).join('')}
+            </div>
+        </div>
+    `;
 }
 
 // Создание карточки результата
 function createResultCard(item, index) {
     const relevancePercent = Math.min(100, Math.round((item.relevance_score || 0.5) * 100));
+    const itemId = `result-${item.type}-${item.id}-${index}`;
+    const isExpanded = expandedItems.has(itemId);
+    
     let relevanceColor = 'secondary';
     let relevanceIcon = 'bi-circle';
     
@@ -826,9 +1004,18 @@ function createResultCard(item, index) {
         relevanceIcon = 'bi-exclamation-circle';
     }
     
+    // Определяем тип карточки
+    let cardTypeClass = '';
+    if (item.type === 'symptom' && !item.has_rules) {
+        cardTypeClass = 'symptom-only';
+    } else if (item.type === 'rule') {
+        cardTypeClass = 'rule-match';
+    }
+    
     let html = `
-        <div class="card result-card ${item.type === 'symptom' && !item.has_rules ? 'symptom-only' : ''} mb-3 fade-in" 
-             style="animation-delay: ${index * 0.1}s">
+        <div class="card result-card ${cardTypeClass} mb-3 fade-in" 
+             style="animation-delay: ${index * 0.1}s"
+             id="${itemId}">
             <div class="card-body">
                 <div class="d-flex justify-content-between align-items-start mb-3">
                     <div class="flex-grow-1">
@@ -838,10 +1025,20 @@ function createResultCard(item, index) {
                                 '<i class="bi bi-exclamation-triangle text-warning me-2"></i>'}
                             ${item.title}
                         </h6>
+                        
                         ${item.description ? `
                             <p class="card-text text-muted small mb-2">
                                 ${item.description}
                             </p>
+                        ` : ''}
+                        
+                        ${item.matched_keywords && item.matched_keywords.length > 0 ? `
+                            <div class="matched-keywords small mt-2">
+                                <span class="text-muted me-2">Совпадения:</span>
+                                ${item.matched_keywords.map(keyword => 
+                                    `<span class="keyword-tag">${keyword}</span>`
+                                ).join('')}
+                            </div>
                         ` : ''}
                     </div>
                     <span class="badge relevance-badge bg-${relevanceColor} ms-2">
@@ -877,31 +1074,70 @@ function createResultCard(item, index) {
     
     // Диагностические шаги
     if (item.diagnostic_steps && Array.isArray(item.diagnostic_steps) && item.diagnostic_steps.length > 0) {
-        const steps = item.diagnostic_steps.slice(0, 3);
+        const steps = item.diagnostic_steps;
+        const showSteps = 3;
+        const shouldExpand = steps.length > showSteps;
+        const isStepsExpanded = isExpanded || !shouldExpand;
+        
         html += `
             <div class="mb-3">
-                <small class="text-muted d-block mb-1"><strong>Шаги диагностики:</strong></small>
-                <ul class="diagnostic-list small">
-                    ${steps.map(step => `<li>${step}</li>`).join('')}
-                    ${item.diagnostic_steps.length > 3 ? 
-                        `<li class="text-muted">... и еще ${item.diagnostic_steps.length - 3} шагов</li>` : ''}
-                </ul>
+                <small class="text-muted d-block mb-1">
+                    <strong>Шаги диагностики:</strong>
+                    <span class="text-muted ms-2">(${steps.length} шагов)</span>
+                </small>
+                <div class="expandable-list ${isStepsExpanded ? 'expanded' : ''}" id="steps-${itemId}">
+                    <ul class="diagnostic-list small">
+                        ${steps.map((step, i) => `<li>${i + 1}. ${step}</li>`).join('')}
+                    </ul>
+                </div>
+                ${shouldExpand ? `
+                    <button class="expand-btn ${isStepsExpanded ? 'expanded' : ''}" 
+                            onclick="toggleExpand('steps-${itemId}', '${itemId}')">
+                        <i class="bi bi-chevron-down"></i>
+                        ${isStepsExpanded ? 'Свернуть шаги' : `Показать все ${steps.length} шагов`}
+                    </button>
+                ` : ''}
             </div>
         `;
     }
     
     // Возможные причины
     if (item.possible_causes && Array.isArray(item.possible_causes) && item.possible_causes.length > 0) {
-        const causes = item.possible_causes.slice(0, 3);
+        const causes = item.possible_causes;
+        const showCauses = 3;
+        const shouldExpand = causes.length > showCauses;
+        const isCausesExpanded = isExpanded || !shouldExpand;
+        
         html += `
             <div class="mb-3">
-                <small class="text-muted d-block mb-1"><strong>Возможные причины:</strong></small>
+                <small class="text-muted d-block mb-1">
+                    <strong>Возможные причины:</strong>
+                    <span class="text-muted ms-2">(${causes.length} причин)</span>
+                </small>
+                <div class="expandable-list ${isCausesExpanded ? 'expanded' : ''}" id="causes-${itemId}">
+                    <div class="causes-list">
+                        ${causes.map(cause => `<span class="cause-badge">${cause}</span>`).join('')}
+                    </div>
+                </div>
+                ${shouldExpand ? `
+                    <button class="expand-btn ${isCausesExpanded ? 'expanded' : ''}" 
+                            onclick="toggleExpand('causes-${itemId}', '${itemId}')">
+                        <i class="bi bi-chevron-down"></i>
+                        ${isCausesExpanded ? 'Свернуть причины' : `Показать все ${causes.length} причин`}
+                    </button>
+                ` : ''}
+            </div>
+        `;
+    }
+    
+    // Требуемые данные
+    if (item.required_data && Array.isArray(item.required_data) && item.required_data.length > 0) {
+        const requiredData = item.required_data;
+        html += `
+            <div class="mb-3">
+                <small class="text-muted d-block mb-1"><strong>Требуемые данные:</strong></small>
                 <div class="d-flex flex-wrap gap-1">
-                    ${causes.map(cause => `
-                        <span class="badge bg-light text-dark">${cause}</span>
-                    `).join('')}
-                    ${item.possible_causes.length > 3 ? 
-                        `<span class="badge bg-light text-dark">+${item.possible_causes.length - 3}</span>` : ''}
+                    ${requiredData.map(data => `<span class="badge bg-light text-dark">${data}</span>`).join('')}
                 </div>
             </div>
         `;
@@ -945,6 +1181,50 @@ function createResultCard(item, index) {
     return html;
 }
 
+// Форматирование AI ответа
+function formatAIResponse(response) {
+    return response
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/🔍/g, '<i class="bi bi-search text-warning"></i>')
+        .replace(/🤖/g, '<i class="bi bi-robot text-info"></i>')
+        .replace(/🔧/g, '<i class="bi bi-tools text-primary"></i>')
+        .replace(/🚗/g, '<i class="bi bi-car-front text-success"></i>')
+        .replace(/⚠️/g, '<i class="bi bi-exclamation-triangle text-warning"></i>')
+        .replace(/⏱️/g, '<i class="bi bi-clock text-secondary"></i>')
+        .replace(/💰/g, '<i class="bi bi-cash text-success"></i>')
+        .replace(/📊/g, '<i class="bi bi-graph-up text-info"></i>')
+        .replace(/🎯/g, '<i class="bi bi-bullseye text-danger"></i>')
+        .replace(/💡/g, '<i class="bi bi-lightbulb text-warning"></i>')
+        .replace(/🔑/g, '<i class="bi bi-key text-primary"></i>')
+        .replace(/📝/g, '<i class="bi bi-pencil text-info"></i>')
+        .replace(/🏷️/g, '<i class="bi bi-tag text-success"></i>')
+        .replace(/📌/g, '<i class="bi bi-pin-angle text-danger"></i>')
+        .replace(/ℹ️/g, '<i class="bi bi-info-circle text-info"></i>')
+        .replace(/\n/g, '<br>');
+}
+
+// Раскрытие/сворачивание списков
+function toggleExpand(elementId, itemId) {
+    const element = document.getElementById(elementId);
+    const button = element?.nextElementSibling;
+    
+    if (!element || !button) return;
+    
+    element.classList.toggle('expanded');
+    button.classList.toggle('expanded');
+    
+    const isNowExpanded = element.classList.contains('expanded');
+    const itemText = elementId.includes('steps') ? 'шаги' : 'причины';
+    
+    if (isNowExpanded) {
+        expandedItems.add(itemId);
+        button.innerHTML = `<i class="bi bi-chevron-up"></i> Свернуть ${itemText}`;
+    } else {
+        expandedItems.delete(itemId);
+        button.innerHTML = `<i class="bi bi-chevron-down"></i> ${button.textContent.includes('все') ? button.textContent : 'Показать все'}`;
+    }
+}
+
 // Вспомогательные функции
 function initTooltips() {
     const tooltipTriggerList = [].slice.call(document.querySelectorAll('[data-bs-toggle="tooltip"]'));
@@ -957,11 +1237,22 @@ function clearSearch() {
     resetModelSelect();
     document.getElementById('search_basic').checked = true;
     
+    // Сброс расширенных настроек
+    document.getElementById('complexity').value = '';
+    document.getElementById('max_results').value = '10';
+    document.getElementById('only_with_rules').checked = false;
+    document.getElementById('group_by_brand').checked = false;
+    
     // Скрываем расширенные настройки
     document.getElementById('advancedOptions').classList.remove('show');
     document.getElementById('toggleAdvancedBtn').innerHTML = '<i class="bi bi-sliders me-1"></i>Больше настроек';
     
     showToast('Поиск очищен', 'info');
+}
+
+function setExample(text) {
+    document.getElementById('query').value = text;
+    document.getElementById('query').focus();
 }
 
 function toggleAdvanced() {
@@ -991,16 +1282,19 @@ function exportResults() {
         return;
     }
     
-    // Создаем CSV
-    let csv = 'Название;Описание;Марка;Модель;Шаги диагностики;Возможные причины;Сложность;Время;Цена\n';
+    let csv = 'Тип;Название;Описание;Марка;Модель;Шаги диагностики;Возможные причины;Требуемые данные;Сложность;Время (мин);Цена (руб);Релевантность (%)\n';
     
     currentResults.forEach(item => {
+        const type = item.type === 'rule' ? 'Правило' : 'Симптом';
         const steps = Array.isArray(item.diagnostic_steps) ? 
-            item.diagnostic_steps.join('; ') : '';
+            item.diagnostic_steps.join(' | ') : '';
         const causes = Array.isArray(item.possible_causes) ? 
-            item.possible_causes.join('; ') : '';
+            item.possible_causes.join(' | ') : '';
+        const required = Array.isArray(item.required_data) ? 
+            item.required_data.join(' | ') : '';
+        const relevance = Math.round((item.relevance_score || 0) * 100);
         
-        csv += `"${item.title || ''}";"${item.description || ''}";"${item.brand || ''}";"${item.model || ''}";"${steps}";"${causes}";${item.complexity_level || ''};${item.estimated_time || ''};${item.consultation_price || ''}\n`;
+        csv += `"${type}";"${item.title || ''}";"${item.description || ''}";"${item.brand || ''}";"${item.model || ''}";"${steps}";"${causes}";"${required}";${item.complexity_level || ''};${item.estimated_time || ''};${item.consultation_price || ''};${relevance}\n`;
     });
     
     // Создаем и скачиваем файл
@@ -1009,7 +1303,7 @@ function exportResults() {
     const url = URL.createObjectURL(blob);
     
     link.setAttribute('href', url);
-    link.setAttribute('download', `ai_search_results_${new Date().toISOString().slice(0,10)}.csv`);
+    link.setAttribute('download', `ai_diagnostic_results_${new Date().toISOString().slice(0,10)}.csv`);
     link.style.visibility = 'hidden';
     
     document.body.appendChild(link);
@@ -1033,9 +1327,9 @@ function orderConsultation() {
         return;
     }
     
-    // Перенаправляем на страницу заказа консультации
     const query = document.getElementById('query').value;
     const brandId = document.getElementById('brand_id').value;
+    const modelId = document.getElementById('model_id').value;
     
     let url = '/diagnostic/consultation/order?ai_search=true';
     
@@ -1045,6 +1339,10 @@ function orderConsultation() {
     
     if (brandId) {
         url += `&brand_id=${brandId}`;
+    }
+    
+    if (modelId) {
+        url += `&model_id=${modelId}`;
     }
     
     window.location.href = url;
@@ -1070,8 +1368,8 @@ async function loadPopularSymptoms() {
         const data = await response.json();
         
         if (data.success && data.symptoms.length > 0) {
-            // Можно обновить интерфейс популярными симптомами
-            console.log('Popular symptoms loaded:', data.symptoms);
+            // Можно добавить отображение популярных симптомов
+            console.log('Popular symptoms loaded:', data.symptoms.length);
         }
     } catch (error) {
         console.error('Error loading popular symptoms:', error);
