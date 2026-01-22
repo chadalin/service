@@ -42,11 +42,6 @@ class SymptomImportController extends Controller
      */
     public function importForBrandModel(Request $request)
     {
-        // Включим подробное логирование
-        Log::info('=== IMPORT START ===');
-        Log::info('Request data:', $request->all());
-        Log::info('Has file:', ['has_file' => $request->hasFile('csv_file')]);
-        
         DB::beginTransaction();
         
         try {
@@ -64,8 +59,6 @@ class SymptomImportController extends Controller
             ]);
 
             if ($validator->fails()) {
-                Log::error('Validation failed:', $validator->errors()->toArray());
-                
                 return response()->json([
                     'success' => false,
                     'message' => 'Ошибка валидации',
@@ -74,8 +67,8 @@ class SymptomImportController extends Controller
             }
 
             $file = $request->file('csv_file');
-            $brandId = $request->input('brand_id'); // Это строка "LAND_ROVER"
-            $modelId = $request->input('model_id', null); // Это число или null
+            $brandId = $request->input('brand_id');
+            $modelId = $request->input('model_id', null);
             $updateExisting = $request->boolean('update_existing', true);
             
             Log::info('Import parameters:', [
@@ -88,7 +81,6 @@ class SymptomImportController extends Controller
             // Проверяем существование бренда
             $brand = Brand::find($brandId);
             if (!$brand) {
-                Log::error('Brand not found:', ['brand_id' => $brandId]);
                 return response()->json([
                     'success' => false,
                     'message' => 'Марка не найдена'
@@ -100,23 +92,10 @@ class SymptomImportController extends Controller
             if ($modelId) {
                 $model = CarModel::find($modelId);
                 if (!$model) {
-                    Log::error('Model not found:', ['model_id' => $modelId]);
                     return response()->json([
                         'success' => false,
                         'message' => 'Модель не найдена'
                     ], 404);
-                }
-                
-                // Проверяем что модель принадлежит бренду
-                if ($model->brand_id !== $brandId) {
-                    Log::error('Model does not belong to brand:', [
-                        'model_brand_id' => $model->brand_id,
-                        'selected_brand_id' => $brandId
-                    ]);
-                    return response()->json([
-                        'success' => false,
-                        'message' => 'Модель не принадлежит выбранной марке'
-                    ], 400);
                 }
             }
 
@@ -163,59 +142,123 @@ class SymptomImportController extends Controller
     }
 
     /**
-     * Обработка Excel файла
+     * Обработка Excel файла с поддержкой многострочных данных
      */
     private function processExcelFile($file, $brandId, $modelId, $updateExisting, &$results)
     {
-        Log::info('Processing Excel file...');
+        Log::info('Processing Excel file with advanced multi-line support...');
         
         $this->checkPhpSpreadsheet();
         
         try {
-            // Загружаем файл
             $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
             $worksheet = $spreadsheet->getActiveSheet();
             
-            // Получаем все данные
-            $data = $worksheet->toArray();
+            // Получаем все данные как они есть в Excel
+            $highestRow = $worksheet->getHighestRow();
+            $highestColumn = $worksheet->getHighestColumn();
             
-            Log::info('Excel file loaded:', [
-                'total_rows' => count($data),
-                'first_row' => $data[0] ?? []
+            Log::info('Excel dimensions:', [
+                'highestRow' => $highestRow,
+                'highestColumn' => $highestColumn
             ]);
             
-            if (empty($data)) {
-                throw new \Exception('Файл пустой');
+            if ($highestRow <= 1) {
+                throw new \Exception('Файл пустой или содержит только заголовок');
             }
             
-            // Проверяем, есть ли заголовок
-            $firstRow = $data[0];
-            $isHeader = $this->isHeaderRow($firstRow);
-            $startRow = $isHeader ? 1 : 0;
-            
-            if ($isHeader) {
-                Log::info('Header detected and skipped:', $firstRow);
+            // Определяем заголовки
+            $headers = [];
+            for ($col = 'A'; $col <= $highestColumn; $col++) {
+                $cellValue = $worksheet->getCell($col . '1')->getValue();
+                $headers[$col] = trim((string)$cellValue);
             }
             
-            // Обрабатываем каждую строку
-            for ($i = $startRow; $i < count($data); $i++) {
-                $row = $data[$i];
-                $rowNumber = $i + 1; // Номер строки для отображения
+            Log::info('Headers found:', $headers);
+            
+            // Определяем индексы колонок
+            $colIndexes = [
+                'name' => $this->findColumnIndex($headers, ['symptom', 'название', 'name']),
+                'description' => $this->findColumnIndex($headers, ['description', 'описание']),
+                'slug' => $this->findColumnIndex($headers, ['slug']),
+                'diagnostic_steps' => $this->findColumnIndex($headers, ['diagnostic', 'steps', 'диагностика', 'шаги']),
+                'possible_causes' => $this->findColumnIndex($headers, ['possible', 'causes', 'причины']),
+                'required_data' => $this->findColumnIndex($headers, ['required', 'data', 'данные']),
+                'complexity' => $this->findColumnIndex($headers, ['complexity', 'level', 'сложность']),
+                'estimated_time' => $this->findColumnIndex($headers, ['estimated', 'time', 'время', 'минуты']),
+                'price' => $this->findColumnIndex($headers, ['price', 'стоимость', 'consultation', 'цена']),
+            ];
+            
+            Log::info('Column indexes:', $colIndexes);
+            
+            if ($colIndexes['name'] === null) {
+                throw new \Exception('Не найдена колонка с названием симптома');
+            }
+            
+            // Обрабатываем строки с учетом многострочных данных
+            $currentSymptom = null;
+            $symptomRows = [];
+            $currentRowNum = 2; // Начинаем с второй строки (после заголовка)
+            
+            while ($currentRowNum <= $highestRow) {
+                $rowData = $this->getRowData($worksheet, $currentRowNum, $highestColumn);
                 
-                Log::debug("Processing row {$rowNumber}:", [
-                    'row_data' => $row,
-                    'non_empty_cells' => count(array_filter($row, function($v) { 
-                        return $v !== null && trim($v) !== ''; 
-                    }))
-                ]);
+                // Проверяем, есть ли название симптома в этой строке
+                $symptomName = $this->getCellValue($rowData, $colIndexes['name']);
                 
-                $this->processRow($row, $rowNumber, $brandId, $modelId, $updateExisting, $results);
+                if (!empty($symptomName)) {
+                    // Если у нас есть накопленный симптом, обрабатываем его
+                    if ($currentSymptom !== null) {
+                        $this->processMultiRowSymptom($currentSymptom, $symptomRows, $colIndexes,
+                            $brandId, $modelId, $updateExisting, $results);
+                    }
+                    
+                    // Начинаем новый симптом
+                    $currentSymptom = [
+                        'name' => $symptomName,
+                        'description' => '',
+                        'slug' => '',
+                        'diagnostic_steps_raw' => '',
+                        'possible_causes_raw' => '',
+                        'required_data_raw' => '',
+                        'complexity' => '',
+                        'estimated_time' => '',
+                        'price' => '',
+                        'start_row' => $currentRowNum
+                    ];
+                    
+                    // Заполняем данные из первой строки
+                    $this->fillSymptomDataFromRow($currentSymptom, $rowData, $colIndexes);
+                    
+                    $symptomRows = [$rowData];
+                    
+                    Log::debug("New symptom started at row {$currentRowNum}: {$symptomName}");
+                } elseif ($currentSymptom !== null) {
+                    // Это продолжение текущего симптома
+                    // Собираем многострочные данные
+                    $this->appendSymptomDataFromRow($currentSymptom, $rowData, $colIndexes);
+                    $symptomRows[] = $rowData;
+                    
+                    Log::debug("Continued symptom at row {$currentRowNum}");
+                } else {
+                    // Пустая строка перед первым симптомом - игнорируем
+                    Log::debug("Empty row {$currentRowNum} before first symptom");
+                }
+                
+                $currentRowNum++;
+            }
+            
+            // Обрабатываем последний симптом
+            if ($currentSymptom !== null) {
+                $this->processMultiRowSymptom($currentSymptom, $symptomRows, $colIndexes,
+                    $brandId, $modelId, $updateExisting, $results);
             }
             
             Log::info('Excel processing completed:', [
                 'total_processed' => $results['total_rows'],
                 'symptoms_created' => $results['symptoms_created'],
-                'rules_created' => $results['rules_created']
+                'rules_created' => $results['rules_created'],
+                'errors_count' => count($results['errors'])
             ]);
             
         } catch (\Exception $e) {
@@ -228,85 +271,189 @@ class SymptomImportController extends Controller
     }
 
     /**
-     * Обработка строки
+     * Найти индекс колонки по ключевым словам
      */
-    private function processRow($row, $rowNumber, $brandId, $modelId, $updateExisting, &$results)
+    private function findColumnIndex($headers, $keywords)
     {
-        try {
-            // Очищаем значения
-            $row = array_map(function($value) {
-                if (is_null($value)) {
-                    return '';
+        foreach ($headers as $col => $header) {
+            $headerLower = strtolower($header);
+            foreach ($keywords as $keyword) {
+                if (strpos($headerLower, strtolower($keyword)) !== false) {
+                    return $col;
                 }
-                return trim((string)$value);
-            }, $row);
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Получить данные строки
+     */
+    private function getRowData($worksheet, $rowNum, $highestColumn)
+    {
+        $rowData = [];
+        for ($col = 'A'; $col <= $highestColumn; $col++) {
+            $cell = $worksheet->getCell($col . $rowNum);
+            $value = $cell->getValue();
             
-            Log::debug("Row {$rowNumber} after cleaning:", $row);
-            
-            // Пропускаем пустые строки
-            $nonEmptyCells = array_filter($row, function($value) {
-                return $value !== '';
-            });
-            
-            if (empty($nonEmptyCells)) {
-                Log::debug("Row {$rowNumber} is empty, skipping");
-                $results['skipped_rows']++;
-                return;
+            // Получаем форматированное значение
+            if ($cell->getDataType() === \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_FORMULA) {
+                $value = $cell->getCalculatedValue();
             }
             
-            // Проверяем наличие названия симптома
-            if (empty($row[0])) {
-                $errorMsg = "Строка {$rowNumber}: Отсутствует название симптома";
-                Log::warning($errorMsg);
+            // Обрабатываем объекты RichText
+            if ($value instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
+                $value = $value->getPlainText();
+            }
+            
+            $rowData[$col] = $value !== null ? trim((string)$value) : '';
+        }
+        return $rowData;
+    }
+
+    /**
+     * Получить значение ячейки по индексу колонки
+     */
+    private function getCellValue($rowData, $colIndex)
+    {
+        if ($colIndex === null || !isset($rowData[$colIndex])) {
+            return '';
+        }
+        return $rowData[$colIndex];
+    }
+
+    /**
+     * Заполнить данные симптома из строки
+     */
+    private function fillSymptomDataFromRow(&$symptom, $rowData, $colIndexes)
+    {
+        $symptom['description'] = $this->getCellValue($rowData, $colIndexes['description']);
+        $symptom['slug'] = $this->getCellValue($rowData, $colIndexes['slug']);
+        $symptom['diagnostic_steps_raw'] = $this->getCellValue($rowData, $colIndexes['diagnostic_steps']);
+        $symptom['possible_causes_raw'] = $this->getCellValue($rowData, $colIndexes['possible_causes']);
+        $symptom['required_data_raw'] = $this->getCellValue($rowData, $colIndexes['required_data']);
+        $symptom['complexity'] = $this->getCellValue($rowData, $colIndexes['complexity']);
+        $symptom['estimated_time'] = $this->getCellValue($rowData, $colIndexes['estimated_time']);
+        $symptom['price'] = $this->getCellValue($rowData, $colIndexes['price']);
+    }
+
+    /**
+     * Добавить данные симптома из дополнительной строки
+     */
+    private function appendSymptomDataFromRow(&$symptom, $rowData, $colIndexes)
+    {
+        // Для текстовых полей добавляем с переносом строки
+        $appendIfNotEmpty = function(&$target, $newValue) {
+            if (!empty($newValue)) {
+                if (!empty($target)) {
+                    $target .= "\n" . $newValue;
+                } else {
+                    $target = $newValue;
+                }
+            }
+        };
+        
+        $appendIfNotEmpty($symptom['diagnostic_steps_raw'], $this->getCellValue($rowData, $colIndexes['diagnostic_steps']));
+        $appendIfNotEmpty($symptom['possible_causes_raw'], $this->getCellValue($rowData, $colIndexes['possible_causes']));
+        $appendIfNotEmpty($symptom['required_data_raw'], $this->getCellValue($rowData, $colIndexes['required_data']));
+        
+        // Для одиночных полей берем только если еще не заполнены
+        if (empty($symptom['description'])) {
+            $symptom['description'] = $this->getCellValue($rowData, $colIndexes['description']);
+        }
+        if (empty($symptom['slug'])) {
+            $symptom['slug'] = $this->getCellValue($rowData, $colIndexes['slug']);
+        }
+        if (empty($symptom['complexity'])) {
+            $symptom['complexity'] = $this->getCellValue($rowData, $colIndexes['complexity']);
+        }
+        if (empty($symptom['estimated_time'])) {
+            $symptom['estimated_time'] = $this->getCellValue($rowData, $colIndexes['estimated_time']);
+        }
+        if (empty($symptom['price'])) {
+            $symptom['price'] = $this->getCellValue($rowData, $colIndexes['price']);
+        }
+    }
+
+    /**
+     * Обработать симптом, собранный из нескольких строк
+     */
+    private function processMultiRowSymptom($symptomData, $symptomRows, $colIndexes,
+        $brandId, $modelId, $updateExisting, &$results)
+    {
+        $startRow = $symptomData['start_row'];
+        $endRow = $startRow + count($symptomRows) - 1;
+        $rowRange = $startRow . '-' . $endRow;
+        $symptomName = $symptomData['name'];
+        
+        try {
+            Log::debug("Processing symptom '{$symptomName}' (rows {$rowRange})", [
+                'diagnostic_steps_length' => strlen($symptomData['diagnostic_steps_raw']),
+                'possible_causes_length' => strlen($symptomData['possible_causes_raw']),
+                'rows_count' => count($symptomRows)
+            ]);
+            
+            if (empty($symptomName)) {
+                $errorMsg = "Строки {$rowRange}: Отсутствует название симптома";
                 $results['errors'][] = $errorMsg;
-                $results['skipped_rows']++;
+                $results['skipped_rows'] += count($symptomRows);
                 return;
             }
-            
-            $symptomName = $row[0];
-            $description = $row[1] ?? '';
-            $slugInput = $row[2] ?? '';
             
             // Генерируем slug
-            $slug = !empty($slugInput) ? 
-                \Illuminate\Support\Str::slug($slugInput) : 
+            $slug = !empty($symptomData['slug']) ? 
+                \Illuminate\Support\Str::slug($symptomData['slug']) : 
                 \Illuminate\Support\Str::slug($symptomName);
             
-            Log::debug("Row {$rowNumber} - Symptom: {$symptomName}, Slug: {$slug}");
+            // Делаем slug уникальным
+            $originalSlug = $slug;
+            $counter = 1;
+            while (Symptom::where('slug', $slug)->exists()) {
+                $slug = $originalSlug . '-' . $counter;
+                $counter++;
+            }
             
             // Создаем или обновляем симптом
-            $symptomData = [
-                'name' => $symptomName,
-                'description' => $description,
-                'slug' => $slug,
-                'is_active' => true,
-            ];
-            
             $symptom = Symptom::updateOrCreate(
                 ['slug' => $slug],
-                $symptomData
+                [
+                    'name' => $symptomName,
+                    'description' => $symptomData['description'],
+                    'slug' => $slug,
+                    'is_active' => true,
+                ]
             );
             
             if ($symptom->wasRecentlyCreated) {
                 $results['symptoms_created']++;
-                Log::debug("Row {$rowNumber} - Created new symptom (ID: {$symptom->id})");
+                Log::debug("Created symptom: {$symptomName} (ID: {$symptom->id})");
             } else {
                 $results['symptoms_updated']++;
-                Log::debug("Row {$rowNumber} - Updated existing symptom (ID: {$symptom->id})");
+                Log::debug("Updated symptom: {$symptomName} (ID: {$symptom->id})");
             }
             
-            // Подготавливаем данные для правила
-            $diagnosticSteps = $this->parseTextToArray($row[3] ?? '');
-            $possibleCauses = $this->parseTextToArray($row[4] ?? '');
-            $requiredData = $this->parseTextToArray($row[5] ?? '');
-            $complexity = $this->parseInt($row[6] ?? 3);
-            $estimatedTime = $this->parseInt($row[7] ?? 60);
-            $price = $this->parseFloat($row[8] ?? 3000);
+            // Парсим многострочные данные в правильный формат JSON
+            $diagnosticSteps = $this->parseMultiLineToArray($symptomData['diagnostic_steps_raw']);
+            $possibleCauses = $this->parseMultiLineToArray($symptomData['possible_causes_raw']);
+            $requiredData = $this->parseMultiLineToArray($symptomData['required_data_raw']);
             
-            Log::debug("Row {$rowNumber} - Rule data prepared:", [
+            // Преобразуем массивы в JSON
+            $diagnosticStepsJson = json_encode($diagnosticSteps, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            $possibleCausesJson = json_encode($possibleCauses, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            $requiredDataJson = json_encode($requiredData, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
+            
+            // Парсим числовые значения
+            $complexity = $this->parseInt($symptomData['complexity'] ?? '3', 1, 10);
+            $estimatedTime = $this->parseInt($symptomData['estimated_time'] ?? '60', 1, 480);
+            $price = $this->parseFloat($symptomData['price'] ?? '3000');
+            
+            Log::debug("Parsed data for '{$symptomName}':", [
                 'diagnostic_steps_count' => count($diagnosticSteps),
+                'possible_causes_count' => count($possibleCauses),
+                'required_data_count' => count($requiredData),
                 'complexity' => $complexity,
-                'price' => $price
+                'price' => $price,
+                'diagnostic_steps_json_valid' => json_last_error() === JSON_ERROR_NONE
             ]);
             
             // Проверяем существование правила
@@ -319,8 +466,8 @@ class SymptomImportController extends Controller
             // Подготавливаем данные для правила
             $ruleData = [
                 'symptom_id' => $symptom->id,
-                'brand_id' => $brandId, // Это строка "LAND_ROVER"
-                'model_id' => $modelId, // Это число или null
+                'brand_id' => $brandId,
+                'model_id' => $modelId,
                 'diagnostic_steps' => $diagnosticSteps,
                 'possible_causes' => $possibleCauses,
                 'required_data' => $requiredData,
@@ -331,122 +478,107 @@ class SymptomImportController extends Controller
                 'is_active' => true,
             ];
             
-            Log::debug("Row {$rowNumber} - Rule data for DB:", $ruleData);
+            // Проверяем JSON перед сохранением
+            if (json_last_error() !== JSON_ERROR_NONE) {
+                throw new \Exception('Ошибка формирования JSON: ' . json_last_error_msg());
+            }
             
             if ($existingRule) {
-                Log::debug("Row {$rowNumber} - Rule exists (ID: {$existingRule->id})");
-                
                 if ($updateExisting) {
                     $existingRule->update($ruleData);
                     $results['rules_updated']++;
-                    Log::debug("Row {$rowNumber} - Rule updated");
+                    Log::debug("Updated rule for symptom: {$symptomName}");
                 }
             } else {
-                // Создаем новое правило
                 $rule = Rule::create($ruleData);
                 $results['rules_created']++;
-                Log::debug("Row {$rowNumber} - Created new rule (ID: {$rule->id})");
+                Log::debug("Created rule for symptom: {$symptomName} (Rule ID: {$rule->id})");
             }
             
             $results['total_rows']++;
-            Log::debug("Row {$rowNumber} - Processing completed successfully");
+            Log::debug("Successfully processed symptom: {$symptomName}");
             
         } catch (\Exception $e) {
-            $errorMsg = "Строка {$rowNumber}: " . $e->getMessage();
-            Log::error("Error processing row {$rowNumber}:", [
+            $errorMsg = "Строки {$rowRange} (симптом: {$symptomName}): " . $e->getMessage();
+            Log::error("Error processing accumulated symptom:", [
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
-                'row_data' => $row
+                'symptom_data' => [
+                    'name' => $symptomName,
+                    'diagnostic_steps_sample' => substr($symptomData['diagnostic_steps_raw'] ?? '', 0, 200),
+                    'rows_count' => count($symptomRows)
+                ]
             ]);
             
             $results['errors'][] = $errorMsg;
-            $results['skipped_rows']++;
+            $results['skipped_rows'] += count($symptomRows);
         }
     }
 
     /**
-     * Проверка на заголовок
+     * Парсинг многострочного текста в массив для JSON
      */
-    private function isHeaderRow($row)
+    private function parseMultiLineToArray($text)
     {
-        if (empty($row) || empty($row[0])) {
-            return false;
+        if (empty($text)) {
+            return [];
         }
         
-        $firstCell = strtolower(trim($row[0]));
+        // Нормализуем переносы строк
+        $text = str_replace(["\r\n", "\r"], "\n", trim($text));
         
-        $headerKeywords = ['symptom', 'симптом', 'name', 'название'];
+        // Если текст пустой после обрезки
+        if (empty($text)) {
+            return [];
+        }
         
-        foreach ($headerKeywords as $keyword) {
-            if (strpos($firstCell, $keyword) !== false) {
-                return true;
+        // Сначала проверяем наличие стандартных разделителей
+        $hasSemicolon = strpos($text, ';') !== false;
+        $hasComma = strpos($text, ',') !== false;
+        $hasPipe = strpos($text, '|') !== false;
+        
+        $result = [];
+        
+        if ($hasSemicolon) {
+            // Разделяем по точке с запятой
+            $parts = explode(';', $text);
+            foreach ($parts as $part) {
+                $trimmed = trim($part);
+                if (!empty($trimmed)) {
+                    $result[] = $trimmed;
+                }
+            }
+        } elseif ($hasComma) {
+            // Разделяем по запятым
+            $parts = explode(',', $text);
+            foreach ($parts as $part) {
+                $trimmed = trim($part);
+                if (!empty($trimmed)) {
+                    $result[] = $trimmed;
+                }
+            }
+        } elseif ($hasPipe) {
+            // Разделяем по вертикальной черте
+            $parts = explode('|', $text);
+            foreach ($parts as $part) {
+                $trimmed = trim($part);
+                if (!empty($trimmed)) {
+                    $result[] = $trimmed;
+                }
+            }
+        } else {
+            // Если нет разделителей, разбиваем по переносам строк
+            $lines = explode("\n", $text);
+            foreach ($lines as $line) {
+                $trimmed = trim($line);
+                if (!empty($trimmed)) {
+                    $result[] = $trimmed;
+                }
             }
         }
         
-        return false;
+        return $result;
     }
-
-    /**
-     * Парсинг текста в массив
-     */
-   /**
- * Парсинг текста в массив с сохранением переносов строк
- */
-   private function parseTextToArray($text)
-{
-    if (empty($text)) {
-        return [];
-    }
-    
-    $text = trim($text);
-    
-    // Нормализуем переносы строк
-    $text = str_replace(["\r\n", "\r"], "\n", $text);
-    
-    // Если текст содержит только переносы строк без других разделителей
-    if (strpos($text, ';') === false && 
-        strpos($text, ',') === false && 
-        strpos($text, '|') === false) {
-        
-        // Разбиваем по переносам строк
-        $items = explode("\n", $text);
-        $items = array_map('trim', $items);
-        $items = array_filter($items, function($item) {
-            return !empty($item);
-        });
-        
-        if (!empty($items)) {
-            return array_values($items);
-        }
-    }
-    
-    // Сохраняем переносы строк внутри элементов
-    $text = str_replace("\n", '###NEWLINE###', $text);
-    
-    // Пробуем стандартные разделители
-    $delimiters = [';', ',', '|'];
-    
-    foreach ($delimiters as $delimiter) {
-        if (strpos($text, $delimiter) !== false) {
-            $items = explode($delimiter, $text);
-            $items = array_map(function($item) {
-                // Восстанавливаем переносы строк
-                $item = str_replace('###NEWLINE###', "\n", $item);
-                return trim($item);
-            }, $items);
-            
-            $items = array_filter($items, function($item) {
-                return !empty($item);
-            });
-            
-            return array_values($items);
-        }
-    }
-    
-    // Если нет других разделителей
-    $text = str_replace('###NEWLINE###', "\n", $text);
-    return [$text];
-}
 
     /**
      * Парсинг целого числа
@@ -454,14 +586,7 @@ class SymptomImportController extends Controller
     private function parseInt($value, $min = 1, $max = 10)
     {
         $int = intval($value);
-        $result = max($min, min($max, $int));
-        
-        Log::debug("Parsed integer:", [
-            'original' => $value,
-            'parsed' => $result
-        ]);
-        
-        return $result;
+        return max($min, min($max, $int));
     }
 
     /**
@@ -470,14 +595,7 @@ class SymptomImportController extends Controller
     private function parseFloat($value, $min = 0)
     {
         $float = floatval(str_replace(',', '.', $value));
-        $result = max($min, $float);
-        
-        Log::debug("Parsed float:", [
-            'original' => $value,
-            'parsed' => $result
-        ]);
-        
-        return $result;
+        return max($min, $float);
     }
 
     /**
@@ -485,27 +603,17 @@ class SymptomImportController extends Controller
      */
     public function getModels($brandId)
     {
-        Log::info('Getting models for brand:', ['brand_id' => $brandId]);
-        
         try {
             $models = CarModel::where('brand_id', $brandId)
                 ->orderBy('name')
                 ->get(['id', 'name']);
-            
-            Log::info('Models found:', [
-                'count' => $models->count(),
-                'models' => $models->toArray()
-            ]);
             
             return response()->json([
                 'success' => true,
                 'models' => $models
             ]);
         } catch (\Exception $e) {
-            Log::error('Error getting models:', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+            Log::error('Get models error: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,
@@ -542,20 +650,88 @@ class SymptomImportController extends Controller
                 $sheet->setCellValue($cell, $value);
             }
             
-            // Пример данных
-            $example = [
-                'A2' => 'Не заводится двигатель',
-                'B2' => 'Двигатель не запускается при повороте ключа',
-                'C2' => 'engine-not-starting',
-                'D2' => 'Проверить аккумулятор; Проверить стартер; Проверить топливную систему',
-                'E2' => 'Разряженный аккумулятор; Неисправный стартер; Проблемы с топливным насосом',
+            // Пример данных с переносами строк
+            $example1 = [
+                'A2' => 'U3000-49',
+                'B2' => 'Описание кода ошибки U3000-49',
+                'C2' => 'u3000-49',
+                'D2' => "Шаг 1: Проверить аккумулятор; Шаг 2: Проверить стартер; Шаг 3: Проверить топливную систему",
+                'E2' => "Разряженный аккумулятор; Неисправный стартер; Проблемы с топливным насосом",
                 'F2' => 'Напряжение аккумулятора; Состояние стартера; Давление топлива',
                 'G2' => '3',
                 'H2' => '120',
                 'I2' => '3500'
             ];
             
-            foreach ($example as $cell => $value) {
+            foreach ($example1 as $cell => $value) {
+                $sheet->setCellValue($cell, $value);
+            }
+            
+            // Пример продолжения данных (вторая строка для того же симптома)
+            $example2 = [
+                'A3' => '', // Пусто - продолжение предыдущего симптома
+                'B3' => '', // Пусто
+                'C3' => '', // Пусто
+                'D3' => 'Шаг 4: Проверить систему зажигания',
+                'E3' => 'Неисправные свечи зажигания',
+                'F3' => 'Состояние свечей зажигания',
+                'G3' => '', // Пусто
+                'H3' => '', // Пусто
+                'I3' => ''  // Пусто
+            ];
+            
+            foreach ($example2 as $cell => $value) {
+                $sheet->setCellValue($cell, $value);
+            }
+            
+            // Третий симптом
+            $example3 = [
+                'A4' => 'U3000-50',
+                'B4' => 'Описание кода ошибки U3000-50',
+                'C4' => 'u3000-50',
+                'D4' => "Шаг 1: Диагностика электронной системы\nШаг 2: Проверка датчиков\nШаг 3: Анализ кодов ошибок",
+                'E4' => "Электронная неисправность; Проблемы с датчиками; Короткое замыкание",
+                'F4' => 'Данные диагностики; Показания датчиков; Логи ошибок',
+                'G4' => '4',
+                'H4' => '180',
+                'I4' => '4500'
+            ];
+            
+            foreach ($example3 as $cell => $value) {
+                $sheet->setCellValue($cell, $value);
+            }
+            
+            // Четвертый симптом с продолжением в трех строках
+            $example4 = [
+                'A5' => 'U3000-51',
+                'B5' => 'Комплексная диагностика',
+                'C5' => 'u3000-51',
+                'D5' => 'Шаг 1: Внешний осмотр',
+                'E5' => 'Внешние повреждения',
+                'F5' => '',
+                'G5' => '5',
+                'H5' => '240',
+                'I5' => '6000'
+            ];
+            
+            foreach ($example4 as $cell => $value) {
+                $sheet->setCellValue($cell, $value);
+            }
+            
+            // Продолжение четвертого симптома
+            $example5 = [
+                'A6' => '', // Пусто - продолжение
+                'B6' => '', // Пусто
+                'C6' => '', // Пусто
+                'D6' => 'Шаг 2: Компьютерная диагностика',
+                'E6' => 'Программные ошибки',
+                'F6' => 'Диагностические коды',
+                'G6' => '', // Пусто
+                'H6' => '', // Пусто
+                'I6' => ''  // Пусто
+            ];
+            
+            foreach ($example5 as $cell => $value) {
                 $sheet->setCellValue($cell, $value);
             }
             
@@ -564,8 +740,23 @@ class SymptomImportController extends Controller
                 $sheet->getColumnDimension($column)->setAutoSize(true);
             }
             
+            // Включаем перенос текста для колонок с длинным текстом
+            $sheet->getStyle('D:D')->getAlignment()->setWrapText(true);
+            $sheet->getStyle('E:E')->getAlignment()->setWrapText(true);
+            $sheet->getStyle('F:F')->getAlignment()->setWrapText(true);
+            
+            // Стили для заголовков
+            $headerStyle = [
+                'font' => ['bold' => true],
+                'fill' => [
+                    'fillType' => \PhpOffice\PhpSpreadsheet\Style\Fill::FILL_SOLID,
+                    'startColor' => ['rgb' => 'E6E6FA']
+                ]
+            ];
+            $sheet->getStyle('A1:I1')->applyFromArray($headerStyle);
+            
             // Сохраняем файл
-            $filename = 'symptoms_template_' . date('Y-m-d') . '.xlsx';
+            $filename = 'symptoms_import_template_' . date('Y-m-d') . '.xlsx';
             $tempFile = tempnam(sys_get_temp_dir(), 'excel_');
             
             $writer = new \PhpOffice\PhpSpreadsheet\Writer\Xlsx($spreadsheet);
@@ -576,10 +767,7 @@ class SymptomImportController extends Controller
             ])->deleteFileAfterSend(true);
             
         } catch (\Exception $e) {
-            Log::error('Error creating template:', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
+            Log::error('Template error: ' . $e->getMessage());
             
             return response()->json([
                 'success' => false,

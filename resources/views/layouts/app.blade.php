@@ -548,6 +548,17 @@
         </a>
     </li>
 @endif
+
+
+                   @if(auth()->check())
+    <li class="nav-item">
+        <a class="nav-link" href="{{ route('admin.symptoms.import.page') }}">
+            <i class="bi bi-robot me-1"></i> Загрузка правил ексель
+        </a>
+    </li>
+@endif
+
+  
                 @if(auth()->user()->is_admin)
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.users.*') ? 'active' : '' }}" 
