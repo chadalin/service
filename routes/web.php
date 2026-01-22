@@ -341,14 +341,30 @@ Route::middleware('auth')->prefix('api')->group(function () {
 
 
 // routes/web.php
+// routes/web.php
 Route::middleware(['auth'])->prefix('admin')->group(function() {
-    // Импорт симптомов и правил
+    // Импорт симптомов
     Route::get('/symptoms/import', [SymptomImportController::class, 'index'])
         ->name('admin.symptoms.import.page');
-    Route::post('/symptoms/import', [SymptomImportController::class, 'import'])
-        ->name('admin.symptoms.import');
+    Route::get('/symptoms/import/select', [SymptomImportController::class, 'selectBrandModel'])
+        ->name('admin.symptoms.import.select');
+    Route::post('/symptoms/import/brand-model', [SymptomImportController::class, 'importForBrandModel'])
+        ->name('admin.symptoms.import.brand-model');
+    Route::post('/symptoms/import/auto', [SymptomImportController::class, 'importAuto'])
+        ->name('admin.symptoms.import.auto');
     Route::get('/symptoms/import/template', [SymptomImportController::class, 'downloadTemplate'])
         ->name('admin.symptoms.import.template');
+    Route::get('/symptoms/get-models/{brandId}', [SymptomImportController::class, 'getModels']);
+    Route::get('/symptoms/existing-data', [SymptomImportController::class, 'getExistingData']);
+    
+    // Статистика
+    Route::get('/diagnostic/stats', function() {
+        return response()->json([
+            'success' => true,
+            'symptoms' => \App\Models\Diagnostic\Symptom::count(),
+            'rules' => \App\Models\Diagnostic\Rule::count(),
+        ]);
+    });
 });
 
 

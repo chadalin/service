@@ -42,34 +42,46 @@ class Rule extends Model
     }
     
     // Поиск правил по условиям
-    public static function findMatchingRules(array $symptoms, int $brandId, ?int $modelId = null, array $carData = [])
-    {
-        return self::where('brand_id', $brandId)
-            ->when($modelId, fn($q) => $q->where('model_id', $modelId))
-            ->where('is_active', true)
-            ->whereIn('symptom_id', $symptoms)
-            ->get()
-            ->filter(function ($rule) use ($carData) {
-                // Проверка условий (engine_type, year и т.д.)
-                foreach ($rule->conditions as $key => $condition) {
-                    if (!isset($carData[$key])) {
-                        return false;
-                    }
-                    
-                    // Простая проверка условий (можно расширить)
-                    if (str_starts_with($condition, '>')) {
-                        $value = (int) substr($condition, 1);
-                        if ($carData[$key] <= $value) return false;
-                    } elseif (str_starts_with($condition, '<')) {
-                        $value = (int) substr($condition, 1);
-                        if ($carData[$key] >= $value) return false;
-                    } elseif ($carData[$key] != $condition) {
-                        return false;
-                    }
-                }
+   public static function findMatchingRules(array $symptoms, int $brandId, ?int $modelId = null, array $carData = [])
+{
+    return self::where('brand_id', $brandId)
+        ->when($modelId, fn($q) => $q->where('model_id', $modelId))
+        ->where('is_active', true)
+        ->whereIn('symptom_id', $symptoms)
+        ->get()
+        ->filter(function ($rule) use ($carData) {
+            // Получаем условия с проверкой на null
+            $conditions = $rule->conditions ?? [];
+            
+            // Проверяем что это массив
+            if (!is_array($conditions)) {
+                $conditions = [];
+            }
+            
+            // Если условий нет, правило подходит
+            if (empty($conditions)) {
                 return true;
-            });
-    }
+            }
+            
+            foreach ($conditions as $key => $condition) {
+                if (!isset($carData[$key])) {
+                    return false;
+                }
+                
+                // Простая проверка условий
+                if (str_starts_with($condition, '>')) {
+                    $value = (int) substr($condition, 1);
+                    if ($carData[$key] <= $value) return false;
+                } elseif (str_starts_with($condition, '<')) {
+                    $value = (int) substr($condition, 1);
+                    if ($carData[$key] >= $value) return false;
+                } elseif ($carData[$key] != $condition) {
+                    return false;
+                }
+            }
+            return true;
+        });
+}
     
     // Рассчитать цену консультации на основе сложности
     public function calculatePrice(int $complexityMultiplier = 1): float

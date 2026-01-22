@@ -21,7 +21,7 @@ class Symptom extends Model
     
     public function rules(): HasMany
     {
-        return $this->hasMany(Rule::class);
+        return $this->hasMany(Rule::class, 'symptom_id');
     }
     
     public function incrementFrequency(): void
