@@ -218,15 +218,15 @@ public function index(Request $request)
     /**
      * Показать страницу подтверждения
      */
-    public function confirmation($id)
-    {
-        $consultation = Consultation::where('id', $id)
-            ->where('user_id', Auth::id())
-            ->with(['case.brand', 'case.model', 'expert'])
-            ->firstOrFail();
+   // public function confirmation($id)
+    //{
+   //     $consultation = Consultation::where('id', $id)
+    //        ->where('user_id', Auth::id())
+    //        ->with(['case.brand', 'case.model', 'expert'])
+    //        ->firstOrFail();
             
-        return view('diagnostic.consultation.confirmation', compact('consultation'));
-    }
+   ////     return view('diagnostic.consultation.confirmation', compact('consultation'));
+  // }
     
     /**
      * Список консультаций пользователя (клиент)
@@ -718,4 +718,355 @@ public function show($id)
             })
         ]);
     }
+
+
+     public function orderForm(Request $request)
+    {
+        try {
+            Log::info('Consultation order form requested', $request->all());
+            
+            $data = [
+                'consultationType' => $request->get('type', 'expert'),
+                'brands' => Brand::orderBy('name')->get(),
+                'models' => collect(),
+                'symptoms' => [],
+            ];
+            
+            // Если есть правило
+            if ($request->has('rule') || $request->filled('rule_id')) {
+                $ruleId = $request->rule ?? $request->rule_id;
+                $rule = Rule::with(['symptom', 'brand', 'model'])->find($ruleId);
+                
+                if ($rule) {
+                    $data['rule'] = $rule;
+                    $data['brand_id'] = $rule->brand_id;
+                    $data['model_id'] = $rule->model_id;
+                    $data['symptoms'] = [$rule->symptom_id];
+                    
+                    // Получаем название симптома
+                    if ($rule->symptom) {
+                        $data['symptom_name'] = $rule->symptom->name;
+                        $data['symptom_description'] = $rule->symptom->description;
+                    }
+                    
+                    // Загружаем модели для выбранной марки
+                    if ($rule->brand_id) {
+                        $data['models'] = CarModel::where('brand_id', $rule->brand_id)->get();
+                    }
+                }
+            }
+            
+            // Если есть кейс
+            if ($request->has('case') || $request->filled('case_id')) {
+                $caseId = $request->case ?? $request->case_id;
+                $case = DiagnosticCase::with(['brand', 'model'])->find($caseId);
+                
+                if ($case) {
+                    $data['case'] = $case;
+                    $data['brand_id'] = $case->brand_id;
+                    $data['model_id'] = $case->model_id;
+                    $data['year'] = $case->year;
+                    $data['mileage'] = $case->mileage;
+                    $data['engine_type'] = $case->engine_type;
+                    $data['symptoms'] = $case->symptoms;
+                    
+                    // Загружаем модели для выбранной марки
+                    if ($case->brand_id) {
+                        $data['models'] = CarModel::where('brand_id', $case->brand_id)->get();
+                    }
+                    
+                    // Получаем названия симптомов
+                    $symptomNames = Symptom::whereIn('id', $case->symptoms)
+                        ->pluck('name')
+                        ->toArray();
+                    $data['symptom_names'] = $symptomNames;
+                }
+            }
+            
+            // Если переданы прямые параметры
+            if ($request->filled('brand_id')) {
+                $data['brand_id'] = $request->brand_id;
+                $data['models'] = CarModel::where('brand_id', $request->brand_id)->get();
+            }
+            
+            if ($request->filled('model_id')) {
+                $data['model_id'] = $request->model_id;
+            }
+            
+            if ($request->filled('year')) {
+                $data['year'] = $request->year;
+            }
+            
+            if ($request->filled('mileage')) {
+                $data['mileage'] = $request->mileage;
+            }
+            
+            if ($request->filled('engine_type')) {
+                $data['engine_type'] = $request->engine_type;
+            }
+            
+            if ($request->filled('symptoms')) {
+                $data['symptoms'] = is_array($request->symptoms) 
+                    ? $request->symptoms 
+                    : explode(',', $request->symptoms);
+            }
+            
+            return view('diagnostic.consultation.order', $data);
+            
+        } catch (\Exception $e) {
+            Log::error('Consultation order form error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->all()
+            ]);
+            
+            return redirect()->route('diagnostic.start')
+                ->with('error', 'Ошибка загрузки формы: ' . $e->getMessage());
+        }
+    }
+    
+     /**
+     * Заказ консультации из правила
+     */
+    public function orderFromRule($ruleId)
+    {
+        try {
+            Log::info('Order from rule requested', ['rule_id' => $ruleId]);
+            
+            $rule = Rule::with(['symptom', 'brand', 'model'])->findOrFail($ruleId);
+            
+            // Редирект на универсальную форму с параметрами
+            return redirect()->route('consultation.order.form', [
+                'rule' => $ruleId,
+                'type' => 'expert',
+                'brand_id' => $rule->brand_id,
+                'model_id' => $rule->model_id,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Order from rule error', [
+                'rule_id' => $ruleId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return redirect()->route('diagnostic.start')
+                ->with('error', 'Правило не найдено: ' . $e->getMessage());
+        }
+    }
+    
+     /**
+     * Заказ консультации из кейса
+     */
+    public function orderFromCase($caseId)
+    {
+        try {
+            Log::info('Order from case requested', ['case_id' => $caseId]);
+            
+            $case = DiagnosticCase::with(['brand', 'model'])->findOrFail($caseId);
+            
+            // Редирект на универсальную форму с параметрами
+            return redirect()->route('consultation.order.form', [
+                'case' => $caseId,
+                'type' => 'expert',
+                'brand_id' => $case->brand_id,
+                'model_id' => $case->model_id,
+                'year' => $case->year,
+                'mileage' => $case->mileage,
+                'engine_type' => $case->engine_type,
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Order from case error', [
+                'case_id' => $caseId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return redirect()->route('diagnostic.start')
+                ->with('error', 'Кейс не найден: ' . $e->getMessage());
+        }
+    }
+    
+     /**
+     * Обработка заказа консультации
+     */
+    public function order(Request $request)
+    {
+        try {
+            Log::info('Consultation order submitted', $request->except(['_token']));
+            
+            $validator = Validator::make($request->all(), [
+                'consultation_type' => 'required|in:basic,premium,expert',
+                'rule_id' => 'nullable|exists:diagnostic_rules,id',
+                'case_id' => 'nullable|exists:diagnostic_cases,id',
+                'brand_id' => 'required|exists:brands,id',
+                'model_id' => 'nullable|exists:car_models,id',
+                'year' => 'nullable|integer|min:1990|max:' . date('Y'),
+                'mileage' => 'nullable|integer|min:0|max:1000000',
+                'engine_type' => 'nullable|string',
+                'description' => 'nullable|string|max:2000',
+                'contact_name' => 'required|string|max:255',
+                'contact_phone' => 'required|string|max:20',
+                'contact_email' => 'required|email|max:255',
+                'symptoms' => 'nullable|array',
+                'agreement' => 'required|accepted',
+            ], [
+                'agreement.required' => 'Необходимо согласиться с условиями',
+                'agreement.accepted' => 'Необходимо согласиться с условиями',
+                'contact_name.required' => 'Укажите ваше имя',
+                'contact_phone.required' => 'Укажите телефон для связи',
+                'contact_email.required' => 'Укажите email для связи',
+                'contact_email.email' => 'Укажите корректный email',
+                'brand_id.required' => 'Выберите марку автомобиля',
+                'brand_id.exists' => 'Выбранная марка не найдена',
+            ]);
+            
+            if ($validator->fails()) {
+                return redirect()->back()
+                    ->withErrors($validator)
+                    ->withInput();
+            }
+            
+            // Рассчитываем цену
+            $price = $this->calculatePrice(
+                $request->consultation_type, 
+                $request->rule_id
+            );
+            
+            // Создаем консультацию
+            $consultation = Consultation::create([
+                'user_id' => Auth::id(),
+                'rule_id' => $request->rule_id,
+                'case_id' => $request->case_id,
+                'brand_id' => $request->brand_id,
+                'model_id' => $request->model_id,
+                'year' => $request->year,
+                'mileage' => $request->mileage,
+                'engine_type' => $request->engine_type,
+                'consultation_type' => $request->consultation_type,
+                'description' => $request->description,
+                'contact_name' => $request->contact_name,
+                'contact_phone' => $request->contact_phone,
+                'contact_email' => $request->contact_email,
+                'price' => $price,
+                'status' => 'pending',
+                'payment_status' => 'pending',
+                'symptoms' => $request->symptoms ?? [],
+                'additional_data' => [
+                    'ip' => $request->ip(),
+                    'user_agent' => $request->userAgent(),
+                    'created_at' => now()->toDateTimeString(),
+                ],
+            ]);
+            
+            Log::info('Consultation created', [
+                'id' => $consultation->id,
+                'type' => $consultation->consultation_type,
+                'price' => $price
+            ]);
+            
+            // Отправка уведомлений (можно добавить позже)
+            // $this->sendNotifications($consultation);
+            
+            return redirect()->route('consultation.confirmation', $consultation->id)
+                ->with('success', 'Заказ консультации создан успешно!');
+            
+        } catch (\Exception $e) {
+            Log::error('Consultation order error', [
+                'error' => $e->getMessage(),
+                'trace' => $e->getTraceAsString(),
+                'request' => $request->except(['_token'])
+            ]);
+            
+            return redirect()->back()
+                ->withInput()
+                ->with('error', 'Ошибка при создании заказа: ' . $e->getMessage());
+        }
+    }
+    
+   /**
+     * Расчет цены консультации
+     */
+    private function calculatePrice($type, $ruleId = null)
+    {
+        $basePrices = [
+            'basic' => 500,
+            'premium' => 1500,
+            'expert' => 3000,
+        ];
+        
+        $price = $basePrices[$type] ?? 3000;
+        
+        // Для экспертной консультации берем цену из правила
+        if ($type === 'expert' && $ruleId) {
+            $rule = Rule::find($ruleId);
+            if ($rule && $rule->base_consultation_price > 0) {
+                $price = $rule->base_consultation_price;
+            }
+        }
+        
+        return $price;
+    }
+    
+   /**
+     * Страница подтверждения заказа
+     */
+    public function confirmation($consultationId)
+    {
+        try {
+            $consultation = Consultation::with(['rule', 'case', 'brand', 'model'])
+                ->findOrFail($consultationId);
+            
+            // Для гостей проверяем по email или телефону
+            // Для авторизованных - по user_id
+            if (Auth::check()) {
+                if ($consultation->user_id !== Auth::id()) {
+                    abort(403, 'Доступ запрещён');
+                }
+            } else {
+                // Можно добавить проверку по токену или сессии
+            }
+            
+            return view('diagnostic.consultation.confirmation', [
+                'consultation' => $consultation,
+                'title' => 'Подтверждение заказа консультации'
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error('Consultation confirmation error', [
+                'consultation_id' => $consultationId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return redirect()->route('diagnostic.start')
+                ->with('error', 'Консультация не найдена');
+        }
+    }
+
+     /**
+     * AJAX загрузка моделей по марке
+     */
+    public function getModels($brandId)
+    {
+        try {
+            $models = CarModel::where('brand_id', $brandId)
+                ->orderBy('name')
+                ->get(['id', 'name']);
+            
+            return response()->json([
+                'success' => true,
+                'models' => $models
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Get models error', [
+                'brand_id' => $brandId,
+                'error' => $e->getMessage()
+            ]);
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка загрузки моделей'
+            ], 500);
+        }
+    }
+    
 }

@@ -18,6 +18,7 @@ use Illuminate\Support\Facades\Route;
 use App\Http\Controllers\ProjectInfoController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\ExpertController;
+use App\Http\Controllers\Diagnostic\Admin\RuleController;
 use App\Http\Controllers\Admin\SymptomImportController;
 
 // Главная посадочная страница (B2C)
@@ -377,4 +378,20 @@ Route::middleware(['auth'])->group(function () {
         Route::get('/popular-symptoms', [AISearchController::class, 'getPopularSymptoms']);
         Route::get('/symptoms/by-system/{system}', [AISearchController::class, 'getSymptomsBySystem']);
     });
+});
+
+
+// Маршруты для правил (публичные)
+Route::get('admin/diagnostic/rules/{id}', [RuleController::class, 'show'])->name('rules.show');
+
+// Маршруты для консультаций
+Route::prefix('diagnostic/consultation')->group(function () {
+    Route::get('/order', [ConsultationController::class, 'orderForm'])->name('consultation.order.form');
+    Route::post('/order', [ConsultationController::class, 'order'])->name('consultation.order');
+    
+    // Альтернативные маршруты для разных источников
+    Route::get('/order/from-rule/{rule}', [ConsultationController::class, 'orderFromRule'])->name('consultation.order.from-rule');
+    Route::get('/order/from-case/{case}', [ConsultationController::class, 'orderFromCase'])->name('consultation.order.from-case');
+    Route::get('/diagnostic/consultation/confirmation/{consultation}', 
+    [ConsultationController::class, 'confirmation'])->name('consultation.confirmation');
 });

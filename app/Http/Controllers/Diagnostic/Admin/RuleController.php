@@ -8,6 +8,7 @@ use App\Models\CarModel;
 use App\Models\Diagnostic\Symptom;
 use App\Models\Diagnostic\Rule;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Log;
 
 class RuleController extends Controller
 {
@@ -103,5 +104,23 @@ class RuleController extends Controller
     {
         $models = CarModel::where('brand_id', $request->brand_id)->get();
         return response()->json($models);
+    }
+
+      public function show($id)
+    {
+        try {
+            $rule = Rule::with(['symptom', 'brand', 'model'])
+                ->findOrFail($id);
+            
+            return view('admin.diagnostic.rules.show', [
+                'rule' => $rule,
+                'title' => 'Правило диагностики: ' . ($rule->symptom->name ?? 'Unknown')
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error showing rule', ['rule_id' => $id, 'error' => $e->getMessage()]);
+            
+            return redirect()->route('admin.diagnostic.rules.index')
+                ->with('error', 'Правило не найдено: ' . $e->getMessage());
+        }
     }
 }
