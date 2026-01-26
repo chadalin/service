@@ -299,8 +299,8 @@
                             </a>
                         </div>
                         <div>
-                            @if($rule->is_active)
-    <a href="{{ route('consultation.order.from-rule', $rule->id) }}" 
+                           @if($rule->is_active)
+    <a href="{{ route('diagnostic.consultation.order.from-rule', $rule->id) }}" 
        class="btn btn-success">
         <i class="bi bi-chat-dots me-1"></i> Заказать консультацию
     </a>

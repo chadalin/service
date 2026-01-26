@@ -6,10 +6,12 @@ use App\Http\Controllers\Controller;
 use App\Models\Diagnostic\Consultation;
 use App\Models\Diagnostic\DiagnosticCase; // Предполагаем, что Case переименован
 use App\Models\User;
+use App\Models\Diagnostic\Rule;
 use App\Models\Diagnostic\ConsultationMessage;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
+use Illuminate\Support\Facades\Log;
 
 class ConsultationController extends Controller
 {

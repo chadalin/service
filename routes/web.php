@@ -3,28 +3,29 @@
 use App\Http\Controllers\Auth\PinAuthController;
 use App\Http\Controllers\Admin\DashboardController;
 use App\Http\Controllers\Admin\DocumentController;
+use App\Http\Controllers\Admin\DocumentProcessingController;
 use App\Http\Controllers\Admin\CarController;
 use App\Http\Controllers\Admin\CategoryController;
+use App\Http\Controllers\Admin\ExpertController;
+use App\Http\Controllers\Admin\SymptomImportController;
 use App\Http\Controllers\ChatController;
 use App\Http\Controllers\SearchController;
-use App\Http\Controllers\Diagnostic\AISearchController;                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  use App\Http\Controllers\DemoController;
 use App\Http\Controllers\HomeController;
-use App\Http\Controllers\Admin\DocumentProcessingController;
+use App\Http\Controllers\ProjectInfoController;
+use App\Http\Controllers\Diagnostic\AISearchController;
 use App\Http\Controllers\Diagnostic\DiagnosticController;
 use App\Http\Controllers\Diagnostic\ReportController;
+use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
 use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleController;
 use Illuminate\Support\Facades\Route;
-use App\Http\Controllers\ProjectInfoController;
-use App\Http\Controllers\Diagnostic\ConsultationController;
-use App\Http\Controllers\Admin\ExpertController;
-use App\Http\Controllers\Diagnostic\Admin\RuleController;
-use App\Http\Controllers\Admin\SymptomImportController;
 
-// Главная посадочная страница (B2C)
+// ===============================================
+// PUBLIC ROUTES (без авторизации)
+// ===============================================
+
+// Главные страницы
 Route::get('/index', [HomeController::class, 'index'])->name('home');
-
-// Посадочная страница для сервисов (B2B)
 Route::get('/services', [HomeController::class, 'landing'])->name('services.landing');
 
 // Auth Routes
@@ -34,17 +35,133 @@ Route::get('/login/verify', [PinAuthController::class, 'showVerifyForm'])->name(
 Route::post('/login/verify', [PinAuthController::class, 'verifyPin'])->name('login.verify');
 Route::post('/logout', [PinAuthController::class, 'logout'])->name('logout');
 
+// Project info (для разработки)
+Route::get('/project-info', [ProjectInfoController::class, 'showProjectInfo']);
+Route::get('/project-info/database', [ProjectInfoController::class, 'showDatabaseStructure']);
+Route::get('/project-info/models', [ProjectInfoController::class, 'showModels']);
+Route::get('/project-info/controllers', [ProjectInfoController::class, 'showControllers']);
+Route::get('/project-info/all', [ProjectInfoController::class, 'showAllInfo']);
+
+// Test route
+Route::get('/test-rule/{id}', function($id) {
+    return "Test Route - Rule ID: " . $id;
+});
+
 // ===============================================
-// Admin Routes
+// AUTHENTICATED ROUTES (требуют авторизации)
 // ===============================================
+
+Route::middleware(['auth'])->group(function () {
+    
+    // Главная перенаправления
+    Route::redirect('/', '/admin/dashboard');
+    
+    // ===============================================
+    // CHAT ROUTES
+    // ===============================================
+    Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
+    Route::post('/chat/search', [ChatController::class, 'search'])->name('chat.search');
+    Route::get('/chat/models/{brandId}', [ChatController::class, 'getModels'])->name('chat.models');
+    
+    // ===============================================
+    // AI SEARCH ROUTES
+    // ===============================================
+    Route::prefix('diagnostic/ai')->name('diagnostic.ai.')->group(function () {
+        Route::get('/search', [AISearchController::class, 'index'])->name('search.page');
+        Route::post('/search', [AISearchController::class, 'search'])->name('search');
+        Route::get('/popular-symptoms', [AISearchController::class, 'getPopularSymptoms'])->name('popular');
+        Route::get('/symptoms/by-system/{system}', [AISearchController::class, 'getSymptomsBySystem']);
+    });
+    
+    // ===============================================
+    // DIAGNOSTIC ROUTES
+    // ===============================================
+    Route::prefix('diagnostic')->name('diagnostic.')->group(function () {
+        // Старт и шаги диагностики
+        Route::get('/', [DiagnosticController::class, 'start'])->name('start');
+        Route::get('/step1', [DiagnosticController::class, 'step1'])->name('step1');
+        Route::post('/step1', [DiagnosticController::class, 'step2'])->name('step2.process'); // POST обработка шага 1
+        Route::get('/step2', [DiagnosticController::class, 'showStep2'])->name('step2.show'); // GET отображение шага 2
+        Route::post('/step2', [DiagnosticController::class, 'processStep2'])->name('step2.process'); // POST обработка шага 2
+        Route::get('/step3', [DiagnosticController::class, 'showStep3'])->name('step3.show'); // GET отображение шага 3
+        Route::post('/step3', [DiagnosticController::class, 'processStep3'])->name('step3.process'); // POST обработка шага 3
+        Route::post('/analyze', [DiagnosticController::class, 'analyze'])->name('analyze');
+        Route::get('/result/{case}', [DiagnosticController::class, 'result'])->name('result');
+        
+        // AJAX для диагностики
+        Route::get('/models/{brandId}', [DiagnosticController::class, 'getModels'])->name('models');
+        
+        // ===============================================
+        // CONSULTATION ROUTES (клиентские)
+        // ===============================================
+        Route::prefix('consultation')->name('consultation.')->group(function () {
+            // Список консультаций пользователя
+            Route::get('/', [ConsultationController::class, 'index'])->name('index');
+            
+            // Основные маршруты заказа
+            Route::get('/order', [ConsultationController::class, 'orderForm'])->name('order.form');
+            Route::post('/order', [ConsultationController::class, 'order'])->name('order');
+            
+            // Заказ из разных источников
+            Route::get('/order/from-rule/{rule}', [ConsultationController::class, 'orderFromRule'])
+                ->name('order.from-rule');
+            Route::get('/order/from-case/{case}', [ConsultationController::class, 'orderFromCase'])
+                ->name('order.from-case');
+                
+            // Просмотр консультации
+            Route::get('/{consultation}', [ConsultationController::class, 'showClient'])->name('show');
+            Route::post('/{consultation}/feedback', [ConsultationController::class, 'addFeedback'])->name('feedback');
+            Route::delete('/{id}/cancel', [ConsultationController::class, 'cancel'])->name('cancel');
+                
+            // Подтверждение заказа
+            Route::get('/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])
+                ->name('confirmation');
+                
+            // Чат консультации
+            Route::post('/{consultation}/message', [ConsultationController::class, 'sendMessage'])->name('message');
+            Route::get('/{consultation}/messages', [ConsultationController::class, 'getMessages'])->name('messages');
+            Route::post('/{consultation}/upload', [ConsultationController::class, 'uploadFile'])->name('upload');
+            Route::post('/{consultation}/read', [ConsultationController::class, 'markAsRead'])->name('read');
+                
+            // AJAX
+            Route::get('/models/{brandId}', [ConsultationController::class, 'getModels'])
+                ->name('models');
+        });
+        
+        // ===============================================
+        // REPORT ROUTES
+        // ===============================================
+        Route::prefix('report')->name('report.')->group(function () {
+            Route::get('/', [ReportController::class, 'index'])->name('index');
+            Route::get('/{case}', [ReportController::class, 'show'])->name('show');
+            Route::get('/{case}/pdf', [ReportController::class, 'pdf'])->name('pdf');
+            Route::post('/{case}/send-email', [ReportController::class, 'sendEmail'])->name('send-email');
+        });
+    });
+    
+    // ===============================================
+    // CONSULTATION CHAT MESSAGES ROUTES
+    // ===============================================
+    Route::post('/diagnostic/consultation/{id}/message', [ConsultationController::class, 'sendMessage'])
+        ->name('diagnostic.consultation.message');
+    Route::get('/diagnostic/consultation/{id}/messages', [ConsultationController::class, 'getMessages'])
+        ->name('diagnostic.consultation.messages');
+});
+
+// ===============================================
+// ADMIN ROUTES (auth + внутри группы admin)
+// ===============================================
+
 Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () {
+    
     // Dashboard
     Route::get('/dashboard', [DashboardController::class, 'index'])->name('dashboard');
     
-    // Обработка документов - ДОЛЖЕН БЫТЬ ПЕРЕД ДРУГИМИ МАРШРУТАМИ ДОКУМЕНТОВ
-     Route::prefix('documents-processing')->name('documents.processing.')->group(function () {
+    // ===============================================
+    // DOCUMENT PROCESSING ROUTES
+    // ===============================================
+    Route::prefix('documents-processing')->name('documents.processing.')->group(function () {
         Route::get('/', [DocumentProcessingController::class, 'index'])->name('index');
-        
         Route::post('/parse/{id}', [DocumentProcessingController::class, 'parseDocument'])->name('parse');
         Route::post('/index/{id}', [DocumentProcessingController::class, 'indexDocument'])->name('index');
         Route::post('/process/{id}', [DocumentProcessingController::class, 'processDocument'])->name('process');
@@ -54,7 +171,9 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::post('/reset/{id}', [DocumentProcessingController::class, 'resetStatus'])->name('reset');
     });
     
-    // Documents Routes (ОСНОВНЫЕ)
+    // ===============================================
+    // DOCUMENTS ROUTES
+    // ===============================================
     Route::prefix('documents')->name('documents.')->group(function () {
         Route::get('/', [DocumentController::class, 'index'])->name('index');
         Route::get('/create', [DocumentController::class, 'create'])->name('create');
@@ -65,21 +184,28 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::get('/{document}/download', [DocumentController::class, 'download'])->name('download');
         Route::post('/{document}/reprocess', [DocumentController::class, 'reprocess'])->name('reprocess');
         
-        // AJAX маршруты для документов
+        // AJAX
         Route::get('/models/{brandId}', [DocumentController::class, 'getModels'])->name('models');
         Route::post('/upload-chunk', [DocumentController::class, 'uploadChunk'])->name('upload-chunk');
         Route::post('/check-file', [DocumentController::class, 'checkFile'])->name('check-file');
+        Route::post('/batch-index', [DocumentController::class, 'batchIndex'])->name('batch-index');
     });
     
-    // Search Routes
+    // ===============================================
+    // SEARCH ROUTES
+    // ===============================================
     Route::prefix('search')->name('search.')->group(function () {
         Route::get('/', [SearchController::class, 'index'])->name('index');
         Route::post('/', [SearchController::class, 'search'])->name('perform');
         Route::get('/advanced', [SearchController::class, 'advancedSearch'])->name('advanced');
         Route::post('/semantic', [SearchController::class, 'semanticSearch'])->name('semantic');
+        Route::post('/analyze-query', [SearchController::class, 'analyzeQuery'])->name('analyze-query');
+        Route::get('/models/{brandId}', [SearchController::class, 'getModels'])->name('models');
     });
     
-    // Categories Routes
+    // ===============================================
+    // CATEGORIES ROUTES
+    // ===============================================
     Route::prefix('categories')->name('categories.')->group(function () {
         Route::get('/', [CategoryController::class, 'index'])->name('index');
         Route::get('/create', [CategoryController::class, 'create'])->name('create');
@@ -89,7 +215,9 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::delete('/{category}', [CategoryController::class, 'destroy'])->name('destroy');
     });
     
-    // Cars Routes
+    // ===============================================
+    // CARS ROUTES
+    // ===============================================
     Route::prefix('cars')->name('cars.')->group(function () {
         Route::get('/import', [CarController::class, 'importForm'])->name('import');
         Route::post('/import', [CarController::class, 'import'])->name('import.submit');
@@ -97,9 +225,9 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::get('/models', [CarController::class, 'models'])->name('models');
     });
     
-
-    
-    // Diagnostic Admin Routes
+    // ===============================================
+    // DIAGNOSTIC ADMIN ROUTES
+    // ===============================================
     Route::prefix('diagnostic')->name('diagnostic.')->group(function () {
         // Симптомы
         Route::get('/symptoms', [DiagnosticSymptomController::class, 'index'])->name('symptoms.index');
@@ -111,15 +239,75 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         
         // Правила
         Route::get('/rules', [DiagnosticRuleController::class, 'index'])->name('rules.index');
-        Route::get('/admin/rules/create', [DiagnosticRuleController::class, 'create'])->name('rules.create');
+        Route::get('/rules/create', [DiagnosticRuleController::class, 'create'])->name('rules.create');
         Route::post('/rules', [DiagnosticRuleController::class, 'store'])->name('rules.store');
+        Route::get('/rules/{rule}', [DiagnosticRuleController::class, 'show'])->name('rules.show');
         Route::get('/rules/{rule}/edit', [DiagnosticRuleController::class, 'edit'])->name('rules.edit');
         Route::put('/rules/{rule}', [DiagnosticRuleController::class, 'update'])->name('rules.update');
         Route::delete('/rules/{rule}', [DiagnosticRuleController::class, 'destroy'])->name('rules.destroy');
         Route::get('/rules/models/{brandId}', [DiagnosticRuleController::class, 'getModels'])->name('rules.models');
     });
     
-    // Тестовый поиск
+    // ===============================================
+    // SYMPTOM IMPORT ROUTES
+    // ===============================================
+    Route::prefix('symptoms')->name('symptoms.')->group(function () {
+        Route::get('/import', [SymptomImportController::class, 'index'])->name('import.page');
+        Route::get('/import/select', [SymptomImportController::class, 'selectBrandModel'])->name('import.select');
+        Route::post('/import/brand-model', [SymptomImportController::class, 'importForBrandModel'])->name('import.brand-model');
+        Route::post('/import/auto', [SymptomImportController::class, 'importAuto'])->name('import.auto');
+        Route::get('/import/template', [SymptomImportController::class, 'downloadTemplate'])->name('import.template');
+        Route::get('/get-models/{brandId}', [SymptomImportController::class, 'getModels'])->name('import.models');
+        Route::get('/existing-data', [SymptomImportController::class, 'getExistingData'])->name('import.existing-data');
+    });
+    
+    // ===============================================
+    // CONSULTATIONS ADMIN ROUTES
+    // ===============================================
+    Route::prefix('consultations')->name('consultations.')->group(function () {
+        Route::get('/', [ConsultationController::class, 'index'])->name('index');
+        Route::get('/pending', [ConsultationController::class, 'pending'])->name('pending');
+        Route::get('/in-progress', [ConsultationController::class, 'inProgress'])->name('in-progress');
+        Route::get('/{consultation}', [ConsultationController::class, 'show'])->name('show');
+        Route::post('/{consultation}/assign', [ConsultationController::class, 'assignExpert'])->name('assign');
+        Route::post('/{consultation}/cancel', [ConsultationController::class, 'cancel'])->name('cancel');
+        Route::get('/statistics', [ConsultationController::class, 'statistics'])->name('statistics');
+        
+        // Формы заказа (редиректы)
+        Route::get('/consultation/order-form', function() {
+            return redirect()->route('diagnostic.start')->with('info', 'Пожалуйста, сначала создайте диагностический случай');
+        })->name('consultation.order-form');
+        
+        Route::get('/consultation/{consultation}', [ConsultationController::class, 'showClient'])->name('consultation.show-client');
+    });
+    
+    // ===============================================
+    // EXPERTS ADMIN ROUTES
+    // ===============================================
+    Route::prefix('experts')->name('experts.')->group(function () {
+        Route::get('/', [ExpertController::class, 'index'])->name('index');
+        Route::get('/create', [ExpertController::class, 'create'])->name('create');
+        Route::post('/', [ExpertController::class, 'store'])->name('store');
+        Route::get('/{expert}/edit', [ExpertController::class, 'edit'])->name('edit');
+        Route::put('/{expert}', [ExpertController::class, 'update'])->name('update');
+        Route::delete('/{expert}', [ExpertController::class, 'destroy'])->name('destroy');
+        Route::post('/{expert}/toggle-status', [ExpertController::class, 'toggleStatus'])->name('toggle-status');
+    });
+    
+    // ===============================================
+    // DIAGNOSTICS STATS ROUTES
+    // ===============================================
+    Route::get('/diagnostic/stats', function() {
+        return response()->json([
+            'success' => true,
+            'symptoms' => \App\Models\Diagnostic\Symptom::count(),
+            'rules' => \App\Models\Diagnostic\Rule::count(),
+        ]);
+    })->name('diagnostic.stats');
+    
+    // ===============================================
+    // TEST SEARCH ROUTES
+    // ===============================================
     Route::get('/test-search', function() {
         $brands = \App\Models\Brand::orderBy('name')->get();
         $models = \App\Models\CarModel::orderBy('name')->get()
@@ -139,166 +327,62 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         
         return view('test-search', compact('brands', 'models'));
     })->name('test.search');
-
-    Route::get('/diagnostic/consultation/order-form', function() {
-    return redirect()->route('diagnostic.start')->with('info', 'Пожалуйста, сначала создайте диагностический случай');
-})->name('diagnostic.consultation.order-form')->middleware('auth');
-    
-    // Дополнительные AJAX маршруты
-    Route::get('/search/models/{brandId}', [SearchController::class, 'getModels'])
-        ->name('search.models');
-    Route::post('/documents/batch-index', [DocumentController::class, 'batchIndex'])
-        ->name('documents.batch-index');
-    Route::post('/documents/{document}/reindex', [DocumentController::class, 'reprocess'])
-        ->name('documents.reindex');
-    Route::post('/search/semantic', [SearchController::class, 'semanticSearch'])
-        ->name('search.semantic');
-    Route::post('/search/analyze-query', [SearchController::class, 'analyzeQuery'])
-        ->name('search.analyze-query');
 });
 
 // ===============================================
-// Public Routes
+// EXPERT ROUTES (для экспертов)
 // ===============================================
 
-// Chat (доступно авторизованным)
-Route::middleware(['auth'])->group(function () {
-    Route::get('/chat', [ChatController::class, 'index'])->name('chat.index');
-    Route::post('/chat/search', [ChatController::class, 'search'])->name('chat.search');
-    Route::get('/chat/models/{brandId}', [ChatController::class, 'getModels'])->name('chat.models');
-});
-
-// Diagnostic Routes (доступно авторизованным)
-Route::middleware(['auth'])->prefix('diagnostic')->name('diagnostic.')->group(function () {
-    // Шаги диагностики
-    Route::get('/', [DiagnosticController::class, 'step1'])->name('start');
-    Route::post('/step2', [DiagnosticController::class, 'step2'])->name('step2');
+Route::middleware(['auth'])->prefix('expert')->name('expert.')->group(function () {
+    // Профиль эксперта
+    Route::get('/profile', [ExpertController::class, 'profile'])->name('profile.edit');
+    Route::put('/profile', [ExpertController::class, 'updateProfile'])->name('profile.update');
     
-    // GET роуты для отображения шагов (если нужны)
-    Route::get('/step2', [DiagnosticController::class, 'showStep2'])->name('step2.show');
-    Route::get('/step3', [DiagnosticController::class, 'showStep3'])->name('step3.show');
+    // Расписание
+    Route::get('/schedule', [ExpertController::class, 'schedule'])->name('schedule.index');
+    Route::put('/schedule', [ExpertController::class, 'updateSchedule'])->name('schedule.update');
     
-    Route::post('/step3', [DiagnosticController::class, 'step3'])->name('step3');
-     Route::post('/step3/process', [DiagnosticController::class, 'processStep3'])->name('step3.process'); // POST для обработки
-    Route::post('/analyze', [DiagnosticController::class, 'analyze'])->name('analyze');
-    Route::get('/result/{case}', [DiagnosticController::class, 'result'])->name('result');
+    // Аналитика
+    Route::get('/analytics', [ExpertController::class, 'analytics'])->name('analytics.index');
     
-    // Консультации
-    Route::post('/consultation/{case}/order', [DiagnosticController::class, 'orderConsultation'])->name('consultation.order');
-    
-    // AJAX для диагностики
-    Route::get('/models/{brandId}', [DiagnosticController::class, 'getModels'])->name('models');
-});
-
-// Отчёты
-  // Отчеты
-Route::prefix('diagnostic/report')->group(function () {
-    Route::get('/', [ReportController::class, 'index'])->name('diagnostic.report.index');
-    Route::get('/{case}', [ReportController::class, 'show'])->name('diagnostic.report.show');
-    Route::get('/{case}/pdf', [ReportController::class, 'pdf'])->name('diagnostic.report.pdf');
-    Route::post('/{case}/send-email', [ReportController::class, 'sendEmail'])->name('diagnostic.report.send-email');
-});
-    
-
-// Главная страница перенаправляет на логин
-Route::redirect('/', '/login')->middleware('guest');
-Route::redirect('/', '/admin/dashboard')->middleware('auth');
-
-
-
-// Маршрут для показа структуры проекта
-Route::get('/project-info', [ProjectInfoController::class, 'showProjectInfo']);
-Route::get('/project-info/database', [ProjectInfoController::class, 'showDatabaseStructure']);
-Route::get('/project-info/models', [ProjectInfoController::class, 'showModels']);
-Route::get('/project-info/controllers', [ProjectInfoController::class, 'showControllers']);
-Route::get('/project-info/all', [ProjectInfoController::class, 'showAllInfo']);
-
-
-
-// Consultation Routes
-Route::middleware(['auth'])->prefix('consultation')->name('consultation.')->group(function () {
-    Route::get('/order/{case}/{type?}', [ConsultationController::class, 'showOrderForm'])->name('order.form');
-    Route::post('/order/{case}', [ConsultationController::class, 'orderConsultation'])->name('order');
-    Route::get('/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])->name('confirmation');
-});
-// Консультации
-Route::prefix('diagnostic/consultation')->group(function () {
-    // Клиентские маршруты
-    Route::get('/order/{case}/{type?}', [ConsultationController::class, 'showOrderForm'])->name('diagnostic.consultation.order');
-    Route::post('/order/{case}', [ConsultationController::class, 'orderConsultation'])->name('diagnostic.consultation.order.submit');
-    Route::get('/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])->name('diagnostic.consultation.confirmation');
-    Route::get('/', [ConsultationController::class, 'index'])->name('diagnostic.consultation.index');
-    Route::get('/{consultation}', [ConsultationController::class, 'showClient'])->name('diagnostic.consultation.show');
-    Route::post('/{consultation}/feedback', [ConsultationController::class, 'addFeedback'])->name('diagnostic.consultation.feedback');
-    Route::delete('/{id}/cancel', [ConsultationController::class, 'cancel'])->name('diagnostic.consultation.cancel');
-    
-    
-    // Экспертные маршруты
-    Route::prefix('expert')->group(function () {
-        Route::get('/', [ConsultationController::class, 'expertDashboard'])->name('diagnostic.consultation.expert.dashboard');
-        Route::get('/{consultation}', [ConsultationController::class, 'showExpert'])->name('diagnostic.consultation.expert.show');
-        Route::post('/{consultation}/start', [ConsultationController::class, 'startExpertConsultation'])->name('diagnostic.consultation.expert.start');
-        Route::post('/{consultation}/analysis', [ConsultationController::class, 'addAnalysis'])->name('diagnostic.consultation.expert.analysis');
-        Route::post('/{consultation}/request-data', [ConsultationController::class, 'requestData'])->name('diagnostic.consultation.expert.request-data');
-        Route::post('/{consultation}/complete', [ConsultationController::class, 'completeConsultation'])->name('diagnostic.consultation.expert.complete');
+    // ===============================================
+    // EXPERT CONSULTATION ROUTES
+    // ===============================================
+    Route::prefix('consultation')->name('consultation.')->group(function () {
+        Route::get('/', [ConsultationController::class, 'expertDashboard'])->name('dashboard');
+        Route::get('/{consultation}', [ConsultationController::class, 'showExpert'])->name('show');
+        Route::post('/{consultation}/start', [ConsultationController::class, 'startExpertConsultation'])->name('start');
+        Route::post('/{consultation}/analysis', [ConsultationController::class, 'addAnalysis'])->name('analysis');
+        Route::post('/{consultation}/request-data', [ConsultationController::class, 'requestData'])->name('request-data');
+        Route::post('/{consultation}/complete', [ConsultationController::class, 'completeConsultation'])->name('complete');
     });
-    
-    // Общие маршруты для чата
-    Route::post('/{consultation}/message', [ConsultationController::class, 'sendMessage'])->name('diagnostic.consultation.message');
-    Route::post('/{consultation}/upload', [ConsultationController::class, 'uploadFile'])->name('diagnostic.consultation.upload');
-    Route::get('/{consultation}/messages', [ConsultationController::class, 'getMessages'])->name('diagnostic.consultation.messages');
-    Route::post('/{consultation}/read', [ConsultationController::class, 'markAsRead'])->name('diagnostic.consultation.read');
-    
 });
+
+// ===============================================
+// LEGACY CONSULTATION ROUTES (для обратной совместимости)
+// ===============================================
 
 Route::middleware(['auth'])->group(function () {
-    // ... другие маршруты
-    
-    // Чат консультации
-    Route::post('/diagnostic/consultation/{id}/message', [ConsultationController::class, 'sendMessage'])
-        ->name('diagnostic.consultation.message');
-    
-    Route::get('/diagnostic/consultation/{id}/messages', [ConsultationController::class, 'getMessages'])
-        ->name('diagnostic.consultation.messages');
+    Route::get('/consultation/order/{case}/{type?}', [ConsultationController::class, 'showOrderForm'])
+        ->name('consultation.order.form.legacy');
+    Route::post('/consultation/order/{case}', [ConsultationController::class, 'orderConsultation'])
+        ->name('consultation.order.legacy');
+    Route::get('/consultation/confirmation/{consultation}', [ConsultationController::class, 'confirmation'])
+        ->name('consultation.confirmation.legacy');
 });
 
+// ===============================================
+// PUBLIC RULES VIEW (публичный доступ к правилам)
+// ===============================================
 
-// Административные маршруты для консультаций
-Route::middleware(['auth', 'admin'])->prefix('admin')->group(function () {
-    Route::prefix('consultations')->group(function () {
-        Route::get('/', [ConsultationController::class, 'index'])->name('admin.consultations.index');
-        Route::get('/pending', [ConsultationController::class, 'pending'])->name('admin.consultations.pending');
-        Route::get('/in-progress', [ConsultationController::class, 'inProgress'])->name('admin.consultations.in-progress');
-        Route::get('/{consultation}', [ConsultationController::class, 'show'])->name('admin.consultations.show');
-        Route::get('/consultation/order', [ConsultationController::class, 'showOrderForm'])->name('consultation.order-form');
-        Route::get('/consultation/{consultation}', [ConsultationController::class, 'showClient'])->name('consultation.show-client');
-        Route::post('/{consultation}/assign', [ConsultationController::class, 'assignExpert'])->name('admin.consultations.assign');
-        Route::post('/{consultation}/cancel', [ConsultationController::class, 'cancel'])->name('admin.consultations.cancel');
-        Route::get('/statistics', [ConsultationController::class, 'statistics'])->name('admin.consultations.statistics');
-        
-    });
-    
-    Route::prefix('experts')->group(function () {
-        Route::get('/', [ExpertController::class, 'index'])->name('admin.experts.index');
-        Route::get('/create', [ExpertController::class, 'create'])->name('admin.experts.create');
-        Route::post('/', [ExpertController::class, 'store'])->name('admin.experts.store');
-        Route::get('/{expert}/edit', [ExpertController::class, 'edit'])->name('admin.experts.edit');
-        Route::put('/{expert}', [ExpertController::class, 'update'])->name('admin.experts.update');
-        Route::delete('/{expert}', [ExpertController::class, 'destroy'])->name('admin.experts.destroy');
-        Route::post('/{expert}/toggle-status', [ExpertController::class, 'toggleStatus'])->name('admin.experts.toggle-status');
-    });
-});
+Route::get('/diagnostic/public-rules/{id}', [DiagnosticRuleController::class, 'publicShow'])
+    ->name('rules.public.show')
+    ->where('id', '[0-9]+');
 
-// Экспертные маршруты
-Route::middleware(['auth', 'expert'])->prefix('expert')->group(function () {
-    Route::get('/profile', [ExpertController::class, 'profile'])->name('expert.profile.edit');
-    Route::put('/profile', [ExpertController::class, 'updateProfile'])->name('expert.profile.update');
-    Route::get('/schedule', [ExpertController::class, 'schedule'])->name('expert.schedule.index');
-    Route::put('/schedule', [ExpertController::class, 'updateSchedule'])->name('expert.schedule.update');
-    Route::get('/analytics', [ExpertController::class, 'analytics'])->name('expert.analytics.index');
-});
+// ===============================================
+// API ROUTES (для уведомлений и AJAX)
+// ===============================================
 
-// API для уведомлений
 Route::middleware('auth')->prefix('api')->group(function () {
     Route::get('/consultations/unread-count', function() {
         $user = auth()->user();
@@ -339,59 +423,8 @@ Route::middleware('auth')->prefix('api')->group(function () {
     });
 });
 
+// ===============================================
+// GUEST REDIRECT
+// ===============================================
 
-
-// routes/web.php
-// routes/web.php
-Route::middleware(['auth'])->prefix('admin')->group(function() {
-    // Импорт симптомов
-    Route::get('/symptoms/import', [SymptomImportController::class, 'index'])
-        ->name('admin.symptoms.import.page');
-    Route::get('/symptoms/import/select', [SymptomImportController::class, 'selectBrandModel'])
-        ->name('admin.symptoms.import.select');
-    Route::post('/symptoms/import/brand-model', [SymptomImportController::class, 'importForBrandModel'])
-        ->name('admin.symptoms.import.brand-model');
-    Route::post('/symptoms/import/auto', [SymptomImportController::class, 'importAuto'])
-        ->name('admin.symptoms.import.auto');
-    Route::get('/symptoms/import/template', [SymptomImportController::class, 'downloadTemplate'])
-        ->name('admin.symptoms.import.template');
-    Route::get('/symptoms/get-models/{brandId}', [SymptomImportController::class, 'getModels']);
-    Route::get('/symptoms/existing-data', [SymptomImportController::class, 'getExistingData']);
-    
-    // Статистика
-    Route::get('/diagnostic/stats', function() {
-        return response()->json([
-            'success' => true,
-            'symptoms' => \App\Models\Diagnostic\Symptom::count(),
-            'rules' => \App\Models\Diagnostic\Rule::count(),
-        ]);
-    });
-});
-
-
-
-Route::middleware(['auth'])->group(function () {
-    // AI поиск по симптомам
-    Route::prefix('diagnostic/ai')->name('diagnostic.ai.')->group(function () {
-        Route::get('/search', [AISearchController::class, 'index'])->name('search.page');
-        Route::post('/search', [AISearchController::class, 'search'])->name('search');
-        Route::get('/popular-symptoms', [AISearchController::class, 'getPopularSymptoms']);
-        Route::get('/symptoms/by-system/{system}', [AISearchController::class, 'getSymptomsBySystem']);
-    });
-});
-
-
-// Маршруты для правил (публичные)
-Route::get('admin/diagnostic/rules/{id}', [RuleController::class, 'show'])->name('rules.show');
-
-// Маршруты для консультаций
-Route::prefix('diagnostic/consultation')->group(function () {
-    Route::get('/order', [ConsultationController::class, 'orderForm'])->name('consultation.order.form');
-    Route::post('/order', [ConsultationController::class, 'order'])->name('consultation.order');
-    
-    // Альтернативные маршруты для разных источников
-    Route::get('/order/from-rule/{rule}', [ConsultationController::class, 'orderFromRule'])->name('consultation.order.from-rule');
-    Route::get('/order/from-case/{case}', [ConsultationController::class, 'orderFromCase'])->name('consultation.order.from-case');
-    Route::get('/diagnostic/consultation/confirmation/{consultation}', 
-    [ConsultationController::class, 'confirmation'])->name('consultation.confirmation');
-});
+Route::redirect('/', '/login')->middleware('guest');
