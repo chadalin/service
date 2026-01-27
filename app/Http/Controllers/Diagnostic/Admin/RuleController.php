@@ -14,8 +14,10 @@ class RuleController extends Controller
 {
     public function index()
     {
+        $symptoms = Symptom::where('is_active', true)->get();
+        $brands = Brand::all();
         $rules = Rule::with(['symptom', 'brand', 'model'])->paginate(20);
-        return view('diagnostic.admin.rules.index', compact('rules'));
+        return view('diagnostic.admin.rules.index', compact('rules','symptoms','brands'));
     }
     
     public function create()

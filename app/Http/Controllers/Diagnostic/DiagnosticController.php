@@ -260,4 +260,98 @@ class DiagnosticController extends Controller
         
         return redirect()->route('diagnostic.result', $case->id);
     }
+
+
+     public function start(Request $request)
+{
+    \Log::info('Consultation order form accessed with params:', $request->all());
+    
+    // Обрабатываем разные источники данных
+    $consultationType = $request->input('type', 'basic');
+    $symptomId = $request->input('symptom_id');
+    $ruleId = $request->input('rule_id');
+    $caseId = $request->input('case');
+    $brandId = $request->input('brand_id');
+    $modelId = $request->input('model_id');
+    
+    // Загружаем данные в зависимости от источника
+    $symptomNames = [];
+    $symptomIds = [];
+    $rule = null;
+    
+    // Если передан симптом ID
+    if ($symptomId) {
+        $symptomIds = [$symptomId];
+        $symptom = Symptom::find($symptomId);
+        if ($symptom) {
+            $symptomNames = [$symptom->name];
+        }
+    }
+    
+    // Если передан ID кейса
+    if ($caseId) {
+        $case = DiagnosticCase::find($caseId);
+        if ($case) {
+            // Получаем симптомы из кейса
+            $symptomIds = $case->symptoms ?? [];
+            if (!empty($symptomIds)) {
+                $symptoms = Symptom::whereIn('id', $symptomIds)->get();
+                $symptomNames = $symptoms->pluck('name')->toArray();
+            }
+            
+            // Устанавливаем данные автомобиля
+            $brandId = $brandId ?? $case->brand_id;
+            $modelId = $modelId ?? $case->model_id;
+            $year = $request->input('year') ?? $case->year;
+            $mileage = $request->input('mileage') ?? $case->mileage;
+            $engine_type = $request->input('engine_type') ?? $case->engine_type;
+            $description = $request->input('description') ?? $case->description;
+        }
+    }
+    
+    // Если передан ID правила
+    if ($ruleId) {
+        $rule = Rule::find($ruleId);
+        if ($rule) {
+            // Получаем симптомы из правила
+            $symptomIds = $rule->symptoms->pluck('id')->toArray();
+            $symptomNames = $rule->symptoms->pluck('name')->toArray();
+            
+            // Устанавливаем данные автомобиля
+            $brandId = $brandId ?? $rule->brand_id;
+            $modelId = $modelId ?? $rule->model_id;
+        }
+    }
+    
+    // Загружаем марки автомобилей
+    $brands = Brand::orderBy('name')->get();
+    
+    // Загружаем модели, если есть brand_id
+    $models = collect();
+    if ($brandId) {
+        $models = CarModel::where('brand_id', $brandId)->orderBy('name')->get();
+    }
+    
+    // Получаем данные из запроса
+    $data = [
+        'consultationType' => $consultationType,
+        'rule' => $rule,
+        'caseId' => $caseId,
+        'symptoms' => $symptomIds,
+        'symptom_names' => $symptomNames,
+        'brands' => $brands,
+        'models' => $models,
+        'brand_id' => $brandId,
+        'model_id' => $modelId,
+        'year' => $request->input('year'),
+        'mileage' => $request->input('mileage'),
+        'engine_type' => $request->input('engine_type'),
+        'description' => $request->input('description'),
+    ];
+    
+    \Log::info('Data for consultation form:', $data);
+    
+    return view('diagnostic.consultation.order', $data);
+}
+    
 }

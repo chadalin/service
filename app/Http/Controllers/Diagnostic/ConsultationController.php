@@ -6,6 +6,8 @@ use App\Http\Controllers\Controller;
 use App\Models\Diagnostic\Consultation;
 use App\Models\Diagnostic\DiagnosticCase; // Предполагаем, что Case переименован
 use App\Models\User;
+use App\Models\Brand;
+use App\Models\CarModel;
 use App\Models\Diagnostic\Rule;
 use App\Models\Diagnostic\ConsultationMessage;
 use Illuminate\Http\Request;
@@ -831,18 +833,20 @@ public function show($id)
      * Заказ консультации из правила
      */
     public function orderFromRule($ruleId)
-    {
+    { 
         try {
             Log::info('Order from rule requested', ['rule_id' => $ruleId]);
             
             $rule = Rule::with(['symptom', 'brand', 'model'])->findOrFail($ruleId);
-            
+            // Установите значение по умолчанию для consultationType
+            $consultationType = $request->query('type', 'basic');
             // Редирект на универсальную форму с параметрами
             return redirect()->route('consultation.order.form', [
                 'rule' => $ruleId,
                 'type' => 'expert',
                 'brand_id' => $rule->brand_id,
                 'model_id' => $rule->model_id,
+                'consultationType' => $consultationType,
             ]);
             
         } catch (\Exception $e) {
@@ -1069,6 +1073,132 @@ public function show($id)
                 'message' => 'Ошибка загрузки моделей'
             ], 500);
         }
+    }
+
+    
+
+     public function store(Request $request)
+    {
+        \Log::info('Consultation store request:', $request->all());
+        
+        $validated = $request->validate([
+            'consultation_type' => 'required|in:basic,premium,expert',
+            'contact_name' => 'required|string|max:255',
+            'contact_phone' => 'required|string|max:20',
+            'contact_email' => 'required|email',
+            'brand_id' => 'required|exists:brands,id',
+            'model_id' => 'nullable|exists:car_models,id',
+            'year' => 'nullable|integer|min:1990|max:' . date('Y'),
+            'engine_type' => 'nullable|string|max:50',
+            'mileage' => 'nullable|integer|min:0|max:1000000',
+            'description' => 'nullable|string|max:2000',
+            'agreement' => 'required|accepted',
+            'rule_id' => 'nullable|exists:diagnostic_rules,id',
+            'case_id' => 'nullable|exists:diagnostic_cases,id',
+            'symptoms' => 'nullable|array',
+            'symptoms.*' => 'exists:diagnostic_symptoms,id',
+        ]);
+        
+        // Создание заказа консультации
+        $consultationOrder = \App\Models\Diagnostic\Consultation::create([
+            'user_id' => Auth::id(),
+            'consultation_type' => $validated['consultation_type'],
+            'contact_name' => $validated['contact_name'],
+            'contact_phone' => $validated['contact_phone'],
+            'contact_email' => $validated['contact_email'],
+            'brand_id' => $validated['brand_id'],
+            'model_id' => $validated['model_id'],
+            'year' => $validated['year'],
+            'engine_type' => $validated['engine_type'],
+            'mileage' => $validated['mileage'],
+            'description' => $validated['description'],
+            'rule_id' => $validated['rule_id'],
+            'case_id' => $validated['case_id'],
+            'symptoms' => $validated['symptoms'] ?? [],
+            'status' => 'pending',
+            'price' => $this->calculatePrice($validated['consultation_type'], $validated['rule_id'] ?? null),
+        ]);
+        
+        // Если есть загруженные файлы из формы на странице правила
+        if ($request->has('symptom_description') || $request->hasFile('protocol_files') || $request->hasFile('symptom_photos') || $request->hasFile('symptom_videos')) {
+            $this->processConsultationFiles($consultationOrder, $request);
+        }
+        
+        // Перенаправление на страницу успеха или оплаты
+        return redirect()->route('consultation.success', $consultationOrder->id)
+            ->with('success', 'Заказ на консультацию успешно создан! Наш эксперт свяжется с вами в течение 30 минут.');
+    }
+    
+   
+    
+    private function processConsultationFiles($consultationOrder, $request)
+    {
+        $uploadedFiles = [];
+        
+        // Обработка протоколов
+        if ($request->hasFile('protocol_files')) {
+            foreach ($request->file('protocol_files') as $file) {
+                $path = $file->store('consultations/' . $consultationOrder->id . '/protocols', 'public');
+                $uploadedFiles[] = [
+                    'type' => 'protocol',
+                    'name' => $file->getClientOriginalName(),
+                    'path' => $path,
+                    'mime_type' => $file->getMimeType(),
+                    'size' => $file->getSize(),
+                ];
+            }
+        }
+        
+        // Обработка фото
+        if ($request->hasFile('symptom_photos')) {
+            foreach ($request->file('symptom_photos') as $file) {
+                $path = $file->store('consultations/' . $consultationOrder->id . '/photos', 'public');
+                $uploadedFiles[] = [
+                    'type' => 'photo',
+                    'name' => $file->getClientOriginalName(),
+                    'path' => $path,
+                    'mime_type' => $file->getMimeType(),
+                    'size' => $file->getSize(),
+                ];
+            }
+        }
+        
+        // Обработка видео
+        if ($request->hasFile('symptom_videos')) {
+            foreach ($request->file('symptom_videos') as $file) {
+                $path = $file->store('consultations/' . $consultationOrder->id . '/videos', 'public');
+                $uploadedFiles[] = [
+                    'type' => 'video',
+                    'name' => $file->getClientOriginalName(),
+                    'path' => $path,
+                    'mime_type' => $file->getMimeType(),
+                    'size' => $file->getSize(),
+                ];
+            }
+        }
+        
+        // Сохраняем описание симптома и дополнительные файлы
+        if ($request->has('symptom_description')) {
+            $consultationOrder->update([
+                'symptom_description' => $request->input('symptom_description'),
+                'additional_info' => $request->input('additional_info'),
+                'uploaded_files' => $uploadedFiles,
+            ]);
+        }
+    }
+    
+    public function success($id)
+    {
+        $consultationOrder = ConsultationOrder::findOrFail($id);
+        
+        // Проверка прав доступа
+        if ($consultationOrder->user_id !== Auth::id()) {
+            abort(403, 'Доступ запрещён');
+        }
+        
+        return view('consultation.success', [
+            'consultation' => $consultationOrder,
+        ]);
     }
     
 }

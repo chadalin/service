@@ -428,3 +428,40 @@ Route::middleware('auth')->prefix('api')->group(function () {
 // ===============================================
 
 Route::redirect('/', '/login')->middleware('guest');
+
+
+Route::prefix('consultation')->group(function () {
+    Route::get('/order/{case}/form', [ConsultationController::class, 'orderForm'])
+        ->name('consultation.order.form');
+});
+
+
+
+// routes/web.php
+Route::prefix('consultation')->middleware(['web', 'auth'])->group(function () {
+    Route::get('/order/form', [ConsultationController::class, 'showOrderForm'])
+        ->name('consultation.order.form');
+    Route::post('/order', [ConsultationController::class, 'storeOrder'])
+        ->name('consultation.order');
+});
+
+
+
+
+// routes/web.php
+Route::middleware(['web', 'auth'])->group(function () {
+    // Основной маршрут для формы консультации
+    Route::get('/consultation/order', [ConsultationController::class, 'start'])
+        ->name('consultation.order.form');
+    
+    Route::post('/consultation/order', [ConsultationController::class, 'store'])
+        ->name('consultation.order');
+    
+    // Маршрут для страницы успеха
+    Route::get('/consultation/success/{id}', [ConsultationController::class, 'success'])
+        ->name('consultation.success');
+    
+    // Альтернативный маршрут для нового заказа
+    Route::get('/consultation/success', [ConsultationController::class, 'successNew'])
+        ->name('consultation.success.new');
+});
