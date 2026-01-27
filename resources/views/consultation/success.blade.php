@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Заказ консультации принят')
+@section('title', 'Заявка на консультацию принята')
 
 @section('content')
 <div class="container py-5">
@@ -9,25 +9,33 @@
             <div class="card shadow-lg border-0">
                 <div class="card-header bg-success text-white text-center py-4">
                     <i class="bi bi-check-circle display-1 mb-3"></i>
-                    <h1 class="card-title mb-0">Заказ принят!</h1>
+                    <h1 class="card-title mb-0">Заявка принята!</h1>
                 </div>
                 
                 <div class="card-body p-5">
                     <div class="text-center mb-5">
-                        <h3 class="text-success mb-3">Спасибо за заказ консультации!</h3>
+                        <h3 class="text-success mb-3">Спасибо за заявку на консультацию!</h3>
                         <p class="lead">Наш эксперт свяжется с вами в течение 30 минут</p>
                     </div>
                     
+                    @if(!$isNew && $case)
                     <div class="row mb-4">
                         <div class="col-md-6 mb-3">
                             <div class="card border-light">
                                 <div class="card-body">
-                                    <h6><i class="bi bi-clock text-primary me-2"></i>Детали заказа</h6>
+                                    <h6><i class="bi bi-clock text-primary me-2"></i>Детали заявки</h6>
                                     <ul class="list-unstyled mb-0">
-                                        <li><strong>№ заказа:</strong> #{{ $consultation->id }}</li>
-                                        <li><strong>Тип:</strong> {{ $consultation->getConsultationTypeText() }}</li>
-                                        <li><strong>Сумма:</strong> {{ number_format($consultation->price, 0, '', ' ') }} ₽</li>
-                                        <li><strong>Статус:</strong> <span class="badge bg-warning">В обработке</span></li>
+                                        <li><strong>№ заказа:</strong> #{{ $case->id }}</li>
+                                        <li><strong>Тип консультации:</strong> 
+                                            @if($case->consultation_type === 'basic') Базовая
+                                            @elseif($case->consultation_type === 'premium') Премиум
+                                            @else Экспертная
+                                            @endif
+                                        </li>
+                                        <li><strong>Стоимость:</strong> {{ number_format($case->price_estimate ?? 0, 0, '', ' ') }} ₽</li>
+                                        <li><strong>Статус:</strong> 
+                                            <span class="badge bg-warning">Ожидает обработки</span>
+                                        </li>
                                     </ul>
                                 </div>
                             </div>
@@ -36,24 +44,25 @@
                         <div class="col-md-6 mb-3">
                             <div class="card border-light">
                                 <div class="card-body">
-                                    <h6><i class="bi bi-person text-primary me-2"></i>Контакты</h6>
+                                    <h6><i class="bi bi-person text-primary me-2"></i>Контактные данные</h6>
                                     <ul class="list-unstyled mb-0">
-                                        <li><strong>Имя:</strong> {{ $consultation->contact_name }}</li>
-                                        <li><strong>Телефон:</strong> {{ $consultation->contact_phone }}</li>
-                                        <li><strong>Email:</strong> {{ $consultation->contact_email }}</li>
+                                        <li><strong>Имя:</strong> {{ $case->contact_name }}</li>
+                                        <li><strong>Телефон:</strong> {{ $case->contact_phone }}</li>
+                                        <li><strong>Email:</strong> {{ $case->contact_email }}</li>
                                     </ul>
                                 </div>
                             </div>
                         </div>
                     </div>
+                    @endif
                     
                     <div class="alert alert-info">
                         <h6><i class="bi bi-info-circle me-2"></i>Что дальше?</h6>
                         <ul class="mb-0">
-                            <li>Эксперт изучит предоставленные материалы</li>
-                            <li>Свяжется с вами по указанному телефону</li>
-                            <li>Проведет консультацию и даст рекомендации</li>
-                            <li>Отправит подробный отчет на email</li>
+                            <li>Наш эксперт изучит предоставленные материалы</li>
+                            <li>Свяжется с вами по указанному телефону в течение 30 минут</li>
+                            <li>Проведет консультацию и даст подробные рекомендации</li>
+                            <li>Отправит отчет на указанный email</li>
                         </ul>
                     </div>
                     

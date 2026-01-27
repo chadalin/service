@@ -113,9 +113,12 @@ class RuleController extends Controller
         try {
             $rule = Rule::with(['symptom', 'brand', 'model'])
                 ->findOrFail($id);
-            
+
+                $brands = Brand::orderBy('name')->get();
+            //dd($brand);
             return view('admin.diagnostic.rules.show', [
                 'rule' => $rule,
+                'brands' => $brands,
                 'title' => 'Правило диагностики: ' . ($rule->symptom->name ?? 'Unknown')
             ]);
         } catch (\Exception $e) {

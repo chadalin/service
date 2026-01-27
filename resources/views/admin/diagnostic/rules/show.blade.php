@@ -375,7 +375,7 @@
                 @csrf
                 <input type="hidden" name="rule_id" value="{{ $rule->id }}">
                 <input type="hidden" name="consultation_type" value="expert">
-                <input type="hidden" name="brand_id" value="{{ $rule->brand_id }}">
+                <input type="hidden" name="brand_id" value="{{ $rule->brand_id ?? '' }}">
                 
                 @if($rule->symptoms && $rule->symptoms->isNotEmpty())
                     @foreach($rule->symptoms as $symptom)

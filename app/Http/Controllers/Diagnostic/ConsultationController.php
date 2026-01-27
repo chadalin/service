@@ -1077,59 +1077,129 @@ public function show($id)
 
     
 
-     public function store(Request $request)
-    {
-        \Log::info('Consultation store request:', $request->all());
-        
-        $validated = $request->validate([
-            'consultation_type' => 'required|in:basic,premium,expert',
-            'contact_name' => 'required|string|max:255',
-            'contact_phone' => 'required|string|max:20',
-            'contact_email' => 'required|email',
-            'brand_id' => 'required|exists:brands,id',
-            'model_id' => 'nullable|exists:car_models,id',
-            'year' => 'nullable|integer|min:1990|max:' . date('Y'),
-            'engine_type' => 'nullable|string|max:50',
-            'mileage' => 'nullable|integer|min:0|max:1000000',
-            'description' => 'nullable|string|max:2000',
-            'agreement' => 'required|accepted',
-            'rule_id' => 'nullable|exists:diagnostic_rules,id',
-            'case_id' => 'nullable|exists:diagnostic_cases,id',
-            'symptoms' => 'nullable|array',
-            'symptoms.*' => 'exists:diagnostic_symptoms,id',
-        ]);
-        
-        // Создание заказа консультации
-        $consultationOrder = \App\Models\Diagnostic\Consultation::create([
-            'user_id' => Auth::id(),
-            'consultation_type' => $validated['consultation_type'],
-            'contact_name' => $validated['contact_name'],
-            'contact_phone' => $validated['contact_phone'],
-            'contact_email' => $validated['contact_email'],
-            'brand_id' => $validated['brand_id'],
-            'model_id' => $validated['model_id'],
-            'year' => $validated['year'],
-            'engine_type' => $validated['engine_type'],
-            'mileage' => $validated['mileage'],
-            'description' => $validated['description'],
-            'rule_id' => $validated['rule_id'],
-            'case_id' => $validated['case_id'],
-            'symptoms' => $validated['symptoms'] ?? [],
-            'status' => 'pending',
-            'price' => $this->calculatePrice($validated['consultation_type'], $validated['rule_id'] ?? null),
-        ]);
-        
-        // Если есть загруженные файлы из формы на странице правила
-        if ($request->has('symptom_description') || $request->hasFile('protocol_files') || $request->hasFile('symptom_photos') || $request->hasFile('symptom_videos')) {
-            $this->processConsultationFiles($consultationOrder, $request);
-        }
-        
-        // Перенаправление на страницу успеха или оплаты
-        return redirect()->route('consultation.success', $consultationOrder->id)
-            ->with('success', 'Заказ на консультацию успешно создан! Наш эксперт свяжется с вами в течение 30 минут.');
+   public function store(Request $request)
+{
+     // Код отладки ДОЛЖЕН быть здесь, в начале метода
+    \Log::info('=== CONSULTATION STORE START ===');
+    \Log::info('Full request data:', $request->all());
+    \Log::info('Brand ID from request:', ['value' => $request->input('brand_id'), 'type' => gettype($request->input('brand_id'))]);
+    
+    // ВРЕМЕННО: посмотрим все бренды
+    $allBrands = Brand::all();
+    \Log::info('All brands:', $allBrands->map(function($b) {
+        return ['id' => $b->id, 'name' => $b->name, 'cyrillic' => $b->name_cyrillic];
+    })->toArray());
+    
+    $validated = $request->validate([
+        'consultation_type' => 'required|in:basic,premium,expert',
+        'contact_name' => 'required|string|max:255',
+        'contact_phone' => 'required|string|max:20',
+        'contact_email' => 'required|email',
+        'brand_id' => 'required', // Убираем exists проверку
+        'model_id' => 'nullable',
+        'year' => 'nullable|integer|min:1990|max:' . date('Y'),
+        'engine_type' => 'nullable|string|max:50',
+        'vin' => 'nullable|string|max:17',
+        'mileage' => 'nullable|integer|min:0|max:1000000',
+        'description' => 'nullable|string|max:2000',
+        'agreement' => 'required|accepted',
+        'rule_id' => 'required|exists:diagnostic_rules,id',
+        'symptoms' => 'nullable|array',
+        'symptoms.*' => 'exists:diagnostic_symptoms,id',
+        'symptom_description' => 'required|string|min:20|max:2000',
+        'additional_info' => 'nullable|string|max:1000',
+    ]);
+    
+    // Преобразуем строковый brand_id в числовой
+    $brandId = $this->getBrandId($validated['brand_id']);
+    if (!$brandId) {
+        return response()->json([
+            'success' => false,
+            'message' => 'Марка автомобиля не найдена'
+        ], 422);
     }
     
-   
+    // Преобразуем строковый model_id в числовой (если передан)
+    $modelId = null;
+    if (!empty($validated['model_id'])) {
+        $modelId = $this->getModelId($validated['model_id'], $brandId);
+    }
+    
+    // Создание диагностического кейса
+    $case = DiagnosticCase::create([
+        'user_id' => Auth::id(),
+        'rule_id' => $validated['rule_id'],
+        'brand_id' => $brandId,
+        'model_id' => $modelId,
+        'engine_type' => $validated['engine_type'] ?? null,
+        'year' => $validated['year'] ?? null,
+        'vin' => $validated['vin'] ?? null,
+        'mileage' => $validated['mileage'] ?? null,
+        'symptoms' => $validated['symptoms'] ?? [],
+        'description' => $validated['description'] ?? $validated['symptom_description'],
+        'status' => 'draft',
+        'step' => 1,
+        'contact_name' => $validated['contact_name'],
+        'contact_phone' => $validated['contact_phone'],
+        'contact_email' => $validated['contact_email'],
+        'consultation_type' => $validated['consultation_type'],
+        'price_estimate' => $this->calculatePrice($validated['consultation_type'], $validated['rule_id']),
+    ]);
+    
+    // Обработка загруженных файлов
+    if ($request->hasFile('protocol_files') || $request->hasFile('symptom_photos') || $request->hasFile('symptom_videos')) {
+        $this->processConsultationFiles($case, $request);
+    }
+    
+    // Сохраняем дополнительное описание симптома
+    $additionalData = [
+        'symptom_description' => $validated['symptom_description'],
+        'additional_info' => $validated['additional_info'] ?? null,
+    ];
+    
+    $case->update($additionalData);
+    
+    // Перенаправление на страницу успеха
+    return response()->json([
+        'success' => true,
+        'message' => 'Заявка на консультацию успешно создана!',
+        'case_id' => $case->id,
+        'redirect_url' => route('consultation.success', $case->id)
+    ]);
+}
+
+private function getBrandId($brandIdentifier)
+{
+    // Ищем любой бренд
+    $brand = Brand::where('name', 'LIKE', '%' . $brandIdentifier . '%')->first();
+    
+    if ($brand) {
+        return $brand->id; // Это будет строка "LAND_ROVER"
+    }
+    
+    // Возвращаем первый попавшийся бренд
+    return Brand::first()->id ?? 'ACURA';
+}
+
+private function getModelId($modelIdentifier, $brandId)
+{
+    // Если передан числовой ID
+    if (is_numeric($modelIdentifier)) {
+        return (int) $modelIdentifier;
+    }
+    
+    // Если передано название, ищем по имени для конкретной марки
+    $model = CarModel::where('brand_id', $brandId)
+                     ->where(function($query) use ($modelIdentifier) {
+                         $query->where('name', $modelIdentifier)
+                               ->orWhere('name_cyrillic', $modelIdentifier);
+                     })
+                     ->first();
+    
+    return $model ? $model->id : null;
+}
+
+
     
     private function processConsultationFiles($consultationOrder, $request)
     {
@@ -1187,18 +1257,27 @@ public function show($id)
         }
     }
     
-    public function success($id)
-    {
-        $consultationOrder = ConsultationOrder::findOrFail($id);
-        
-        // Проверка прав доступа
-        if ($consultationOrder->user_id !== Auth::id()) {
-            abort(403, 'Доступ запрещён');
-        }
-        
+    public function success($id = null)
+{
+    if ($id === 'new' || $id === null) {
+        // Для нового заказа без ID
         return view('consultation.success', [
-            'consultation' => $consultationOrder,
+            'case' => null,
+            'isNew' => true
         ]);
     }
+    
+    $case = DiagnosticCase::findOrFail($id);
+    
+    // Проверка прав доступа
+    if ($case->user_id !== Auth::id()) {
+        abort(403, 'Доступ запрещён');
+    }
+    
+    return view('consultation.success', [
+        'case' => $case,
+        'isNew' => false
+    ]);
+}
     
 }
