@@ -31,41 +31,53 @@
             </div>
 
             <!-- Быстрые действия -->
-            <div class="card mb-3">
-                <div class="card-header bg-primary text-white">
-                    <h6 class="mb-0">⚡ Действия</h6>
-                </div>
-                <div class="card-body">
-                    <div class="d-grid gap-2">
-                        <a href="{{ route('admin.documents.download', $document) }}" 
-                           class="btn btn-outline-primary btn-sm">
-                            ⬇️ Скачать оригинал
-                        </a>
-                        
-                        @if($document->status === 'processed')
-                        <a href="{{ route('admin.documents.preview', $document) }}" 
-                           target="_blank" 
-                           class="btn btn-outline-success btn-sm">
-                            👁️ Предпросмотр
-                        </a>
-                        @endif
-                        
-                        <a href="{{ route('admin.documents.edit', $document) }}" 
-                           class="btn btn-outline-warning btn-sm">
-                            ✏️ Редактировать
-                        </a>
-                        
-                        <form action="{{ route('admin.documents.reprocess', $document) }}" 
-                              method="POST" 
-                              class="d-inline">
-                            @csrf
-                            <button type="submit" class="btn btn-outline-info btn-sm w-100">
-                                🔄 Переобработать
-                            </button>
-                        </form>
-                    </div>
-                </div>
-            </div>
+<div class="card mb-3">
+    <div class="card-header bg-primary text-white">
+        <h6 class="mb-0">⚡ Действия</h6>
+    </div>
+    <div class="card-body">
+        <div class="d-grid gap-2">
+            <a href="{{ route('admin.documents.download', $document) }}" 
+               class="btn btn-outline-primary btn-sm">
+                ⬇️ Скачать оригинал
+            </a>
+            
+            <!-- Кнопка для парсинга/обработки -->
+            @if(!$document->is_parsed)
+            <a href="{{ route('admin.documents.processing.advanced', $document->id) }}" 
+               class="btn btn-outline-warning btn-sm">
+                🛠️ Обработка документа
+            </a>
+            @elseif($document->is_parsed && !$document->search_indexed)
+            <a href="{{ route('admin.documents.processing.advanced', $document->id) }}" 
+               class="btn btn-outline-info btn-sm">
+                🔍 Индексировать
+            </a>
+            @else
+            <a href="{{ route('admin.documents.processing.advanced', $document->id) }}" 
+               class="btn btn-outline-success btn-sm">
+                📊 Расширенная обработка
+            </a>
+            @endif
+            
+            <!-- Если маршрут edit не определен, можно временно закомментировать или удалить -->
+            <!--
+            
+            -->
+            
+            <!-- Кнопка для повторной обработки -->
+            <form action="{{ route('admin.documents.processing.reset', $document->id) }}" 
+                  method="POST" 
+                  class="d-inline">
+                @csrf
+                <button type="submit" class="btn btn-outline-danger btn-sm w-100" 
+                        onclick="return confirm('Сбросить статус и переобработать документ?')">
+                    🔄 Переобработать
+                </button>
+            </form>
+        </div>
+    </div>
+</div>
 
             <!-- Статус документа -->
             <div class="card mb-3">

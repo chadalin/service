@@ -18,6 +18,7 @@ use App\Http\Controllers\Diagnostic\ReportController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
 use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleController;
+
 use Illuminate\Support\Facades\Route;
 
 // ===============================================
@@ -464,4 +465,74 @@ Route::middleware(['web', 'auth'])->group(function () {
     // Альтернативный маршрут для нового заказа
     Route::get('/consultation/success', [ConsultationController::class, 'successNew'])
         ->name('consultation.success.new');
+});
+
+
+// Маршруты для расширенной обработки документов
+Route::prefix('admin/documents')->name('admin.documents.')->group(function () {
+    // Просмотр отдельной страницы документа
+    Route::get('/{document}/page/{page}', [DocumentController::class, 'showPage'])
+        ->name('page');
+    
+    // Предпросмотр документа
+    Route::post('/{document}/preview', [DocumentProcessingController::class, 'previewDocument'])
+        ->name('preview');
+    
+    // Полный парсинг
+    Route::post('/{document}/parse-full', [DocumentProcessingController::class, 'parseFullDocument'])
+        ->name('parse-full');
+    
+    // Прогресс обработки
+    Route::get('/{document}/progress', [DocumentProcessingController::class, 'getProcessingProgress'])
+        ->name('progress');
+    
+    // Список страниц
+    Route::get('/{document}/pages', [DocumentProcessingController::class, 'getDocumentPages'])
+        ->name('pages');
+    
+    // Экспорт
+    Route::get('/{document}/export', [DocumentProcessingController::class, 'exportDocument'])
+        ->name('export');
+    
+    // Переиндексация
+    Route::post('/{document}/reindex', [DocumentProcessingController::class, 'reindexDocument'])
+        ->name('reindex');
+    
+    // Статистика
+    Route::get('/{document}/stats', [DocumentProcessingController::class, 'getDocumentStats'])
+        ->name('stats');
+    
+    // Удаление предпросмотра
+    Route::delete('/{document}/delete-preview', [DocumentProcessingController::class, 'deletePreview'])
+        ->name('delete-preview');
+    
+    // Расширенная обработка
+    Route::get('/{document}/processing/advanced', [DocumentProcessingController::class, 'advancedProcessing'])
+        ->name('processing.advanced');
+
+        // Расширенная обработка конкретного документа
+    Route::get('/{id}/advanced', [DocumentProcessingController::class, 'advancedProcessing'])
+        ->name('advanced');
+
+          // API эндпоинты
+    Route::post('/parse/{id}', [DocumentProcessingController::class, 'parseDocument'])
+        ->name('parse');
+    
+    Route::post('/index/{id}', [DocumentProcessingController::class, 'indexDocument'])
+        ->name('index');
+    
+    Route::post('/process/{id}', [DocumentProcessingController::class, 'processDocument'])
+        ->name('process');
+    
+    Route::post('/parse-multiple', [DocumentProcessingController::class, 'parseMultiple'])
+        ->name('parse.multiple');
+    
+    Route::post('/index-multiple', [DocumentProcessingController::class, 'indexMultiple'])
+        ->name('index.multiple');
+    
+    Route::get('/status/{id}', [DocumentProcessingController::class, 'getStatus'])
+        ->name('status');
+    
+    Route::post('/reset/{id}', [DocumentProcessingController::class, 'resetStatus'])
+        ->name('reset');
 });

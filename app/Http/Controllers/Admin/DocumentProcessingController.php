@@ -2,21 +2,28 @@
 
 namespace App\Http\Controllers\Admin;
 
-use App\Http\Controllers\Controller;
+use App\Http\Controllers\Controller as BaseController;
+
 use App\Models\Document;
-use App\Services\FileParserService;
+use App\Models\DocumentPage;
+use App\Models\DocumentImage;
+use App\Services\AdvancedDocumentParser;
 use App\Services\DocumentIndexer;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Str;
+use Symfony\Component\Process\Process;
+use Symfony\Component\Process\Exception\ProcessFailedException;
 
-class DocumentProcessingController extends Controller
+class DocumentProcessingController extends BaseController
 {
     protected $fileParser;
     protected $documentIndexer;
     
     public function __construct()
     {
-        $this->fileParser = new FileParserService();
+         $this->documentParser = new AdvancedDocumentParser();
         $this->documentIndexer = new DocumentIndexer();
     }
     
@@ -55,6 +62,44 @@ class DocumentProcessingController extends Controller
         return view('admin.documents.processing', compact(
             'documents', 'stats', 'forParsing', 'forIndexing'
         ));
+    }
+
+       /**
+     * Расширенная обработка конкретного документа
+     */
+    public function advancedProcessing($id)
+    {
+        try {
+            $document = Document::with(['carModel.brand', 'category'])
+                ->findOrFail($id);
+            
+            // Получаем предпросмотр страниц
+            $previewPages = DocumentPage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->with('images')
+                ->orderBy('page_number')
+                ->get();
+            
+            // Статистика
+            $parsedPagesCount = DocumentPage::where('document_id', $id)->count();
+            $totalImagesCount = DocumentImage::where('document_id', $id)->count();
+            $totalWordsCount = DocumentPage::where('document_id', $id)->sum('word_count');
+            $totalTextSize = DocumentPage::where('document_id', $id)->sum('character_count');
+            
+            return view('admin.documents.processing_advanced', compact(
+                'document',
+                'previewPages',
+                'parsedPagesCount',
+                'totalImagesCount',
+                'totalWordsCount',
+                'totalTextSize'
+            ));
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка загрузки страницы расширенной обработки: " . $e->getMessage());
+            return redirect()->route('admin.documents.processing')
+                ->with('error', 'Документ не найден: ' . $e->getMessage());
+        }
     }
     
     /**
@@ -354,4 +399,387 @@ class DocumentProcessingController extends Controller
             ], 500);
         }
     } 
+
+
+    /**
+     * Предпросмотр документа (первые N страниц)
+     */
+    public function previewDocument(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            $pagesCount = $request->get('pages', 5);
+            
+            // Проверяем, есть ли уже предпросмотр
+            $previewPages = DocumentPage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->orderBy('page_number')
+                ->get();
+                
+            if ($previewPages->isEmpty()) {
+                // Создаем предпросмотр
+                $previewData = $this->documentParser->createPreview($document, $pagesCount);
+                
+                return response()->json([
+                    'success' => true,
+                    'message' => 'Предпросмотр создан',
+                    'pages' => $previewData['pages'],
+                    'total_pages' => $previewData['total_pages'],
+                    'images_count' => $previewData['images_count']
+                ]);
+            }
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Предпросмотр уже существует',
+                'pages' => $previewPages,
+                'total_pages' => $document->total_pages ?? 0
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка создания предпросмотра документа {$id}: " . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Полный парсинг документа
+     */
+    public function parseFullDocument(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            Log::info("Начало полного парсинга документа {$id}");
+            
+            // Обновляем статус
+            $document->update([
+                'status' => 'processing',
+                'processing_started_at' => now()
+            ]);
+            
+            // Помещаем задачу в очередь
+            dispatch(new \App\Jobs\ProcessDocumentJob($document->id));
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Документ поставлен в очередь на обработку',
+                'document_id' => $document->id,
+                'job_id' => null
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка постановки документа {$id} в очередь: " . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Получить прогресс обработки
+     */
+    public function getProcessingProgress($id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            $pagesProcessed = DocumentPage::where('document_id', $id)->count();
+            $imagesProcessed = DocumentImage::where('document_id', $id)->count();
+            
+            $progress = 0;
+            if ($document->total_pages > 0) {
+                $progress = ($pagesProcessed / $document->total_pages) * 100;
+            }
+            
+            return response()->json([
+                'success' => true,
+                'status' => $document->status,
+                'progress' => round($progress, 2),
+                'pages_processed' => $pagesProcessed,
+                'total_pages' => $document->total_pages ?? 0,
+                'images_processed' => $imagesProcessed,
+                'estimated_time' => $this->calculateEstimatedTime($document, $progress)
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка получения прогресса'
+            ], 500);
+        }
+    }
+    
+    /**
+     * Получить список страниц документа
+     */
+    public function getDocumentPages($id)
+    {
+        try {
+            $pages = DocumentPage::where('document_id', $id)
+                ->with('images')
+                ->orderBy('page_number')
+                ->get();
+                
+            $document = Document::findOrFail($id);
+            
+            return response()->json([
+                'success' => true,
+                'pages' => $pages,
+                'total_pages' => $document->total_pages ?? 0,
+                'document' => [
+                    'id' => $document->id,
+                    'title' => $document->title,
+                    'status' => $document->status
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка получения страниц'
+            ], 500);
+        }
+    }
+    
+    /**
+     * Экспорт документа в разные форматы
+     */
+    public function exportDocument(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            $format = $request->get('format', 'json');
+            
+            if ($format === 'json') {
+                $data = $this->prepareDocumentData($document);
+                return response()->json($data);
+            } elseif ($format === 'html') {
+                return $this->exportToHtml($document);
+            } elseif ($format === 'txt') {
+                return $this->exportToText($document);
+            }
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Неизвестный формат'
+            ], 400);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка экспорта'
+            ], 500);
+        }
+    }
+    
+    /**
+     * Переиндексация документа
+     */
+    public function reindexDocument($id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            // Очищаем старые данные
+            DocumentPage::where('document_id', $id)->delete();
+            DocumentImage::where('document_id', $id)->delete();
+            
+            // Обновляем статус
+            $document->update([
+                'status' => 'pending_reindex',
+                'is_parsed' => false,
+                'search_indexed' => false,
+                'total_pages' => 0
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Документ подготовлен для переиндексации',
+                'document_id' => $document->id
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка переиндексации'
+            ], 500);
+        }
+    }
+    
+    /**
+     * Получить статистику по документу
+     */
+    public function getDocumentStats($id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            $stats = [
+                'pages_count' => DocumentPage::where('document_id', $id)->count(),
+                'images_count' => DocumentImage::where('document_id', $id)->count(),
+                'words_count' => DocumentPage::where('document_id', $id)->sum('word_count'),
+                'characters_count' => DocumentPage::where('document_id', $id)->sum('character_count'),
+                'paragraphs_count' => DocumentPage::where('document_id', $id)->sum('paragraph_count'),
+                'tables_count' => DocumentPage::where('document_id', $id)->sum('tables_count'),
+                'last_parsed' => $document->updated_at,
+                'parsing_quality' => $document->parsing_quality,
+                'detected_sections' => $this->extractSections($document)
+            ];
+            
+            return response()->json([
+                'success' => true,
+                'stats' => $stats
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка получения статистики'
+            ], 500);
+        }
+    }
+    
+    /**
+     * Удалить предпросмотр
+     */
+    public function deletePreview($id)
+    {
+        try {
+            DocumentPage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->delete();
+                
+            DocumentImage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->delete();
+                
+            return response()->json([
+                'success' => true,
+                'message' => 'Предпросмотр удален'
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка удаления предпросмотра'
+            ], 500);
+        }
+    }
+    
+    private function calculateEstimatedTime($document, $progress)
+    {
+        if ($progress >= 100 || !$document->processing_started_at) {
+            return 'Завершено';
+        }
+        
+        $elapsed = now()->diffInSeconds($document->processing_started_at);
+        if ($progress > 0) {
+            $totalEstimated = ($elapsed / $progress) * 100;
+            $remaining = $totalEstimated - $elapsed;
+            
+            if ($remaining < 60) {
+                return ceil($remaining) . ' сек';
+            } elseif ($remaining < 3600) {
+                return ceil($remaining / 60) . ' мин';
+            } else {
+                return number_format($remaining / 3600, 1) . ' ч';
+            }
+        }
+        
+        return 'Рассчитывается...';
+    }
+    
+    private function prepareDocumentData($document)
+    {
+        $pages = DocumentPage::where('document_id', $document->id)
+            ->with('images')
+            ->orderBy('page_number')
+            ->get()
+            ->map(function($page) {
+                return [
+                    'page_number' => $page->page_number,
+                    'content' => $page->content,
+                    'content_text' => $page->content_text,
+                    'word_count' => $page->word_count,
+                    'images' => $page->images->map(function($image) {
+                        return [
+                            'filename' => $image->filename,
+                            'path' => $image->path,
+                            'description' => $image->description,
+                            'position' => $image->position
+                        ];
+                    })
+                ];
+            });
+            
+        return [
+            'document' => [
+                'id' => $document->id,
+                'title' => $document->title,
+                'car_model' => $document->carModel ? $document->carModel->name : null,
+                'category' => $document->category ? $document->category->name : null,
+                'file_type' => $document->file_type,
+                'total_pages' => $document->total_pages,
+                'parsing_quality' => $document->parsing_quality
+            ],
+            'pages' => $pages,
+            'metadata' => [
+                'created_at' => $document->created_at,
+                'updated_at' => $document->updated_at,
+                'pages_count' => $pages->count(),
+                'total_words' => $pages->sum('word_count')
+            ]
+        ];
+    }
+    
+    private function exportToHtml($document)
+    {
+        $data = $this->prepareDocumentData($document);
+        
+        $html = view('admin.documents.export.html', $data)->render();
+        
+        return response($html)
+            ->header('Content-Type', 'text/html')
+            ->header('Content-Disposition', 'attachment; filename="document_' . $document->id . '.html"');
+    }
+    
+    private function exportToText($document)
+    {
+        $pages = DocumentPage::where('document_id', $document->id)
+            ->orderBy('page_number')
+            ->get();
+            
+        $text = "Документ: {$document->title}\n";
+        $text .= "ID: {$document->id}\n";
+        $text .= "Тип: {$document->file_type}\n";
+        $text .= "Страниц: " . $pages->count() . "\n";
+        $text .= "=" . str_repeat("=", 50) . "=\n\n";
+        
+        foreach ($pages as $page) {
+            $text .= "=== Страница {$page->page_number} ===\n\n";
+            $text .= strip_tags($page->content_text) . "\n\n";
+        }
+        
+        return response($text)
+            ->header('Content-Type', 'text/plain')
+            ->header('Content-Disposition', 'attachment; filename="document_' . $document->id . '.txt"');
+    }
+    
+    private function extractSections($document)
+    {
+        $pages = DocumentPage::where('document_id', $document->id)
+            ->whereNotNull('section_title')
+            ->select('section_title', \DB::raw('count(*) as pages_count'))
+            ->groupBy('section_title')
+            ->orderBy('pages_count', 'desc')
+            ->get();
+            
+        return $pages;
+    }
 }

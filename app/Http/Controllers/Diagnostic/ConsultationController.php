@@ -717,7 +717,7 @@ public function show($id)
                     'type' => $message->type,
                     'metadata' => $message->metadata,
                     'created_at' => $message->created_at->toISOString(),
-                    'is_read' => !is_null($message->read_at),
+                    'read_at' => !is_null($message->read_at),
                 ];
             })
         ]);
