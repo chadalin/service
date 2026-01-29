@@ -533,6 +533,103 @@ Route::prefix('admin/documents')->name('admin.documents.')->group(function () {
     Route::get('/status/{id}', [DocumentProcessingController::class, 'getStatus'])
         ->name('status');
     
-    Route::post('/reset/{id}', [DocumentProcessingController::class, 'resetStatus'])
-        ->name('reset');
+    
+});
+
+Route::prefix('admin/documents-processing')->name('admin.documents.processing.')->group(function () {
+    Route::get('/', [DocumentProcessingController::class, 'index'])->name('index');
+    Route::get('/advanced/{id}', [DocumentProcessingController::class, 'advancedProcessing'])->name('advanced');
+    
+    // Основные операции
+    Route::post('/create-preview/{id}', [DocumentProcessingController::class, 'createPreview'])->name('create-preview');
+    Route::post('/parse-full/{id}', [DocumentProcessingController::class, 'parseFull'])->name('parse-full');
+    Route::post('/reset-status/{id}', [DocumentProcessingController::class, 'resetStatus'])->name('reset-status');
+    Route::post('/parse-multiple', [DocumentProcessingController::class, 'parseMultiple'])->name('parse-multiple');
+    
+    // Получение информации
+    Route::get('/progress/{id}', [DocumentProcessingController::class, 'getProcessingProgress'])->name('progress');
+    Route::get('/pages/{id}', [DocumentProcessingController::class, 'getDocumentPages'])->name('pages');
+    Route::get('/stats/{id}', [DocumentProcessingController::class, 'getDocumentStats'])->name('stats');
+    
+    // Управление
+    Route::delete('/delete-preview/{id}', [DocumentProcessingController::class, 'deletePreview'])->name('delete-preview');
+});
+
+Route::prefix('admin/documents-processing')->name('admin.documents.processing.')->group(function () {
+    Route::get('/', [DocumentProcessingController::class, 'index'])->name('index');
+    Route::get('/advanced/{id}', [DocumentProcessingController::class, 'advancedProcessing'])->name('advanced');
+    
+    // Основные операции
+    Route::post('/create-preview/{id}', [DocumentProcessingController::class, 'createPreview'])->name('create-preview');
+    Route::post('/parse-full/{id}', [DocumentProcessingController::class, 'parseFull'])->name('parse-full');
+    Route::post('/parse/{id}', [DocumentProcessingController::class, 'parseDocument'])->name('parse');
+    
+    // Управление статусом
+    Route::post('/reset-status/{id}', [DocumentProcessingController::class, 'resetStatus'])->name('reset-status');
+    Route::post('/parse-multiple', [DocumentProcessingController::class, 'parseMultiple'])->name('parse-multiple');
+    
+    // Получение информации
+    Route::get('/progress/{id}', [DocumentProcessingController::class, 'getProcessingProgress'])->name('progress');
+    Route::get('/pages/{id}', [DocumentProcessingController::class, 'getDocumentPages'])->name('pages');
+    Route::get('/stats/{id}', [DocumentProcessingController::class, 'getDocumentStats'])->name('stats');
+    
+    // Управление предпросмотром
+    Route::delete('/delete-preview/{id}', [DocumentProcessingController::class, 'deletePreview'])->name('delete-preview');
+
+    // Просмотр изображений
+    Route::get('/images/{id}', [DocumentProcessingController::class, 'viewImages'])->name('images');
+});
+
+
+
+
+Route::get('/test-pdf-images/{id}', function($id) {
+    $document = \App\Models\Document::find($id);
+    if (!$document) {
+        return 'Документ не найден';
+    }
+    
+    $filePath = storage_path('app/' . $document->file_path);
+    
+    if (!file_exists($filePath)) {
+        return 'Файл не найден: ' . $filePath;
+    }
+    
+    // Проверяем доступность команд
+    $commands = ['pdfimages', 'pdftoppm', 'convert'];
+    $available = [];
+    
+    foreach ($commands as $cmd) {
+        $which = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ? 'where' : 'which';
+        $process = new Symfony\Component\Process\Process([$which, $cmd]);
+        $process->run();
+        $available[$cmd] = $process->isSuccessful();
+    }
+    
+    // Пытаемся извлечь первую страницу
+    $tempDir = storage_path('app/temp_test_' . time());
+    mkdir($tempDir, 0755, true);
+    
+    $result = [
+        'file_path' => $filePath,
+        'file_exists' => file_exists($filePath),
+        'file_size' => filesize($filePath),
+        'commands' => $available,
+    ];
+    
+    // Тестируем pdfimages
+    if ($available['pdfimages']) {
+        $output = [];
+        $returnCode = 0;
+        $command = "pdfimages -f 1 -l 1 -list \"{$filePath}\" 2>&1";
+        exec($command, $output, $returnCode);
+        
+        $result['pdfimages_test'] = [
+            'command' => $command,
+            'return_code' => $returnCode,
+            'output' => $output,
+        ];
+    }
+    
+    return response()->json($result);
 });

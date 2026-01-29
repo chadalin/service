@@ -1,488 +1,758 @@
 <?php
 
-namespace App\Services;
+namespace App\Http\Controllers\Admin;
 
+use App\Http\Controllers\Controller;
 use App\Models\Document;
 use App\Models\DocumentPage;
 use App\Models\DocumentImage;
-use Illuminate\Support\Facades\Storage;
+use App\Services\AdvancedDocumentParser;
+use App\Services\AdvancedImageExtractionService;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
-use Illuminate\Support\Str;
-use Smalot\PdfParser\Parser as PdfParser;
-use PhpOffice\PhpWord\IOFactory as WordIOFactory;
-use Symfony\Component\Process\Process;
-use Intervention\Image\Laravel\Facades\Image;
-use thiagoalessio\TesseractOCR\TesseractOCR;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
-class AdvancedDocumentParser
+class DocumentProcessingController extends Controller
 {
-    private $pdfParser;
-    private $imageManager;
+    protected $documentParser;
+    protected $imageExtractor;
     
     public function __construct()
     {
-        $this->pdfParser = new PdfParser();
-       // $this->imageManager = new ImageManager(['driver' => 'gd']);
+        $this->documentParser = new AdvancedDocumentParser();
+        $this->imageExtractor = new AdvancedImageExtractionService();
     }
     
     /**
-     * Создание предпросмотра документа
+     * Страница управления обработкой документов
      */
-     public function createPreview(Document $document, $pagesCount = 5)
+    public function index()
     {
-        Log::info("Создание предпросмотра документа {$document->id}");
+        $documents = Document::with(['carModel.brand', 'category'])
+            ->orderBy('created_at', 'desc')
+            ->paginate(20);
         
-        $filePath = storage_path('app/' . $document->file_path);
-        
-        if (!file_exists($filePath)) {
-            throw new \Exception("Файл не найден: {$document->file_path}");
-        }
-        
-        $totalPages = $this->getTotalPages($document, $filePath);
-        $pages = [];
-        
-        // Парсим первые N страниц
-        for ($i = 1; $i <= min($pagesCount, $totalPages); $i++) {
-            try {
-                $pageData = $this->parsePage($document, $filePath, $i, true);
-                $pages[] = $pageData;
-                
-                // Сохраняем в базу
-                $this->savePageToDatabase($document, $pageData, true);
-                
-            } catch (\Exception $e) {
-                Log::error("Ошибка парсинга страницы {$i}: " . $e->getMessage());
-                continue;
-            }
-        }
-        
-        // Обновляем информацию о документе
-        $document->update([
-            'total_pages' => $totalPages,
-            'parsing_quality' => $this->calculateQuality($pages),
-            'is_parsed' => false,
-            'status' => 'preview_created'
-        ]);
-        
-        return [
-            'pages' => $pages,
-            'total_pages' => $totalPages,
-            'images_count' => 0 // Упрощено
+        $stats = [
+            'total' => Document::count(),
+            'uploaded' => Document::where('status', 'uploaded')->count(),
+            'parsed' => Document::where('is_parsed', true)->count(),
+            'processing' => Document::where('status', 'processing')->count(),
+            'preview_created' => Document::where('status', 'preview_created')->count(),
+            'errors' => Document::where('status', 'parse_error')->count(),
         ];
+        
+        return view('admin.documents.processing', compact('documents', 'stats'));
     }
     
     /**
-     * Полный парсинг документа
+     * Расширенная обработка конкретного документа
      */
-    public function parseFull(Document $document)
-    {
-        Log::info("Начало полного парсинга документа {$document->id}");
-        
-        $filePath = storage_path('app/' . $document->file_path);
-        
-        if (!file_exists($filePath)) {
-            throw new \Exception("Файл не найден: {$document->file_path}");
-        }
-        
-        $totalPages = $this->getTotalPages($document, $filePath);
-        $allPages = [];
-        
-        // Очищаем все страницы (включая предпросмотр)
-        DocumentPage::where('document_id', $document->id)->delete();
-        DocumentImage::where('document_id', $document->id)->delete();
-        
-        // Парсим все страницы
-        for ($i = 1; $i <= $totalPages; $i++) {
-            try {
-                $pageData = $this->parsePage($document, $filePath, $i, false);
-                $allPages[] = $pageData;
-                
-                // Сохраняем в базу
-                $this->savePageToDatabase($document, $pageData, false);
-                
-                // Обновляем прогресс каждые 10 страниц
-                if ($i % 10 === 0) {
-                    $document->update([
-                        'parsing_progress' => ($i / $totalPages) * 100
-                    ]);
-                    Log::info("Прогресс парсинга документа {$document->id}: " . round(($i / $totalPages) * 100) . "%");
-                }
-                
-            } catch (\Exception $e) {
-                Log::error("Ошибка парсинга страницы {$i}: " . $e->getMessage());
-                
-                // Создаем пустую страницу в случае ошибки
-                $this->savePageToDatabase($document, [
-                    'page_number' => $i,
-                    'content' => '<p>Ошибка парсинга страницы</p>',
-                    'content_text' => 'Ошибка парсинга страницы',
-                    'word_count' => 0,
-                    'character_count' => 0,
-                    'paragraph_count' => 0,
-                    'tables_count' => 0,
-                    'section_title' => null,
-                    'metadata' => ['error' => $e->getMessage()],
-                    'images' => [],
-                    'images_count' => 0
-                ], false);
-            }
-        }
-        
-        // Объединяем текст всех страниц для основного содержимого
-        $fullContent = '';
-        $fullText = '';
-        
-        foreach ($allPages as $page) {
-            $fullContent .= $page['content'] . "\n\n";
-            $fullText .= $page['content_text'] . "\n\n";
-        }
-        
-        // Обновляем документ
-        $document->update([
-            'content' => $fullContent,
-            'content_text' => $fullText,
-            'total_pages' => $totalPages,
-            'parsing_quality' => $this->calculateQuality($allPages),
-            'is_parsed' => true,
-            'status' => 'parsed',
-            'parsing_progress' => 100,
-            'parsed_at' => now()
-        ]);
-        
-        Log::info("Полный парсинг документа {$document->id} завершен успешно");
-        
-        return [
-            'total_pages' => $totalPages,
-            'pages_parsed' => count($allPages),
-            'total_words' => array_sum(array_column($allPages, 'word_count')),
-            'total_images' => array_sum(array_column($allPages, 'images_count'))
-        ];
-    }
-    
-    /**
-     * Парсинг одной страницы
-     */
-    private function parsePage(Document $document, $filePath, $pageNumber, $isPreview = false)
-    {
-        Log::info("Парсинг страницы {$pageNumber} документа {$document->id}");
-        
-        $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-        
-        switch ($extension) {
-            case 'pdf':
-                return $this->parsePdfPage($document, $filePath, $pageNumber, $isPreview);
-            case 'doc':
-            case 'docx':
-                return $this->parseWordPage($document, $filePath, $pageNumber, $isPreview);
-            default:
-                throw new \Exception("Неподдерживаемый формат файла: {$extension}");
-        }
-    }
-    
-    /**
-     * Парсинг страницы PDF
-     */
-    private function parsePdfPage(Document $document, $filePath, $pageNumber, $isPreview)
+    public function advancedProcessing($id)
     {
         try {
-            // Используем pdftotext для лучшего извлечения текста
-            $text = $this->extractPdfTextWithPdftotext($filePath, $pageNumber);
+            $document = Document::with(['carModel.brand', 'category'])
+                ->findOrFail($id);
             
-            if (empty($text)) {
-                // Пробуем использовать библиотеку
-                $pdf = $this->pdfParser->parseFile($filePath);
-                $pages = $pdf->getPages();
-                
-                if (isset($pages[$pageNumber - 1])) {
-                    $text = $pages[$pageNumber - 1]->getText();
-                }
-            }
+            // Получаем предпросмотр страниц
+            $previewPages = DocumentPage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->with('images')
+                ->orderBy('page_number')
+                ->get();
             
-            // Извлекаем изображения из PDF
-            $images = $this->extractPdfImages($document, $filePath, $pageNumber, $isPreview);
+            // Полная статистика
+            $stats = $this->getDocumentStats($id);
             
-            // Анализируем структуру страницы
-            $sectionTitle = $this->detectSectionTitle($text);
-            
-            return [
-                'page_number' => $pageNumber,
-                'content' => $this->formatContent($text),
-                'content_text' => $this->cleanText($text),
-                'word_count' => str_word_count($text),
-                'character_count' => strlen($text),
-                'paragraph_count' => count(explode("\n\n", trim($text))),
-                'tables_count' => $this->countTables($text),
-                'section_title' => $sectionTitle,
-                'metadata' => $this->extractMetadata($text),
-                'images' => $images,
-                'images_count' => count($images)
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error("Ошибка парсинга PDF страницы {$pageNumber}: " . $e->getMessage());
-            throw $e;
-        }
-    }
-    
-    /**
-     * Парсинг страницы Word документа
-     */
-    private function parseWordPage(Document $document, $filePath, $pageNumber, $isPreview)
-    {
-        try {
-            $phpWord = WordIOFactory::load($filePath);
-            $text = '';
-            
-            foreach ($phpWord->getSections() as $section) {
-                foreach ($section->getElements() as $element) {
-                    if (method_exists($element, 'getText')) {
-                        $text .= $element->getText() . "\n";
-                    }
-                }
-            }
-            
-            // Разделяем текст на страницы (примерно)
-            $lines = explode("\n", $text);
-            $linesPerPage = 50; // Примерное количество строк на страницу
-            $startLine = ($pageNumber - 1) * $linesPerPage;
-            $pageText = implode("\n", array_slice($lines, $startLine, $linesPerPage));
-            
-            return [
-                'page_number' => $pageNumber,
-                'content' => $this->formatContent($pageText),
-                'content_text' => $this->cleanText($pageText),
-                'word_count' => str_word_count($pageText),
-                'character_count' => strlen($pageText),
-                'paragraph_count' => count(explode("\n\n", trim($pageText))),
-                'tables_count' => 0,
-                'section_title' => $this->detectSectionTitle($pageText),
-                'metadata' => $this->extractMetadata($pageText),
-                'images' => [], // Word изображения сложнее извлекать
-                'images_count' => 0
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error("Ошибка парсинга Word страницы {$pageNumber}: " . $e->getMessage());
-            throw $e;
-        }
-    }
-    
-    /**
-     * Извлечение текста из PDF с помощью pdftotext
-     */
-    private function extractPdfTextWithPdftotext($filePath, $pageNumber)
-    {
-        if (!function_exists('shell_exec')) {
-            return '';
-        }
-        
-        $tempFile = tempnam(sys_get_temp_dir(), 'pdf_text_');
-        $command = "pdftotext -f {$pageNumber} -l {$pageNumber} \"{$filePath}\" \"{$tempFile}\" 2>&1";
-        
-        $process = new Process(explode(' ', $command));
-        $process->run();
-        
-        if (!$process->isSuccessful()) {
-            return '';
-        }
-        
-        $text = file_get_contents($tempFile);
-        unlink($tempFile);
-        
-        return $text ?: '';
-    }
-    
-    /**
-     * Извлечение изображений из PDF
-     */
-    private function extractPdfImages(Document $document, $filePath, $pageNumber, $isPreview)
-    {
-        $images = [];
-        
-        if (!function_exists('shell_exec') || !$this->commandExists('pdfimages')) {
-            return $images;
-        }
-        
-        $tempDir = storage_path('app/temp/' . Str::random(20));
-        mkdir($tempDir, 0755, true);
-        
-        try {
-            // Используем pdfimages для извлечения изображений
-            $command = "pdfimages -p -j \"{$filePath}\" \"{$tempDir}/image\" 2>&1";
-            
-            $process = new Process(explode(' ', $command));
-            $process->setTimeout(300);
-            $process->run();
-            
-            if ($process->isSuccessful()) {
-                $files = glob("{$tempDir}/image-*.{jpg,jpeg,png}", GLOB_BRACE);
-                
-                foreach ($files as $index => $imageFile) {
-                    $imageInfo = getimagesize($imageFile);
-                    
-                    if ($imageInfo && $imageInfo[0] > 50 && $imageInfo[1] > 50) {
-                        $filename = "doc_{$document->id}_page_{$pageNumber}_img_" . ($index + 1) . ".jpg";
-                        $storagePath = "documents/{$document->id}/pages/{$pageNumber}/" . $filename;
-                        
-                        try {
-                            // Создаем директорию если не существует
-                            $directory = dirname(storage_path("app/" . $storagePath));
-                            if (!is_dir($directory)) {
-                                mkdir($directory, 0755, true);
-                            }
-                            
-                            // Используем Intervention Image 3.x
-                            $image = Image::read($imageFile);
-                            
-                            // Ресайз если нужно
-                            if ($image->width() > 1200) {
-                                $image->scale(width: 1200);
-                            }
-                            
-                            // Сохраняем
-                            $image->save(storage_path("app/" . $storagePath), quality: 85);
-                            
-                            $images[] = [
-                                'filename' => $filename,
-                                'path' => $storagePath,
-                                'url' => Storage::url($storagePath),
-                                'width' => $image->width(),
-                                'height' => $image->height(),
-                                'size' => filesize(storage_path("app/" . $storagePath)),
-                                'description' => 'Изображение из документа',
-                                'ocr_text' => '',
-                                'position' => $index + 1
-                            ];
-                            
-                        } catch (\Exception $e) {
-                            Log::warning("Ошибка обработки изображения: " . $e->getMessage());
-                            // Сохраняем оригинал без обработки
-                            copy($imageFile, storage_path("app/" . $storagePath));
-                        }
-                    }
-                }
-            }
-            
-        } catch (\Exception $e) {
-            Log::error("Ошибка извлечения изображений: " . $e->getMessage());
-        } finally {
-            // Очистка временных файлов
-            if (is_dir($tempDir)) {
-                array_map('unlink', glob("{$tempDir}/*"));
-                rmdir($tempDir);
-            }
-        }
-        
-        return $images;
-    }
-    /**
-     * OCR для извлечения текста с изображений
-     */
-    private function extractTextFromImage($imagePath)
-    {
-        if (!class_exists('thiagoalessio\TesseractOCR\TesseractOCR')) {
-            return '';
-        }
-        
-        try {
-            $ocr = new TesseractOCR($imagePath);
-            $ocr->lang('rus+eng');
-            return $ocr->run();
-        } catch (\Exception $e) {
-            Log::warning("OCR ошибка: " . $e->getMessage());
-            return '';
-        }
-    }
-    
-    /**
-     * Сохранение страницы в базу данных
-     */
-    private function savePageToDatabase(Document $document, $pageData, $isPreview)
-    {
-        $page = DocumentPage::create([
-            'document_id' => $document->id,
-            'page_number' => $pageData['page_number'],
-            'content' => $pageData['content'],
-            'content_text' => $pageData['content_text'],
-            'word_count' => $pageData['word_count'],
-            'character_count' => $pageData['character_count'],
-            'paragraph_count' => $pageData['paragraph_count'],
-            'tables_count' => $pageData['tables_count'],
-            'section_title' => $pageData['section_title'],
-            'metadata' => json_encode($pageData['metadata']),
-            'is_preview' => $isPreview,
-            'parsing_quality' => $this->calculatePageQuality($pageData),
-            'status' => 'parsed'
-        ]);
-        
-        // Сохраняем изображения
-        foreach ($pageData['images'] as $imageData) {
-            DocumentImage::create([
-                'document_id' => $document->id,
-                'page_id' => $page->id,
-                'page_number' => $pageData['page_number'],
-                'filename' => $imageData['filename'],
-                'path' => $imageData['path'],
-                'url' => $imageData['url'],
-                'width' => $imageData['width'],
-                'height' => $imageData['height'],
-                'size' => $imageData['size'],
-                'description' => $imageData['description'],
-                'ocr_text' => $imageData['ocr_text'] ?? null,
-                'position' => $imageData['position'],
-                'is_preview' => $isPreview,
-                'status' => 'extracted'
+            return view('admin.documents.processing_advanced', [
+                'document' => $document,
+                'previewPages' => $previewPages,
+                'stats' => $stats
             ]);
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка загрузки страницы расширенной обработки: " . $e->getMessage());
+            return redirect()->route('admin.documents.processing.index')
+                ->with('error', 'Документ не найден: ' . $e->getMessage());
         }
-        
-        return $page;
     }
     
     /**
-     * Получение общего количества страниц
+     * Создание предпросмотра документа (версия с редиректом)
      */
-    private function getTotalPages(Document $document, $filePath)
+    public function createPreview(Request $request, $id)
     {
-        $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
-        
-        if ($extension === 'pdf') {
-            if (function_exists('shell_exec') && $this->commandExists('pdfinfo')) {
-                $command = "pdfinfo \"{$filePath}\" 2>&1";
-                $output = shell_exec($command);
-                
-                if (preg_match('/Pages:\s*(\d+)/', $output, $matches)) {
-                    return (int) $matches[1];
+        try {
+            $document = Document::findOrFail($id);
+            
+            Log::info("Запрос на создание предпросмотра документа {$id}");
+            
+            // Проверяем, не обрабатывается ли уже документ
+            if ($document->status === 'processing') {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Документ уже обрабатывается');
+            }
+            
+            // Обновляем статус
+            $document->update([
+                'status' => 'processing',
+                'parsing_progress' => 0
+            ]);
+            
+            // Создаем предпросмотр через парсер
+            $result = $this->documentParser->parseDocument($document, true);
+            
+            if ($result['success']) {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('success', 'Предпросмотр создан успешно! Обработано страниц: ' . $result['parsed_pages'] . ', изображений: ' . $result['images_count']);
+            } else {
+                $document->update(['status' => 'parse_error']);
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Ошибка создания предпросмотра');
+            }
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка создания предпросмотра документа {$id}: " . $e->getMessage());
+            
+            if (isset($document)) {
+                $document->update(['status' => 'parse_error']);
+            }
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Полный парсинг документа (версия с редиректом)
+     */
+    public function parseFull(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            Log::info("Запрос на полный парсинг документа {$id}");
+            
+            // Проверяем, не обрабатывается ли уже документ
+            if ($document->status === 'processing') {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Документ уже обрабатывается');
+            }
+            
+            // Обновляем статус
+            $document->update([
+                'status' => 'processing',
+                'parsing_progress' => 0
+            ]);
+            
+            // Выполняем полный парсинг
+            $result = $this->documentParser->parseDocument($document, false);
+            
+            if ($result['success']) {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('success', 'Документ полностью распарсен! Обработано страниц: ' . $result['parsed_pages'] . ', слов: ' . $result['word_count'] . ', изображений: ' . $result['images_count']);
+            } else {
+                $document->update(['status' => 'parse_error']);
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Ошибка полного парсинга');
+            }
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка полного парсинга документа {$id}: " . $e->getMessage());
+            
+            if (isset($document)) {
+                $document->update([
+                    'status' => 'parse_error',
+                    'content_text' => 'Ошибка парсинга: ' . substr($e->getMessage(), 0, 500)
+                ]);
+            }
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Парсинг только изображений из документа
+     */
+    public function parseImagesOnly(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            Log::info("Запрос на парсинг только изображений документа {$id}");
+            
+            $filePath = storage_path('app/' . $document->file_path);
+            
+            if (!file_exists($filePath)) {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Файл не найден: ' . $document->file_path);
+            }
+            
+            // Обновляем статус
+            $document->update(['status' => 'processing']);
+            
+            $totalImages = 0;
+            $totalPages = $this->getPdfPageCount($filePath);
+            $pagesProcessed = 0;
+            
+            // Парсим изображения для каждой страницы
+            for ($pageNum = 1; $pageNum <= $totalPages; $pageNum++) {
+                try {
+                    $images = $this->imageExtractor->extractImagesUniversal($document, $filePath, $pageNum, false);
+                    $totalImages += count($images);
+                    
+                    Log::info("Страница {$pageNum}: извлечено " . count($images) . " изображений");
+                    
+                    $pagesProcessed++;
+                    
+                    // Обновляем прогресс
+                    $progress = ($pageNum / $totalPages) * 100;
+                    $document->update(['parsing_progress' => $progress]);
+                    
+                } catch (\Exception $e) {
+                    Log::error("Ошибка парсинга изображений страницы {$pageNum}: " . $e->getMessage());
+                    continue;
                 }
             }
             
-            // Альтернативный метод
+            $document->update([
+                'status' => 'parsed',
+                'parsing_progress' => 100,
+                'total_pages' => $totalPages
+            ]);
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('success', "Извлечение изображений завершено! Страниц: {$pagesProcessed}, изображений: {$totalImages}");
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка парсинга изображений документа {$id}: " . $e->getMessage());
+            
+            if (isset($document)) {
+                $document->update(['status' => 'parse_error']);
+            }
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка извлечения изображений: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Парсинг одной конкретной страницы
+     */
+    public function parseSinglePage(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            $pageNumber = $request->input('page', 1);
+            
+            Log::info("Запрос на парсинг страницы {$pageNumber} документа {$id}");
+            
+            $filePath = storage_path('app/' . $document->file_path);
+            
+            if (!file_exists($filePath)) {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Файл не найден');
+            }
+            
+            // Парсим текст страницы
+            $text = $this->extractPdfText($filePath, $pageNumber);
+            $cleanedText = $this->cleanText($text);
+            
+            // Извлекаем изображения
+            $images = $this->imageExtractor->extractImagesUniversal($document, $filePath, $pageNumber, false);
+            
+            // Создаем или обновляем страницу
+            $page = DocumentPage::updateOrCreate(
+                [
+                    'document_id' => $document->id,
+                    'page_number' => $pageNumber
+                ],
+                [
+                    'content' => $this->formatContent($cleanedText),
+                    'content_text' => $cleanedText,
+                    'word_count' => str_word_count($cleanedText),
+                    'character_count' => strlen($cleanedText),
+                    'paragraph_count' => $this->countParagraphs($cleanedText),
+                    'tables_count' => $this->countTables($cleanedText),
+                    'section_title' => $this->detectSectionTitle($cleanedText),
+                    'metadata' => json_encode($this->extractMetadata($cleanedText)),
+                    'is_preview' => false,
+                    'parsing_quality' => $this->calculatePageQuality($cleanedText, $images),
+                    'status' => 'parsed',
+                    'has_images' => !empty($images)
+                ]
+            );
+            
+            // Сохраняем изображения
+            foreach ($images as $imageData) {
+                DocumentImage::updateOrCreate(
+                    [
+                        'document_id' => $document->id,
+                        'page_id' => $page->id,
+                        'position' => $imageData['position'] ?? 1
+                    ],
+                    $imageData
+                );
+            }
+            
+            // Обновляем статистику документа
+            $this->updateDocumentStats($document);
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('success', "Страница {$pageNumber} обработана! Текст: " . str_word_count($cleanedText) . " слов, изображений: " . count($images));
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка парсинга страницы документа {$id}: " . $e->getMessage());
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка обработки страницы: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Сброс статуса документа (версия с редиректом)
+     */
+    public function resetStatus(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            Log::info("Сброс статуса документа {$id}");
+            
+            // Начинаем транзакцию
+            DB::beginTransaction();
+            
             try {
-                $pdf = $this->pdfParser->parseFile($filePath);
-                return count($pdf->getPages());
+                $document->update([
+                    'status' => 'uploaded',
+                    'is_parsed' => false,
+                    'search_indexed' => false,
+                    'content_text' => null,
+                    'content' => null,
+                    'keywords' => null,
+                    'keywords_text' => null,
+                    'detected_section' => null,
+                    'detected_system' => null,
+                    'detected_component' => null,
+                    'parsing_quality' => 0,
+                    'total_pages' => 0,
+                    'word_count' => 0,
+                    'parsing_progress' => 0,
+                    'parsed_at' => null
+                ]);
+                
+                // Очищаем связанные данные
+                $pages = DocumentPage::where('document_id', $id)->get();
+                
+                foreach ($pages as $page) {
+                    // Удаляем изображения страницы
+                    DocumentImage::where('page_id', $page->id)->delete();
+                    // Удаляем страницу
+                    $page->delete();
+                }
+                
+                // Удаляем оставшиеся изображения
+                DocumentImage::where('document_id', $id)->delete();
+                
+                DB::commit();
+                
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('success', 'Статус документа сброшен. Можно начать обработку заново.');
+                
             } catch (\Exception $e) {
-                Log::warning("Не удалось определить количество страниц PDF: " . $e->getMessage());
+                DB::rollBack();
+                throw $e;
+            }
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка сброса статуса документа {$id}: " . $e->getMessage());
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка сброса статуса: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Удалить предпросмотр (версия с редиректом)
+     */
+    public function deletePreview(Request $request, $id)
+    {
+        try {
+            $deletedPages = DocumentPage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->delete();
+                
+            $deletedImages = DocumentImage::where('document_id', $id)
+                ->where('is_preview', true)
+                ->delete();
+            
+            // Обновляем статус документа
+            Document::where('id', $id)->update([
+                'status' => 'uploaded',
+                'parsing_quality' => 0,
+                'total_pages' => DB::raw('COALESCE(total_pages, 0)'),
+                'word_count' => 0
+            ]);
+                
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('success', 'Предпросмотр удален. Удалено страниц: ' . $deletedPages . ', изображений: ' . $deletedImages);
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка удаления предпросмотра документа {$id}: " . $e->getMessage());
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка удаления предпросмотра: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Просмотр изображений документа
+     */
+    public function viewImages(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            $images = DocumentImage::where('document_id', $id)
+                ->with('page')
+                ->orderBy('page_number')
+                ->orderBy('position')
+                ->paginate(20);
+            
+            $stats = [
+                'total_images' => DocumentImage::where('document_id', $id)->count(),
+                'pages_with_images' => DocumentImage::where('document_id', $id)->distinct('page_number')->count('page_number'),
+                'total_size' => DocumentImage::where('document_id', $id)->sum('size') / 1024 / 1024, // в MB
+            ];
+            
+            return view('admin.documents.images', compact('document', 'images', 'stats'));
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка загрузки изображений документа {$id}: " . $e->getMessage());
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Ошибка загрузки изображений: ' . $e->getMessage());
+        }
+    }
+    
+    /**
+     * Получить статистику по документу
+     */
+    public function getDocumentStats($id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            // Статусы в читаемом формате
+            $statusLabels = [
+                'uploaded' => 'Загружен',
+                'processing' => 'В обработке',
+                'parsed' => 'Распарсен',
+                'preview_created' => 'Предпросмотр создан',
+                'parse_error' => 'Ошибка парсинга'
+            ];
+            
+            $stats = [
+                'pages_count' => DocumentPage::where('document_id', $id)->count(),
+                'total_pages' => $document->total_pages ?? 0,
+                'images_count' => DocumentImage::where('document_id', $id)->count(),
+                'words_count' => $document->word_count ?? 0,
+                'characters_count' => $document->content_text ? strlen($document->content_text) : 0,
+                'paragraphs_count' => DocumentPage::where('document_id', $id)->sum('paragraph_count'),
+                'tables_count' => DocumentPage::where('document_id', $id)->sum('tables_count'),
+                'last_parsed' => $document->parsed_at ? $document->parsed_at->format('d.m.Y H:i') : null,
+                'parsing_quality' => $document->parsing_quality ?? 0,
+                'is_parsed' => $document->is_parsed,
+                'search_indexed' => $document->search_indexed,
+                'file_size' => $this->getFileSize($document),
+                'file_type' => $document->file_type,
+                'status' => $document->status,
+                'status_label' => $statusLabels[$document->status] ?? $document->status
+            ];
+            
+            return $stats;
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка получения статистики документа {$id}: " . $e->getMessage());
+            
+            // Возвращаем пустую статистику при ошибке
+            return [
+                'pages_count' => 0,
+                'total_pages' => 0,
+                'images_count' => 0,
+                'words_count' => 0,
+                'characters_count' => 0,
+                'paragraphs_count' => 0,
+                'tables_count' => 0,
+                'last_parsed' => null,
+                'parsing_quality' => 0,
+                'is_parsed' => false,
+                'search_indexed' => false,
+                'file_size' => '0 B',
+                'file_type' => 'unknown',
+                'status' => 'error',
+                'status_label' => 'Ошибка'
+            ];
+        }
+    }
+    
+    /**
+     * Получить прогресс обработки (AJAX)
+     */
+    public function getProcessingProgress($id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            $pagesProcessed = DocumentPage::where('document_id', $id)
+                ->where('is_preview', false)
+                ->count();
+                
+            $imagesProcessed = DocumentImage::where('document_id', $id)
+                ->where('is_preview', false)
+                ->count();
+            
+            // Если статус уже 'parsed' или 'preview_created', значит обработка завершена
+            if (in_array($document->status, ['parsed', 'preview_created'])) {
+                return response()->json([
+                    'success' => true,
+                    'status' => $document->status,
+                    'progress' => 100,
+                    'pages_processed' => $pagesProcessed,
+                    'total_pages' => $document->total_pages ?? 0,
+                    'images_processed' => $imagesProcessed,
+                    'estimated_time' => 'Завершено',
+                    'is_parsed' => $document->is_parsed,
+                    'parsing_quality' => $document->parsing_quality,
+                    'message' => $document->status === 'parsed' ? 'Документ распарсен' : 'Создан предпросмотр'
+                ]);
+            }
+            
+            // Если статус 'processing', рассчитываем прогресс
+            $progress = $document->parsing_progress ?? 0;
+            
+            return response()->json([
+                'success' => true,
+                'status' => $document->status,
+                'progress' => round($progress, 1),
+                'pages_processed' => $pagesProcessed,
+                'total_pages' => $document->total_pages ?? 0,
+                'images_processed' => $imagesProcessed,
+                'estimated_time' => $this->calculateEstimatedTime($document, $progress),
+                'is_parsed' => $document->is_parsed,
+                'parsing_quality' => $document->parsing_quality,
+                'message' => 'Идет обработка...'
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка получения прогресса: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Получить список страниц документа (AJAX)
+     */
+    public function getDocumentPages($id)
+    {
+        try {
+            $pages = DocumentPage::where('document_id', $id)
+                ->with(['images' => function($query) {
+                    $query->orderBy('position');
+                }])
+                ->orderBy('page_number')
+                ->get();
+                
+            $document = Document::findOrFail($id);
+            
+            return response()->json([
+                'success' => true,
+                'pages' => $pages,
+                'total_pages' => $document->total_pages ?? 0,
+                'document' => [
+                    'id' => $document->id,
+                    'title' => $document->title,
+                    'status' => $document->status,
+                    'is_parsed' => $document->is_parsed,
+                    'parsing_quality' => $document->parsing_quality
+                ]
+            ]);
+            
+        } catch (\Exception $e) {
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка получения страниц: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Тестирование извлечения изображений
+     */
+    public function testImageExtraction(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            $filePath = storage_path('app/' . $document->file_path);
+            
+            if (!file_exists($filePath)) {
+                return response()->json([
+                    'success' => false,
+                    'message' => 'Файл не найден'
+                ], 404);
+            }
+            
+            $pageNumber = $request->input('page', 1);
+            
+            Log::info("Тестирование извлечения изображений для документа {$id}, страница {$pageNumber}");
+            
+            // Извлекаем изображения
+            $images = $this->imageExtractor->extractImagesUniversal($document, $filePath, $pageNumber, true);
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Извлечение изображений завершено',
+                'document_id' => $document->id,
+                'page_number' => $pageNumber,
+                'images_count' => count($images),
+                'images' => array_map(function($img) {
+                    return [
+                        'filename' => $img['filename'] ?? null,
+                        'url' => $img['url'] ?? null,
+                        'thumbnail_url' => $img['thumbnail_url'] ?? null,
+                        'width' => $img['width'] ?? 0,
+                        'height' => $img['height'] ?? 0,
+                        'size' => $img['size'] ?? 0,
+                        'description' => $img['description'] ?? null
+                    ];
+                }, $images)
+            ]);
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка тестирования извлечения изображений: " . $e->getMessage());
+            
+            return response()->json([
+                'success' => false,
+                'message' => 'Ошибка: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+    
+    /**
+     * Вспомогательные методы
+     */
+    
+    private function getFileSize(Document $document): string
+    {
+        $filePath = storage_path('app/' . $document->file_path);
+        if (!file_exists($filePath)) {
+            return '0 B';
+        }
+        
+        $bytes = filesize($filePath);
+        $units = ['B', 'KB', 'MB', 'GB'];
+        $factor = floor((strlen($bytes) - 1) / 3);
+        
+        return sprintf("%.2f %s", $bytes / pow(1024, $factor), $units[$factor]);
+    }
+    
+    private function calculateEstimatedTime(Document $document, float $progress): string
+    {
+        if ($progress >= 100 || $document->status !== 'processing') {
+            return 'Завершено';
+        }
+        
+        // Если только начали, показываем "Рассчитывается..."
+        if ($progress <= 5) {
+            return 'Рассчитывается...';
+        }
+        
+        // Простой расчет оставшегося времени
+        if ($document->updated_at) {
+            $elapsed = now()->diffInSeconds($document->updated_at);
+            if ($progress > 0) {
+                $totalEstimated = ($elapsed / $progress) * 100;
+                $remaining = $totalEstimated - $elapsed;
+                
+                if ($remaining < 60) {
+                    return ceil($remaining) . ' сек';
+                } elseif ($remaining < 3600) {
+                    return ceil($remaining / 60) . ' мин';
+                } else {
+                    return number_format($remaining / 3600, 1) . ' ч';
+                }
             }
         }
         
-        // Для Word документов возвращаем примерное количество
+        return 'Рассчитывается...';
+    }
+    
+    private function getPdfPageCount(string $filePath): int
+    {
+        // Используем простой способ через pdfinfo
+        if ($this->commandExists('pdfinfo')) {
+            $command = "pdfinfo \"{$filePath}\" 2>&1";
+            $output = shell_exec($command);
+            
+            if (preg_match('/Pages:\s*(\d+)/', $output, $matches)) {
+                return (int)$matches[1];
+            }
+        }
+        
+        // Альтернативный способ через библиотеку
+        try {
+            $parser = new \Smalot\PdfParser\Parser();
+            $pdf = $parser->parseFile($filePath);
+            return count($pdf->getPages());
+        } catch (\Exception $e) {
+            Log::warning("Не удалось определить количество страниц: " . $e->getMessage());
+        }
+        
         return 1;
     }
     
-    /**
-     * Проверка наличия команды в системе
-     */
-    private function commandExists($command)
+    private function commandExists(string $command): bool
     {
         $which = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ? 'where' : 'which';
-        $process = new Process([$which, $command]);
+        $process = new \Symfony\Component\Process\Process([$which, $command]);
         $process->run();
         return $process->isSuccessful();
     }
     
-    /**
-     * Форматирование контента
-     */
-    private function formatContent($text)
+    private function extractPdfText(string $filePath, int $pageNumber): string
+    {
+        try {
+            $parser = new \Smalot\PdfParser\Parser();
+            $pdf = $parser->parseFile($filePath);
+            $pages = $pdf->getPages();
+            
+            if (isset($pages[$pageNumber - 1])) {
+                return $pages[$pageNumber - 1]->getText();
+            }
+        } catch (\Exception $e) {
+            Log::warning("Ошибка извлечения текста: " . $e->getMessage());
+        }
+        
+        return '';
+    }
+    
+    private function cleanText(string $text): string
+    {
+        if (empty($text)) {
+            return '';
+        }
+        
+        $text = preg_replace('/\s+/', ' ', $text);
+        $text = preg_replace('/\n{3,}/', "\n\n", $text);
+        $text = preg_replace('/[^\x20-\x7E\xA0-\xFF\x{0400}-\x{04FF}\.,;:!?\-\(\)\[\]\{\}\n\r\t]/u', ' ', $text);
+        
+        return trim($text);
+    }
+    
+    private function formatContent(string $text): string
     {
         $paragraphs = explode("\n\n", trim($text));
         $formatted = '';
@@ -490,9 +760,8 @@ class AdvancedDocumentParser
         foreach ($paragraphs as $paragraph) {
             $paragraph = trim($paragraph);
             if (!empty($paragraph)) {
-                // Проверяем, является ли абзац заголовком
-                if (strlen($paragraph) < 100 && preg_match('/^[A-ZА-Я0-9\s\.\-:]+$/u', $paragraph)) {
-                    $formatted .= '<h3 class="document-heading">' . htmlspecialchars($paragraph) . '</h3>';
+                if (strlen($paragraph) < 150 && preg_match('/^[A-ZА-Я0-9\s\.\-:]+$/u', $paragraph)) {
+                    $formatted .= '<h4 class="document-heading">' . htmlspecialchars($paragraph) . '</h4>';
                 } else {
                     $formatted .= '<p class="document-paragraph">' . nl2br(htmlspecialchars($paragraph)) . '</p>';
                 }
@@ -502,86 +771,23 @@ class AdvancedDocumentParser
         return $formatted;
     }
     
-    /**
-     * Очистка текста
-     */
-    private function cleanText($text)
+    private function countParagraphs(string $text): int
     {
-        // Удаляем лишние пробелы и переносы
-        $text = preg_replace('/\s+/', ' ', $text);
-        $text = preg_replace('/\n{3,}/', "\n\n", $text);
-        
-        // Удаляем специальные символы, но оставляем пунктуацию
-        $text = preg_replace('/[^\x20-\x7F\xA0-\xFF\x{0400}-\x{04FF}\.,;:!?\-\(\)\[\]\{\}]/u', ' ', $text);
-        
-        return trim($text);
+        $paragraphs = preg_split('/\n\s*\n/', $text);
+        return count(array_filter($paragraphs, function($p) {
+            return trim($p) !== '';
+        }));
     }
     
-    /**
-     * Определение раздела/заголовка
-     */
-    private function detectSectionTitle($text)
+    private function countTables(string $text): int
     {
-        $lines = explode("\n", trim($text));
-        
-        foreach ($lines as $line) {
-            $line = trim($line);
-            
-            // Проверяем, похожа ли строка на заголовок
-            if (strlen($line) > 3 && strlen($line) < 200) {
-                // Проверка на заглавные буквы в начале
-                if (preg_match('/^[A-ZА-Я0-9][A-ZА-Яa-zа-я0-9\s\.\-:]+$/u', $line)) {
-                    // Исключаем очевидные не-заголовки
-                    if (!preg_match('/(стр\.|страница|page|\d+\s*из\s*\d+)/iu', $line)) {
-                        return $line;
-                    }
-                }
-            }
-        }
-        
-        return null;
-    }
-    
-    /**
-     * Извлечение метаданных из текста
-     */
-    private function extractMetadata($text)
-    {
-        $metadata = [];
-        
-        // Поиск номеров деталей
-        preg_match_all('/[A-Z]{1,5}[\-\s]?\d{4,10}[A-Z]?/i', $text, $partNumbers);
-        if (!empty($partNumbers[0])) {
-            $metadata['part_numbers'] = array_unique($partNumbers[0]);
-        }
-        
-        // Поиск времени выполнения
-        if (preg_match('/(\d+[\.,]?\d*)\s*(час|ч|мин|мин\.|минут)/iu', $text, $timeMatches)) {
-            $metadata['estimated_time'] = $timeMatches[1] . ' ' . $timeMatches[2];
-        }
-        
-        // Поиск сложности
-        if (preg_match('/(легк|средн|сложн|простой|сложный)/iu', $text, $difficultyMatches)) {
-            $metadata['difficulty'] = mb_strtolower($difficultyMatches[1]);
-        }
-        
-        return $metadata;
-    }
-    
-    /**
-     * Подсчет таблиц в тексте
-     */
-    private function countTables($text)
-    {
-        // Простая эвристика для поиска таблиц
         $lines = explode("\n", $text);
         $tableCount = 0;
         $inTable = false;
         
         foreach ($lines as $line) {
             if (preg_match('/^\s*(\|.+\|)\s*$/', $line) || 
-                preg_match('/^\s*(\+.+\+)\s*$/', $line) ||
-                preg_match('/^\s*(\-+\s+\-+)/', $line)) {
+                preg_match('/^\s*(\+.+\+)\s*$/', $line)) {
                 if (!$inTable) {
                     $tableCount++;
                     $inTable = true;
@@ -594,63 +800,96 @@ class AdvancedDocumentParser
         return $tableCount;
     }
     
-    /**
-     * Генерация описания изображения
-     */
-    private function generateImageDescription($ocrText)
+    private function detectSectionTitle(string $text): ?string
     {
-        if (empty($ocrText)) {
-            return 'Иллюстрация к документу';
+        $lines = explode("\n", trim($text));
+        
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (strlen($line) > 10 && strlen($line) < 200) {
+                if (preg_match('/^[A-ZА-Я][A-ZА-Яa-zа-я0-9\s\.\-:]+$/u', $line)) {
+                    if (!preg_match('/(стр\.|страница|page|\d+\s*из\s*\d+)/iu', $line)) {
+                        return $line;
+                    }
+                }
+            }
         }
         
-        $cleanText = substr(trim($ocrText), 0, 100);
-        return 'Изображение: ' . $cleanText . (strlen($ocrText) > 100 ? '...' : '');
+        return null;
     }
     
-    /**
-     * Расчет качества парсинга страницы
-     */
-    private function calculatePageQuality($pageData)
+    private function extractMetadata(string $text): array
     {
-        $quality = 0.5; // Базовая оценка
+        $metadata = [];
         
-        // Бонус за наличие текста
-        if ($pageData['word_count'] > 10) {
-            $quality += 0.2;
+        // Поиск номеров деталей
+        preg_match_all('/[A-Z]{1,5}[\-\s]?\d{4,10}[A-Z]?/i', $text, $partNumbers);
+        if (!empty($partNumbers[0])) {
+            $metadata['part_numbers'] = array_unique($partNumbers[0]);
         }
         
-        // Бонус за структуру
-        if ($pageData['paragraph_count'] > 1) {
-            $quality += 0.1;
+        return $metadata;
+    }
+    
+    private function calculatePageQuality(string $text, array $images): float
+    {
+        $quality = 0.3;
+        $wordCount = str_word_count($text);
+        
+        if ($wordCount > 100) $quality += 0.2;
+        elseif ($wordCount > 50) $quality += 0.1;
+        elseif ($wordCount > 20) $quality += 0.05;
+        
+        if ($this->detectSectionTitle($text)) {
+            $quality += 0.15;
         }
         
-        // Бонус за заголовок раздела
-        if (!empty($pageData['section_title'])) {
-            $quality += 0.1;
-        }
-        
-        // Бонус за изображения
-        if ($pageData['images_count'] > 0) {
-            $quality += 0.1;
+        if (!empty($images)) {
+            $quality += 0.15;
         }
         
         return min(1.0, $quality);
     }
     
-    /**
-     * Расчет общего качества парсинга
-     */
-    private function calculateQuality($pages)
+    private function updateDocumentStats(Document $document): void
     {
-        if (empty($pages)) {
+        $pages = DocumentPage::where('document_id', $document->id)->get();
+        
+        $totalWords = $pages->sum('word_count');
+        $totalPages = $pages->count();
+        $totalImages = DocumentImage::where('document_id', $document->id)->count();
+        
+        // Объединяем весь текст
+        $allText = $pages->pluck('content_text')->filter()->implode("\n\n");
+        
+        $document->update([
+            'word_count' => $totalWords,
+            'total_pages' => $totalPages,
+            'content_text' => $allText,
+            'content' => $this->formatContent($allText),
+            'is_parsed' => $totalPages > 0,
+            'status' => $totalPages > 0 ? 'parsed' : $document->status,
+            'parsing_quality' => $this->calculateDocumentQuality($allText, $pages->toArray())
+        ]);
+    }
+    
+    private function calculateDocumentQuality(string $fullText, array $pages): float
+    {
+        if (empty($fullText)) {
             return 0.0;
         }
         
-        $totalQuality = 0;
-        foreach ($pages as $page) {
-            $totalQuality += $this->calculatePageQuality($page);
+        $quality = 0.3;
+        $totalWords = str_word_count($fullText);
+        
+        if ($totalWords > 1000) {
+            $quality += 0.3;
+        } elseif ($totalWords > 500) {
+            $quality += 0.2;
+        } elseif ($totalWords > 200) {
+            $quality += 0.1;
         }
         
-        return round($totalQuality / count($pages), 2);
+        return min(1.0, $quality);
     }
 }

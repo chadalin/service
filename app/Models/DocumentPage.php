@@ -104,4 +104,16 @@ class DocumentPage extends Model
         }
         return $text;
     }
+
+    // Методы для безопасной работы с большими текстами
+public function setContentAttribute($value)
+{
+    // LONGTEXT в MySQL поддерживает до 4GB, так что проблем быть не должно
+    $this->attributes['content'] = $value;
+}
+
+public function setContentTextAttribute($value)
+{
+    $this->attributes['content_text'] = $value;
+}
 }

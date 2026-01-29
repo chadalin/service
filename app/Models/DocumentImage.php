@@ -8,31 +8,38 @@ use Illuminate\Support\Facades\Storage;
 
 class DocumentImage extends Model
 {
-    protected $table = 'document_images';
-    
-    protected $fillable = [
+   protected $fillable = [
         'document_id',
         'page_id',
         'page_number',
         'filename',
         'path',
         'url',
+        'thumbnail_path',
+        'thumbnail_url',
         'width',
         'height',
+        'original_width',
+        'original_height',
         'size',
+        'thumbnail_size',
         'description',
-        'ocr_text',
         'position',
+        'mime_type',
+        'extension',
         'is_preview',
         'status'
     ];
     
     protected $casts = [
-        'is_preview' => 'boolean',
         'width' => 'integer',
         'height' => 'integer',
+        'original_width' => 'integer',
+        'original_height' => 'integer',
         'size' => 'integer',
-        'position' => 'integer'
+        'thumbnail_size' => 'integer',
+        'position' => 'integer',
+        'is_preview' => 'boolean'
     ];
     
     /**
@@ -102,5 +109,31 @@ class DocumentImage extends Model
         } else {
             return $bytes . ' bytes';
         }
+    }
+
+     /**
+     * Получить размер миниатюры в читаемом формате
+     */
+    public function getFormattedThumbnailSizeAttribute()
+    {
+        $bytes = $this->thumbnail_size;
+        if ($bytes >= 1048576) {
+            return number_format($bytes / 1048576, 2) . ' MB';
+        } elseif ($bytes >= 1024) {
+            return number_format($bytes / 1024, 2) . ' KB';
+        } else {
+            return $bytes . ' B';
+        }
+    }
+    
+    /**
+     * Получить соотношение сторон
+     */
+    public function getAspectRatioAttribute()
+    {
+        if ($this->height > 0) {
+            return round($this->width / $this->height, 2);
+        }
+        return 0;
     }
 }

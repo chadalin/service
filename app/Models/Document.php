@@ -249,4 +249,15 @@ class Document extends Model
         
         return $labels[$this->status] ?? $this->status;
     }
+
+    public function getContentAttribute($value)
+{
+    // Убедитесь, что возвращаем строку
+    return $value ?? '';
+}
+
+public function getContentTextAttribute($value)
+{
+    return $value ?? '';
+}
 }
