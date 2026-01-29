@@ -16,6 +16,9 @@ use App\Http\Controllers\Diagnostic\AISearchController;
 use App\Http\Controllers\Diagnostic\DiagnosticController;
 use App\Http\Controllers\Diagnostic\ReportController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
+use App\Http\Controllers\Admin\PriceItemController;
+use App\Http\Controllers\Admin\PriceImportController;
+
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
 use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleController;
 
@@ -632,4 +635,20 @@ Route::get('/test-pdf-images/{id}', function($id) {
     }
     
     return response()->json($result);
+});
+
+// Price Import Routes
+Route::prefix('admin/price')->name('admin.price.')->group(function () {
+    Route::get('/import', [PriceImportController::class, 'selectBrand'])->name('import.select');
+    Route::get('/import/page', [PriceImportController::class, 'index'])->name('import.page');
+    Route::post('/import/preview', [PriceImportController::class, 'preview'])->name('import.preview');
+    Route::post('/import/process', [PriceImportController::class, 'import'])->name('import.process');
+    Route::get('/import/template', [PriceImportController::class, 'downloadTemplate'])->name('import.template');
+    Route::get('/import/status', [PriceImportController::class, 'checkImportStatus'])->name('import.status');
+    
+    // Если нужен CRUD для прайс-листа
+    Route::get('/', [PriceItemController::class, 'index'])->name('index');
+    Route::get('/{priceItem}', [PriceItemController::class, 'show'])->name('show');
+    Route::delete('/{priceItem}', [PriceItemController::class, 'destroy'])->name('destroy');
+    Route::post('/{priceItem}/match-symptoms', [PriceItemController::class, 'matchSymptoms'])->name('match.symptoms');
 });
