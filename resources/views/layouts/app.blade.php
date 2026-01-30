@@ -397,6 +397,7 @@
                 <small class="text-muted">Профессиональный поиск</small>
             </div>
             
+            <!-- ОСНОВНОЕ МЕНЮ -->
             <h6 class="sidebar-heading px-3 mt-4 mb-2">
                 <span>Основное</span>
             </h6>
@@ -408,21 +409,45 @@
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('admin.documents.*') ? 'active' : '' }}" 
-                       href="{{ route('admin.documents.index') }}">
-                        <i class="bi bi-files me-2"></i>📎 Документы
-                    </a>
-                </li>
-                <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('chat.index') ? 'active' : '' }}" 
                        href="{{ route('chat.index') }}">
                         <i class="bi bi-search me-2"></i>🔍 Умный поиск
                     </a>
                 </li>
                 <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('diagnostic.ai.search.page') ? 'active' : '' }}" 
+                       href="{{ route('diagnostic.ai.search.page') }}">
+                        <i class="bi bi-robot me-2"></i>🤖 AI Поиск
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.documents.*') ? 'active' : '' }}" 
+                       href="{{ route('admin.documents.index') }}">
+                        <i class="bi bi-files me-2"></i>📎 Документы
+                    </a>
+                </li>
+            </ul>
+            
+            <!-- ДИАГНОСТИКА И КОНСУЛЬТАЦИИ -->
+            <h6 class="sidebar-heading px-3 mt-4 mb-2">
+                <span>Диагностика и консультации</span>
+            </h6>
+            <ul class="nav flex-column">
+                <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('diagnostic.start') ? 'active' : '' }}" 
                        href="{{ route('diagnostic.start') }}">
                         <i class="bi bi-tools me-2"></i>🔧 Диагностика
+                    </a>
+                </li>
+                <li class="nav-item position-relative">
+                    <a class="nav-link {{ request()->routeIs('diagnostic.consultation.index') ? 'active' : '' }}" 
+                       href="{{ route('diagnostic.consultation.index') }}">
+                        <i class="bi bi-chat-left-text me-2"></i>📝 Мои консультации
+                        @if($unreadConsultationsCount ?? 0 > 0)
+                            <span class="position-absolute top-50 end-0 translate-middle-y badge rounded-pill bg-danger me-3 notification-badge">
+                                {{ $unreadConsultationsCount }}
+                            </span>
+                        @endif
                     </a>
                 </li>
                 @if(auth()->user()->is_expert || auth()->user()->is_admin)
@@ -438,17 +463,6 @@
                     </a>
                 </li>
                 @endif
-                <li class="nav-item position-relative">
-                    <a class="nav-link {{ request()->routeIs('diagnostic.consultation.index') ? 'active' : '' }}" 
-                       href="{{ route('diagnostic.consultation.index') }}">
-                        <i class="bi bi-chat-left-text me-2"></i>📝 Мои консультации
-                        @if($unreadConsultationsCount ?? 0 > 0)
-                            <span class="position-absolute top-50 end-0 translate-middle-y badge rounded-pill bg-danger me-3 notification-badge">
-                                {{ $unreadConsultationsCount }}
-                            </span>
-                        @endif
-                    </a>
-                </li>
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('diagnostic.report.index') ? 'active' : '' }}" 
                        href="{{ route('diagnostic.report.index') }}">
@@ -457,11 +471,13 @@
                 </li>
             </ul>
             
+            <!-- АДМИНИСТРИРОВАНИЕ (Только для админов) -->
             @if(auth()->user()->is_admin)
             <h6 class="sidebar-heading px-3 mt-4 mb-2">
-                <span>Управление консультациями</span>
+                <span>Администрирование</span>
             </h6>
             <ul class="nav flex-column">
+                <!-- Управление консультациями -->
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.consultations.*') ? 'active' : '' }}" 
                        href="{{ route('admin.consultations.index') }}">
@@ -497,13 +513,8 @@
                         <i class="bi bi-bar-chart me-2"></i>📊 Статистика консультаций
                     </a>
                 </li>
-            </ul>
-            @endif
-            
-            <h6 class="sidebar-heading px-3 mt-4 mb-2">
-                <span>Администрирование</span>
-            </h6>
-            <ul class="nav flex-column mb-4">
+                
+                <!-- Базы данных -->
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.categories.*') ? 'active' : '' }}" 
                        href="{{ route('admin.categories.index') }}">
@@ -516,18 +527,8 @@
                         <i class="bi bi-car-front me-2"></i>🚗 База автомобилей
                     </a>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('admin.search.*') ? 'active' : '' }}" 
-                       href="{{ route('admin.search.index') }}">
-                        <i class="bi bi-search me-2"></i>🔎 Расширенный поиск
-                    </a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link {{ request()->routeIs('admin.documents.processing.*') ? 'active' : '' }}" 
-                       href="{{ route('admin.documents.processing.index') }}">
-                        <i class="bi bi-cpu me-2"></i>⚡ Обработка документов
-                    </a>
-                </li>
+                
+                <!-- Диагностические правила -->
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.diagnostic.symptoms.*') ? 'active' : '' }}" 
                        href="{{ route('admin.diagnostic.symptoms.index') }}">
@@ -540,46 +541,65 @@
                         <i class="bi bi-diagram-3 me-2"></i>🧩 Правила диагностики
                     </a>
                 </li>
-
-                @if(auth()->check())
-    <li class="nav-item">
-        <a class="nav-link" href="{{ route('diagnostic.ai.search.page') }}">
-            <i class="bi bi-robot me-1"></i> AI поиск
-        </a>
-    </li>
-@endif
-
-
-                   @if(auth()->check())
-    <li class="nav-item">
-        <a class="nav-link" href="{{ route('admin.symptoms.import.page') }}">
-            <i class="bi bi-robot me-1"></i> Загрузка правил ексель
-        </a>
-    </li>
-@endif
-
-  
-                @if(auth()->user()->is_admin)
+                
+                <!-- Импорт данных -->
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.symptoms.import.*') ? 'active' : '' }}" 
+                       href="{{ route('admin.symptoms.import.select') }}">
+                        <i class="bi bi-upload me-2"></i>📤 Импорт правил
+                    </a>
+                </li>
+                <!-- ДОБАВЛЕНА ССЫЛКА НА ИМПОРТ ПРАЙС-ЛИСТА -->
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.price.import.*') ? 'active' : '' }}" 
+                       href="{{ route('admin.price.import.select') }}">
+                        <i class="bi bi-currency-dollar me-2"></i>💰 Импорт прайс-листа
+                    </a>
+                </li>
+                <!-- Ссылка на просмотр прайс-листа -->
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.price.index') ? 'active' : '' }}" 
+                       href="{{ route('admin.price.index') }}">
+                        <i class="bi bi-list-ul me-2"></i>📋 Прайс-лист
+                    </a>
+                </li>
+                
+                <!-- Обработка документов -->
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.documents.processing.*') ? 'active' : '' }}" 
+                       href="{{ route('admin.documents.processing.index') }}">
+                        <i class="bi bi-cpu me-2"></i>⚡ Обработка документов
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link {{ request()->routeIs('admin.search.*') ? 'active' : '' }}" 
+                       href="{{ route('admin.search.index') }}">
+                        <i class="bi bi-search me-2"></i>🔎 Расширенный поиск
+                    </a>
+                </li>
+                
+                <!-- Системные настройки -->
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.users.*') ? 'active' : '' }}" 
-                       href="{{ route('admin.users.index') }}">
+                       href="{{ route('admin.search.index') }}">
                         <i class="bi bi-people me-2"></i>👥 Пользователи
                     </a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link {{ request()->routeIs('admin.settings.*') ? 'active' : '' }}" 
-                       href="{{ route('admin.settings.index') }}">
+                       href="{{ route('admin.search.index') }}">
                         <i class="bi bi-sliders me-2"></i>⚙️ Настройки системы
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="{{ route('project-info.all') }}">
+                    <a class="nav-link" href="/project-info">
                         <i class="bi bi-info-circle me-2"></i>ℹ️ Информация о проекте
                     </a>
                 </li>
-                @endif
             </ul>
+            @endif
             
+            <!-- ФУНКЦИИ ЭКСПЕРТА (Только для экспертов) -->
             @if(auth()->user()->is_expert && !auth()->user()->is_admin)
             <h6 class="sidebar-heading px-3 mt-4 mb-2">
                 <span>Экспертные функции</span>
@@ -616,6 +636,7 @@
             </ul>
             @endif
             
+            <!-- ПРОФИЛЬ ПОЛЬЗОВАТЕЛЯ -->
             <div class="px-3 mt-4">
                 <div class="card bg-dark border-secondary">
                     <div class="card-body p-3">
@@ -680,6 +701,13 @@
                        class="btn btn-outline-info btn-sm">
                         <i class="bi bi-tools me-1"></i> Новая диагностика
                     </a>
+                    <!-- ДОБАВЛЕНА КНОПКА ИМПОРТА ПРАЙС-ЛИСТА (ТОЛЬКО ДЛЯ АДМИНОВ) -->
+                    @if(auth()->user()->is_admin)
+                        <a href="{{ route('admin.price.import.select') }}" 
+                           class="btn btn-outline-warning btn-sm">
+                            <i class="bi bi-currency-dollar me-1"></i> Импорт прайса
+                        </a>
+                    @endif
                 </div>
             </div>
             @hasSection('subtitle')
@@ -715,6 +743,11 @@
                         <div class="col-auto">
                             <a href="{{ route('admin.experts.index') }}" class="btn btn-dark btn-sm">
                                 <i class="bi bi-person-badge me-1"></i> Эксперты
+                            </a>
+                        </div>
+                        <div class="col-auto">
+                            <a href="{{ route('admin.price.index') }}" class="btn btn-outline-warning btn-sm">
+                                <i class="bi bi-currency-dollar me-1"></i> Прайс-лист
                             </a>
                         </div>
                         @endif
@@ -838,6 +871,9 @@
                         <a href="{{ route('admin.documents.index') }}" class="list-group-item list-group-item-action">
                             <i class="bi bi-files me-2"></i> Документы
                         </a>
+                        <a href="{{ route('diagnostic.ai.search.page') }}" class="list-group-item list-group-item-action">
+                            <i class="bi bi-robot me-2"></i> AI Поиск
+                        </a>
                         <a href="{{ route('admin.categories.index') }}" class="list-group-item list-group-item-action">
                             <i class="bi bi-folder me-2"></i> Категории
                         </a>
@@ -850,6 +886,12 @@
                         @if(auth()->user()->is_admin)
                         <a href="{{ route('admin.diagnostic.symptoms.index') }}" class="list-group-item list-group-item-action">
                             <i class="bi bi-heart-pulse me-2"></i> Симптомы
+                        </a>
+                        <a href="{{ route('admin.price.import.select') }}" class="list-group-item list-group-item-action">
+                            <i class="bi bi-currency-dollar me-2"></i> Импорт прайса
+                        </a>
+                        <a href="{{ route('admin.price.index') }}" class="list-group-item list-group-item-action">
+                            <i class="bi bi-list-ul me-2"></i> Прайс-лист
                         </a>
                         @endif
                         @if(auth()->user()->is_expert)

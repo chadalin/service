@@ -30,6 +30,7 @@
         box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
         border: 1px solid #e5e7eb;
         transition: transform 0.2s;
+        margin-bottom: 1.5rem;
     }
     
     .info-card:hover {
@@ -46,6 +47,177 @@
     
     .info-card-body {
         padding: 1.5rem;
+    }
+    
+    /* Мини-карта запчасти */
+    .parts-card {
+        border-left: 4px solid #f59e0b;
+    }
+    
+    .parts-card .info-card-header {
+        border-bottom-color: #f59e0b;
+        background: #fffbeb;
+    }
+    
+    .parts-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+        gap: 1rem;
+        margin-top: 1rem;
+    }
+    
+    @media (max-width: 768px) {
+        .parts-grid {
+            grid-template-columns: 1fr;
+        }
+    }
+    
+    .part-card {
+        background: white;
+        border-radius: 8px;
+        border: 1px solid #e5e7eb;
+        padding: 1rem;
+        transition: all 0.2s;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .part-card:hover {
+        border-color: #3b82f6;
+        box-shadow: 0 4px 8px rgba(59, 130, 246, 0.1);
+        transform: translateY(-2px);
+    }
+    
+    .part-card::before {
+        content: '';
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 3px;
+        background: linear-gradient(90deg, #f59e0b, #3b82f6);
+    }
+    
+    .part-sku {
+        font-family: 'Courier New', monospace;
+        font-size: 0.8rem;
+        color: #6b7280;
+        background: #f3f4f6;
+        padding: 2px 6px;
+        border-radius: 4px;
+        display: inline-block;
+        margin-bottom: 0.5rem;
+    }
+    
+    .part-name {
+        font-weight: 600;
+        color: #1f2937;
+        margin-bottom: 0.5rem;
+        line-height: 1.4;
+    }
+    
+    .part-brand {
+        display: inline-block;
+        font-size: 0.75rem;
+        color: white;
+        background: #6b7280;
+        padding: 2px 8px;
+        border-radius: 12px;
+        margin-right: 0.5rem;
+        margin-bottom: 0.5rem;
+    }
+    
+    .part-brand.original {
+        background: #10b981;
+    }
+    
+    .part-brand.bosch {
+        background: #3b82f6;
+    }
+    
+    .part-brand.denso {
+        background: #ef4444;
+    }
+    
+    .part-price {
+        font-size: 1.25rem;
+        font-weight: 700;
+        color: #10b981;
+        margin-top: 0.5rem;
+    }
+    
+    .part-stock {
+        display: inline-flex;
+        align-items: center;
+        font-size: 0.8rem;
+        padding: 2px 8px;
+        border-radius: 12px;
+        margin-left: 0.5rem;
+    }
+    
+    .stock-in {
+        background: #d1fae5;
+        color: #065f46;
+    }
+    
+    .stock-low {
+        background: #fef3c7;
+        color: #92400e;
+    }
+    
+    .stock-out {
+        background: #fee2e2;
+        color: #991b1b;
+    }
+    
+    .part-actions {
+        display: flex;
+        gap: 0.5rem;
+        margin-top: 1rem;
+    }
+    
+    .part-btn {
+        flex: 1;
+        padding: 0.5rem;
+        border-radius: 6px;
+        font-size: 0.8rem;
+        text-align: center;
+        text-decoration: none;
+        transition: all 0.2s;
+    }
+    
+    .part-details {
+        background: #3b82f6;
+        color: white;
+        border: 1px solid #3b82f6;
+    }
+    
+    .part-details:hover {
+        background: #2563eb;
+        color: white;
+    }
+    
+    .part-match {
+        background: #fef3c7;
+        color: #92400e;
+        border: 1px solid #fbbf24;
+    }
+    
+    .part-match:hover {
+        background: #fbbf24;
+        color: #78350f;
+    }
+    
+    .no-parts {
+        text-align: center;
+        padding: 2rem;
+        color: #6b7280;
+    }
+    
+    .no-parts i {
+        font-size: 3rem;
+        margin-bottom: 1rem;
+        opacity: 0.5;
     }
     
     /* Форма консультации */
@@ -284,9 +456,9 @@
     
     <div class="row g-4">
         <!-- Левая колонка: Информация о правиле -->
-        <div class="col-lg-7">
+        <div class="col-lg-8">
             <!-- Шаги диагностики -->
-            <div class="info-card mb-4">
+            <div class="info-card">
                 <div class="info-card-header">
                     <h6 class="mb-0">
                         <i class="bi bi-list-check me-2"></i>
@@ -310,7 +482,7 @@
             </div>
             
             <!-- Возможные причины -->
-            <div class="info-card mb-4">
+            <div class="info-card">
                 <div class="info-card-header">
                     <h6 class="mb-0">
                         <i class="bi bi-exclamation-triangle me-2"></i>
@@ -359,213 +531,313 @@
                     @endif
                 </div>
             </div>
+            
+            <!-- Мини-карта запчасти -->
+            <div class="info-card parts-card">
+                <div class="info-card-header">
+                    <h6 class="mb-0">
+                        <i class="bi bi-tools me-2"></i>
+                        💡 Возможно для ремонта понадобятся похожие запчасти
+                    </h6>
+                </div>
+                <div class="info-card-body">
+                    @if($matchedPriceItems && $matchedPriceItems->count() > 0)
+                        <p class="text-muted mb-3">
+                            <i class="bi bi-info-circle me-1"></i>
+                            На основе симптома "{{ $rule->symptom->name ?? '' }}" и возможных причин найдены следующие запчасти:
+                        </p>
+                        
+                        <div class="parts-grid">
+                            @foreach($matchedPriceItems as $item)
+                                <div class="part-card">
+                                    <div class="part-sku">{{ $item->sku }}</div>
+                                    <div class="part-name">{{ Str::limit($item->name, 60) }}</div>
+                                    
+                                    @if($item->catalog_brand || $item->brand)
+                                        <div>
+                                            @if($item->catalog_brand)
+                                                <span class="part-brand {{ strtolower($item->catalog_brand) == 'original' ? 'original' : (in_array(strtolower($item->catalog_brand), ['bosch', 'denso', 'kyb', 'bilstein']) ? strtolower($item->catalog_brand) : '') }}">
+                                                    {{ $item->catalog_brand }}
+                                                </span>
+                                            @endif
+                                            @if($item->brand)
+                                                <span class="part-brand">{{ $item->brand->name }}</span>
+                                            @endif
+                                        </div>
+                                    @endif
+                                    
+                                    <div class="d-flex align-items-center justify-content-between mt-2">
+                                        @if($item->price > 0)
+                                            <div class="part-price">
+                                                {{ number_format($item->price, 0, '', ' ') }} ₽
+                                            </div>
+                                        @else
+                                            <div class="text-muted">Цена не указана</div>
+                                        @endif
+                                        
+                                        <span class="part-stock {{ $item->quantity > 10 ? 'stock-in' : ($item->quantity > 0 ? 'stock-low' : 'stock-out') }}">
+                                            <i class="bi bi-{{ $item->quantity > 10 ? 'check-circle' : ($item->quantity > 0 ? 'exclamation-triangle' : 'x-circle') }} me-1"></i>
+                                            {{ $item->quantity > 0 ? $item->quantity . ' шт' : 'Нет в наличии' }}
+                                        </span>
+                                    </div>
+                                    
+                                    @if($item->description)
+                                        <div class="text-muted small mt-2">
+                                            {{ Str::limit($item->description, 80) }}
+                                        </div>
+                                    @endif
+                                    
+                                    <div class="part-actions">
+                                        <a href="{{ route('admin.price.show', $item->id) }}" 
+                                           class="part-btn part-details"
+                                           target="_blank">
+                                            <i class="bi bi-eye me-1"></i> Подробнее
+                                        </a>
+                                        <a href="{{ route('admin.price.index', ['search' => $item->sku]) }}" 
+                                           class="part-btn part-match"
+                                           target="_blank">
+                                            <i class="bi bi-search me-1"></i> Поиск
+                                        </a>
+                                    </div>
+                                </div>
+                            @endforeach
+                        </div>
+                        
+                        <div class="mt-3 text-center">
+                            <a href="{{ route('admin.price.index', ['search' => $rule->symptom->name ?? '']) }}" 
+                               class="btn btn-outline-warning btn-sm">
+                                <i class="bi bi-search me-1"></i> Найти больше запчастей
+                            </a>
+                        </div>
+                    @else
+                        <div class="no-parts">
+                            <i class="bi bi-patch-question"></i>
+                            <h5>Связанные запчасти не найдены</h5>
+                            <p class="text-muted">
+                                Запчасти, связанные с этим симптомом, пока не добавлены в базу.
+                            </p>
+                            <div class="mt-3">
+                                <a href="{{ route('admin.price.import.select') }}" 
+                                   class="btn btn-outline-primary btn-sm me-2">
+                                    <i class="bi bi-upload me-1"></i> Импортировать прайс
+                                </a>
+                                <a href="{{ route('admin.price.index') }}" 
+                                   class="btn btn-outline-secondary btn-sm">
+                                    <i class="bi bi-list-ul me-1"></i> Весь прайс-лист
+                                </a>
+                            </div>
+                        </div>
+                    @endif
+                </div>
+            </div>
         </div>
         
-       <!-- Правая колонка: Форма заказа консультации -->
-<div class="col-lg-5">
-    <div class="consultation-form sticky-top" style="top: 1rem;">
-        <!-- Основная информация -->
-        <div class="form-section">
-            <div class="form-section-title">
-                <i class="bi bi-info-circle"></i>
-                Информация для консультации
+        <!-- Правая колонка: Форма заказа консультации -->
+        <div class="col-lg-4">
+            <div class="consultation-form sticky-top" style="top: 1rem;">
+                <!-- Основная информация -->
+                <div class="form-section">
+                    <div class="form-section-title">
+                        <i class="bi bi-info-circle"></i>
+                        Информация для консультации
+                    </div>
+                    
+                    <form id="consultationOrderForm" enctype="multipart/form-data">
+                        @csrf
+                        <input type="hidden" name="rule_id" value="{{ $rule->id }}">
+                        <input type="hidden" name="consultation_type" value="expert">
+                        <input type="hidden" name="brand_id" value="{{ $rule->brand_id ?? '' }}">
+                        
+                        @if($rule->symptoms && $rule->symptoms->isNotEmpty())
+                            @foreach($rule->symptoms as $symptom)
+                                <input type="hidden" name="symptoms[]" value="{{ $symptom->id }}">
+                            @endforeach
+                        @endif
+                        
+                        <!-- Описание симптома -->
+                        <div class="mb-3">
+                            <label for="symptom_description" class="form-label fw-semibold required-field">
+                                Опишите ваш симптом подробнее
+                            </label>
+                            <textarea class="form-control" 
+                                      id="symptom_description" 
+                                      name="symptom_description" 
+                                      rows="3"
+                                      placeholder="• Когда началась проблема?&#10;• При каких условиях проявляется?&#10;• Какие симптомы сопровождают?&#10;• Что уже пробовали сделать?"
+                                      required></textarea>
+                        </div>
+                        
+                        <!-- Контактная информация -->
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold required-field">Контактная информация</label>
+                            <div class="row g-2">
+                                <div class="col-md-6">
+                                    <input type="text" 
+                                           name="contact_name" 
+                                           class="form-control" 
+                                           placeholder="Ваше имя" 
+                                           required>
+                                </div>
+                                <div class="col-md-6">
+                                    <input type="tel" 
+                                           name="contact_phone" 
+                                           class="form-control" 
+                                           placeholder="Телефон" 
+                                           required>
+                                </div>
+                                <div class="col-12 mt-2">
+                                    <input type="email" 
+                                           name="contact_email" 
+                                           class="form-control" 
+                                           placeholder="Email" 
+                                           required>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Данные автомобиля -->
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Данные автомобиля</label>
+                            <div class="compact-grid">
+                                <div>
+                                    <input type="number" 
+                                           name="year" 
+                                           class="form-control" 
+                                           placeholder="Год выпуска"
+                                           min="1990" 
+                                           max="{{ date('Y') }}">
+                                </div>
+                                <div>
+                                    <input type="number" 
+                                           name="mileage" 
+                                           class="form-control" 
+                                           placeholder="Пробег, км"
+                                           min="0" 
+                                           max="1000000">
+                                </div>
+                                <div>
+                                    <input type="text" 
+                                           name="vin" 
+                                           class="form-control" 
+                                           placeholder="VIN код"
+                                           maxlength="17">
+                                </div>
+                                <div>
+                                    <select name="engine_type" class="form-select">
+                                        <option value="">Тип двигателя</option>
+                                        <option value="Бензин">Бензин</option>
+                                        <option value="Дизель">Дизель</option>
+                                        <option value="Гибрид">Гибрид</option>
+                                        <option value="Электрический">Электрический</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Загрузка файлов -->
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Дополнительные материалы</label>
+                            
+                            <!-- Протоколы диагностики -->
+                            <div class="mb-3">
+                                <small class="text-muted d-block mb-2">Протоколы диагностики (PDF, DOC, JPG)</small>
+                                <div class="upload-area" 
+                                     onclick="document.getElementById('protocol_files').click()">
+                                    <i class="bi bi-cloud-arrow-up fs-4 text-muted mb-2"></i>
+                                    <p class="mb-1 small">Перетащите или нажмите для загрузки</p>
+                                    <small class="text-muted">Можно загрузить несколько файлов</small>
+                                    <input type="file" 
+                                           id="protocol_files" 
+                                           name="protocol_files[]" 
+                                           multiple 
+                                           accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
+                                           class="d-none"
+                                           onchange="handleFileUpload(this, 'protocol-preview')">
+                                </div>
+                                <div class="file-preview" id="protocol-preview"></div>
+                            </div>
+                            
+                            <!-- Фото -->
+                            <div class="mb-3">
+                                <small class="text-muted d-block mb-2">Фото симптома (JPG, PNG)</small>
+                                <div class="upload-area" 
+                                     onclick="document.getElementById('symptom_photos').click()">
+                                    <i class="bi bi-image fs-4 text-muted mb-2"></i>
+                                    <p class="mb-1 small">Фото индикаторов, деталей и т.д.</p>
+                                    <input type="file" 
+                                           id="symptom_photos" 
+                                           name="symptom_photos[]" 
+                                           multiple 
+                                           accept="image/*"
+                                           class="d-none"
+                                           onchange="handleFileUpload(this, 'photo-preview')">
+                                </div>
+                                <div class="file-preview" id="photo-preview"></div>
+                            </div>
+                            
+                            <!-- Видео -->
+                            <div class="mb-3">
+                                <small class="text-muted d-block mb-2">Видео (MP4, AVI, MOV)</small>
+                                <div class="upload-area" 
+                                     onclick="document.getElementById('symptom_videos').click()">
+                                    <i class="bi bi-camera-video fs-4 text-muted mb-2"></i>
+                                    <p class="mb-1 small">Звуки, поведение автомобиля</p>
+                                    <input type="file" 
+                                           id="symptom_videos" 
+                                           name="symptom_videos[]" 
+                                           multiple 
+                                           accept="video/*"
+                                           class="d-none"
+                                           onchange="handleFileUpload(this, 'video-preview')">
+                                </div>
+                                <div class="file-preview" id="video-preview"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Дополнительная информация -->
+                        <div class="mb-3">
+                            <label for="additional_info" class="form-label fw-semibold">Дополнительная информация</label>
+                            <textarea class="form-control" 
+                                      id="additional_info" 
+                                      name="additional_info" 
+                                      rows="2"
+                                      placeholder="Любая другая важная информация..."></textarea>
+                        </div>
+                        
+                        <!-- Согласие -->
+                        <div class="form-check mb-4">
+                            <input class="form-check-input" 
+                                   type="checkbox" 
+                                   id="agreement" 
+                                   name="agreement"
+                                   required>
+                            <label class="form-check-label small" for="agreement">
+                                Я согласен с условиями оказания услуг и обработкой персональных данных
+                            </label>
+                        </div>
+                        
+                        <!-- Кнопка отправки -->
+                        <div class="text-center">
+                            <div class="consultation-price mb-3">
+                                {{ number_format($rule->base_consultation_price, 0, '', ' ') }} ₽
+                            </div>
+                            <button type="submit" 
+                                    class="submit-btn"
+                                    id="buyConsultationBtn">
+                                <i class="bi bi-credit-card me-2"></i>
+                                <span id="btnText">Заказать консультацию</span>
+                                <span class="spinner-border spinner-border-sm ms-2 d-none" id="loadingSpinner"></span>
+                            </button>
+                            <small class="text-muted d-block mt-2">
+                                <i class="bi bi-shield-check me-1"></i>
+                                Консультация проводится сертифицированным экспертом
+                            </small>
+                        </div>
+                    </form>
+                </div>
             </div>
-            
-            <form id="consultationOrderForm" enctype="multipart/form-data">
-                @csrf
-                <input type="hidden" name="rule_id" value="{{ $rule->id }}">
-                <input type="hidden" name="consultation_type" value="expert">
-                <input type="hidden" name="brand_id" value="{{ $rule->brand_id ?? '' }}">
-                
-                @if($rule->symptoms && $rule->symptoms->isNotEmpty())
-                    @foreach($rule->symptoms as $symptom)
-                        <input type="hidden" name="symptoms[]" value="{{ $symptom->id }}">
-                    @endforeach
-                @endif
-                
-                <!-- Описание симптома -->
-                <div class="mb-3">
-                    <label for="symptom_description" class="form-label fw-semibold required-field">
-                        Опишите ваш симптом подробнее
-                    </label>
-                    <textarea class="form-control" 
-                              id="symptom_description" 
-                              name="symptom_description" 
-                              rows="3"
-                              placeholder="• Когда началась проблема?&#10;• При каких условиях проявляется?&#10;• Какие симптомы сопровождают?&#10;• Что уже пробовали сделать?"
-                              required></textarea>
-                </div>
-                
-                <!-- Контактная информация -->
-                <div class="mb-3">
-                    <label class="form-label fw-semibold required-field">Контактная информация</label>
-                    <div class="row g-2">
-                        <div class="col-md-6">
-                            <input type="text" 
-                                   name="contact_name" 
-                                   class="form-control" 
-                                   placeholder="Ваше имя" 
-                                   required>
-                        </div>
-                        <div class="col-md-6">
-                            <input type="tel" 
-                                   name="contact_phone" 
-                                   class="form-control" 
-                                   placeholder="Телефон" 
-                                   required>
-                        </div>
-                        <div class="col-12 mt-2">
-                            <input type="email" 
-                                   name="contact_email" 
-                                   class="form-control" 
-                                   placeholder="Email" 
-                                   required>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Данные автомобиля -->
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Данные автомобиля</label>
-                    <div class="compact-grid">
-                        <div>
-                            <input type="number" 
-                                   name="year" 
-                                   class="form-control" 
-                                   placeholder="Год выпуска"
-                                   min="1990" 
-                                   max="{{ date('Y') }}">
-                        </div>
-                        <div>
-                            <input type="number" 
-                                   name="mileage" 
-                                   class="form-control" 
-                                   placeholder="Пробег, км"
-                                   min="0" 
-                                   max="1000000">
-                        </div>
-                        <div>
-                            <input type="text" 
-                                   name="vin" 
-                                   class="form-control" 
-                                   placeholder="VIN код"
-                                   maxlength="17">
-                        </div>
-                        <div>
-                            <select name="engine_type" class="form-select">
-                                <option value="">Тип двигателя</option>
-                                <option value="Бензин">Бензин</option>
-                                <option value="Дизель">Дизель</option>
-                                <option value="Гибрид">Гибрид</option>
-                                <option value="Электрический">Электрический</option>
-                            </select>
-                        </div>
-                    </div>
-                </div>
-                
-                <!-- Загрузка файлов -->
-                <div class="mb-3">
-                    <label class="form-label fw-semibold">Дополнительные материалы</label>
-                    
-                    <!-- Протоколы диагностики -->
-                    <div class="mb-3">
-                        <small class="text-muted d-block mb-2">Протоколы диагностики (PDF, DOC, JPG)</small>
-                        <div class="upload-area" 
-                             onclick="document.getElementById('protocol_files').click()">
-                            <i class="bi bi-cloud-arrow-up fs-4 text-muted mb-2"></i>
-                            <p class="mb-1 small">Перетащите или нажмите для загрузки</p>
-                            <small class="text-muted">Можно загрузить несколько файлов</small>
-                            <input type="file" 
-                                   id="protocol_files" 
-                                   name="protocol_files[]" 
-                                   multiple 
-                                   accept=".pdf,.doc,.docx,.jpg,.jpeg,.png"
-                                   class="d-none"
-                                   onchange="handleFileUpload(this, 'protocol-preview')">
-                        </div>
-                        <div class="file-preview" id="protocol-preview"></div>
-                    </div>
-                    
-                    <!-- Фото -->
-                    <div class="mb-3">
-                        <small class="text-muted d-block mb-2">Фото симптома (JPG, PNG)</small>
-                        <div class="upload-area" 
-                             onclick="document.getElementById('symptom_photos').click()">
-                            <i class="bi bi-image fs-4 text-muted mb-2"></i>
-                            <p class="mb-1 small">Фото индикаторов, деталей и т.д.</p>
-                            <input type="file" 
-                                   id="symptom_photos" 
-                                   name="symptom_photos[]" 
-                                   multiple 
-                                   accept="image/*"
-                                   class="d-none"
-                                   onchange="handleFileUpload(this, 'photo-preview')">
-                        </div>
-                        <div class="file-preview" id="photo-preview"></div>
-                    </div>
-                    
-                    <!-- Видео -->
-                    <div class="mb-3">
-                        <small class="text-muted d-block mb-2">Видео (MP4, AVI, MOV)</small>
-                        <div class="upload-area" 
-                             onclick="document.getElementById('symptom_videos').click()">
-                            <i class="bi bi-camera-video fs-4 text-muted mb-2"></i>
-                            <p class="mb-1 small">Звуки, поведение автомобиля</p>
-                            <input type="file" 
-                                   id="symptom_videos" 
-                                   name="symptom_videos[]" 
-                                   multiple 
-                                   accept="video/*"
-                                   class="d-none"
-                                   onchange="handleFileUpload(this, 'video-preview')">
-                        </div>
-                        <div class="file-preview" id="video-preview"></div>
-                    </div>
-                </div>
-                
-                <!-- Дополнительная информация -->
-                <div class="mb-3">
-                    <label for="additional_info" class="form-label fw-semibold">Дополнительная информация</label>
-                    <textarea class="form-control" 
-                              id="additional_info" 
-                              name="additional_info" 
-                              rows="2"
-                              placeholder="Любая другая важная информация..."></textarea>
-                </div>
-                
-                <!-- Согласие -->
-                <div class="form-check mb-4">
-                    <input class="form-check-input" 
-                           type="checkbox" 
-                           id="agreement" 
-                           name="agreement"
-                           required>
-                    <label class="form-check-label small" for="agreement">
-                        Я согласен с условиями оказания услуг и обработкой персональных данных
-                    </label>
-                </div>
-                
-                <!-- Кнопка отправки -->
-                <div class="text-center">
-                    <div class="consultation-price mb-3">
-                        {{ number_format($rule->base_consultation_price, 0, '', ' ') }} ₽
-                    </div>
-                    <button type="submit" 
-                            class="submit-btn"
-                            id="buyConsultationBtn">
-                        <i class="bi bi-credit-card me-2"></i>
-                        <span id="btnText">Заказать консультацию</span>
-                        <span class="spinner-border spinner-border-sm ms-2 d-none" id="loadingSpinner"></span>
-                    </button>
-                    <small class="text-muted d-block mt-2">
-                        <i class="bi bi-shield-check me-1"></i>
-                        Консультация проводится сертифицированным экспертом
-                    </small>
-                </div>
-            </form>
         </div>
     </div>
-</div>
     
     <!-- Кнопки действий -->
     <div class="d-flex justify-content-between align-items-center mt-4 pt-4 border-top">

@@ -14,6 +14,7 @@ use App\Http\Controllers\HomeController;
 use App\Http\Controllers\ProjectInfoController;
 use App\Http\Controllers\Diagnostic\AISearchController;
 use App\Http\Controllers\Diagnostic\DiagnosticController;
+use App\Http\Controllers\Diagnostic\EnhancedAISearchController;
 use App\Http\Controllers\Diagnostic\ReportController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\PriceItemController;
@@ -237,6 +238,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
         Route::get('/symptoms', [DiagnosticSymptomController::class, 'index'])->name('symptoms.index');
         Route::get('/symptoms/create', [DiagnosticSymptomController::class, 'create'])->name('symptoms.create');
         Route::post('/symptoms', [DiagnosticSymptomController::class, 'store'])->name('symptoms.store');
+         Route::get('/{symptom}', [DiagnosticSymptomController::class, 'show'])->name('symptoms.show');
         Route::get('/symptoms/{symptom}/edit', [DiagnosticSymptomController::class, 'edit'])->name('symptoms.edit');
         Route::put('/symptoms/{symptom}', [DiagnosticSymptomController::class, 'update'])->name('symptoms.update');
         Route::delete('/symptoms/{symptom}', [DiagnosticSymptomController::class, 'destroy'])->name('symptoms.destroy');
@@ -471,6 +473,18 @@ Route::middleware(['web', 'auth'])->group(function () {
 });
 
 
+// Экспертные консультации
+Route::prefix('diagnostic/consultation/expert')->name('diagnostic.consultation.expert.')->group(function () {
+    Route::get('/dashboard', function () {
+        return view('diagnostic.consultation.expert.dashboard');
+    })->name('dashboard');
+    
+    Route::get('/', function () {
+        return redirect()->route('diagnostic.consultation.expert.dashboard');
+    });
+});
+
+
 // Маршруты для расширенной обработки документов
 Route::prefix('admin/documents')->name('admin.documents.')->group(function () {
     // Просмотр отдельной страницы документа
@@ -651,4 +665,15 @@ Route::prefix('admin/price')->name('admin.price.')->group(function () {
     Route::get('/{priceItem}', [PriceItemController::class, 'show'])->name('show');
     Route::delete('/{priceItem}', [PriceItemController::class, 'destroy'])->name('destroy');
     Route::post('/{priceItem}/match-symptoms', [PriceItemController::class, 'matchSymptoms'])->name('match.symptoms');
+});
+
+Route::prefix('diagnostic')->group(function () {
+    Route::get('/ai-search/enhanced', [EnhancedAISearchController::class, 'index'])
+        ->name('diagnostic.ai-search.enhanced');
+    
+    Route::post('/ai-search/enhanced', [EnhancedAISearchController::class, 'enhancedSearch'])
+        ->name('diagnostic.ai.enhanced.search');
+    
+    Route::get('/rules/{id}/with-parts', [EnhancedAISearchController::class, 'showRuleWithParts'])
+        ->name('diagnostic.rules.with-parts');
 });

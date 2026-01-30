@@ -1,6 +1,6 @@
 @extends('layouts.app')
 
-@section('title', 'Карточка запчасти: ' . $priceItem->name)
+@section('title', 'Карточка запчасти: ' . ($priceItem->name ?? 'Не найдена'))
 
 @section('content')
 <div class="container-fluid py-4">
@@ -25,19 +25,19 @@
                                             <tr>
                                                 <td class="text-muted" style="width: 40%;">Артикул (SKU):</td>
                                                 <td>
-                                                    <span class="badge bg-dark fs-6">{{ $priceItem->sku }}</span>
+                                                    <span class="badge bg-dark fs-6">{{ $priceItem->sku ?? '—' }}</span>
                                                 </td>
                                             </tr>
                                             <tr>
                                                 <td class="text-muted">Название:</td>
                                                 <td>
-                                                    <h5 class="mb-0">{{ $priceItem->name }}</h5>
+                                                    <h5 class="mb-0">{{ $priceItem->name ?? '—' }}</h5>
                                                 </td>
                                             </tr>
                                             <tr>
                                                 <td class="text-muted">Каталожный бренд:</td>
                                                 <td>
-                                                    @if($priceItem->catalog_brand)
+                                                    @if(!empty($priceItem->catalog_brand))
                                                         <span class="badge bg-info">{{ $priceItem->catalog_brand }}</span>
                                                     @else
                                                         <span class="text-muted">—</span>
@@ -47,7 +47,7 @@
                                             <tr>
                                                 <td class="text-muted">Привязанный бренд:</td>
                                                 <td>
-                                                    @if($priceItem->brand)
+                                                    @if($priceItem->brand && $priceItem->brand->name)
                                                         <span class="badge bg-primary">
                                                             {{ $priceItem->brand->name }}
                                                         </span>
@@ -72,8 +72,8 @@
                                             <tr>
                                                 <td class="text-muted" style="width: 40%;">Количество:</td>
                                                 <td>
-                                                    <span class="badge bg-{{ $priceItem->quantity > 0 ? 'success' : 'secondary' }} fs-6">
-                                                        {{ $priceItem->quantity }} {{ $priceItem->unit ?: 'шт' }}
+                                                    <span class="badge bg-{{ ($priceItem->quantity ?? 0) > 0 ? 'success' : 'secondary' }} fs-6">
+                                                        {{ $priceItem->quantity ?? 0 }} {{ $priceItem->unit ?: 'шт' }}
                                                     </span>
                                                 </td>
                                             </tr>
@@ -81,7 +81,7 @@
                                                 <td class="text-muted">Цена:</td>
                                                 <td>
                                                     <h3 class="text-success mb-0">
-                                                        {{ number_format($priceItem->price, 2, '.', ' ') }} ₽
+                                                        {{ number_format($priceItem->price ?? 0, 2, '.', ' ') }} ₽
                                                     </h3>
                                                 </td>
                                             </tr>
@@ -89,7 +89,11 @@
                                                 <td class="text-muted">Дата добавления:</td>
                                                 <td>
                                                     <span class="text-muted">
-                                                        {{ $priceItem->created_at->format('d.m.Y H:i') }}
+                                                        @if($priceItem->created_at)
+                                                            {{ $priceItem->created_at->format('d.m.Y H:i') }}
+                                                        @else
+                                                            —
+                                                        @endif
                                                     </span>
                                                 </td>
                                             </tr>
@@ -97,7 +101,11 @@
                                                 <td class="text-muted">Последнее обновление:</td>
                                                 <td>
                                                     <span class="text-muted">
-                                                        {{ $priceItem->updated_at->format('d.m.Y H:i') }}
+                                                        @if($priceItem->updated_at)
+                                                            {{ $priceItem->updated_at->format('d.m.Y H:i') }}
+                                                        @else
+                                                            —
+                                                        @endif
                                                     </span>
                                                 </td>
                                             </tr>
@@ -109,7 +117,7 @@
                     </div>
                     
                     <!-- Описание -->
-                    @if($priceItem->description)
+                    @if(!empty($priceItem->description))
                         <div class="mt-4 pt-4 border-top">
                             <h6 class="text-muted mb-3">Описание</h6>
                             <div class="p-3 bg-light rounded">
@@ -119,12 +127,14 @@
                     @endif
                     
                     <!-- Совместимость -->
-                    @if($priceItem->compatibility && is_array($priceItem->compatibility))
+                    @if($priceItem->compatibility && is_array($priceItem->compatibility) && count($priceItem->compatibility) > 0)
                         <div class="mt-4 pt-4 border-top">
                             <h6 class="text-muted mb-3">Совместимость</h6>
                             <div class="d-flex flex-wrap gap-2">
                                 @foreach($priceItem->compatibility as $item)
-                                    <span class="badge bg-secondary">{{ $item }}</span>
+                                    @if(!empty($item))
+                                        <span class="badge bg-secondary">{{ $item }}</span>
+                                    @endif
                                 @endforeach
                             </div>
                         </div>
@@ -140,55 +150,78 @@
                         <div class="btn-group">
                             <button type="button" 
                                     class="btn btn-outline-warning match-symptoms-btn"
-                                    data-id="{{ $priceItem->id }}">
+                                    data-id="{{ $priceItem->id ?? '' }}">
                                 <i class="bi bi-link-45deg me-2"></i> Найти совпадения
                             </button>
-                            <form action="{{ route('admin.price.destroy', $priceItem) }}" 
-                                  method="POST"
-                                  onsubmit="return confirm('Удалить эту запчасть из прайс-листа?')">
-                                @csrf
-                                @method('DELETE')
-                                <button type="submit" class="btn btn-outline-danger">
-                                    <i class="bi bi-trash me-2"></i> Удалить
-                                </button>
-                            </form>
+                            @if($priceItem->id ?? false)
+                                <form action="{{ route('admin.price.destroy', $priceItem) }}" 
+                                      method="POST"
+                                      onsubmit="return confirm('Удалить эту запчасть из прайс-листа?')">
+                                    @csrf
+                                    @method('DELETE')
+                                    <button type="submit" class="btn btn-outline-danger">
+                                        <i class="bi bi-trash me-2"></i> Удалить
+                                    </button>
+                                </form>
+                            @endif
                         </div>
                     </div>
                 </div>
             </div>
             
             <!-- Связанные симптомы диагностики -->
-            @if($priceItem->matchedSymptoms && $priceItem->matchedSymptoms->count() > 0)
+            @php
+                $matchedSymptoms = $priceItem->matchedSymptoms ?? collect();
+                $symptomsCount = $matchedSymptoms->count();
+            @endphp
+            
+            @if($symptomsCount > 0)
                 <div class="card mb-4">
                     <div class="card-header bg-info text-white">
                         <h5 class="mb-0">
                             <i class="bi bi-link-45deg me-2"></i> Связанные симптомы диагностики
-                            <span class="badge bg-light text-dark ms-2">{{ $priceItem->matchedSymptoms->count() }}</span>
+                            <span class="badge bg-light text-dark ms-2">{{ $symptomsCount }}</span>
                         </h5>
                     </div>
                     <div class="card-body">
                         <div class="list-group">
-                            @foreach($priceItem->matchedSymptoms->sortByDesc('pivot.match_score') as $symptom)
+                            @foreach($matchedSymptoms->sortByDesc('pivot.match_score') as $symptom)
                                 <div class="list-group-item list-group-item-action">
                                     <div class="d-flex w-100 justify-content-between align-items-start">
                                         <div class="flex-grow-1">
                                             <h6 class="mb-1">
-                                                <a href="{{ route('admin.diagnostic.symptoms.show', $symptom) }}" 
-                                                   class="text-decoration-none">
-                                                    {{ $symptom->name }}
-                                                </a>
+                                                @if($symptom->id ?? false)
+                                                    <a href="{{ route('admin.diagnostic.symptoms.show', $symptom) }}" 
+                                                       class="text-decoration-none">
+                                                        {{ $symptom->name ?? 'Без названия' }}
+                                                    </a>
+                                                @else
+                                                    {{ $symptom->name ?? 'Без названия' }}
+                                                @endif
                                             </h6>
-                                            @if($symptom->description)
+                                            @if(!empty($symptom->description))
                                                 <p class="mb-1 text-muted small">{{ Str::limit($symptom->description, 150) }}</p>
                                             @endif
                                             <div class="mt-2">
-                                                <span class="badge bg-{{ $symptom->pivot->match_type === 'exact' ? 'success' : ($symptom->pivot->match_type === 'strong' ? 'info' : ($symptom->pivot->match_type === 'medium' ? 'warning' : 'secondary')) }}">
-                                                    {{ $symptom->pivot->match_type === 'exact' ? 'Точное совпадение' : 
-                                                       ($symptom->pivot->match_type === 'strong' ? 'Сильное совпадение' : 
-                                                       ($symptom->pivot->match_type === 'medium' ? 'Среднее совпадение' : 'Слабое совпадение')) }}
+                                                @php
+                                                    $matchType = $symptom->pivot->match_type ?? 'weak';
+                                                    $matchScore = $symptom->pivot->match_score ?? 0;
+                                                    
+                                                    $typeClasses = [
+                                                        'exact' => ['label' => 'Точное совпадение', 'color' => 'success'],
+                                                        'strong' => ['label' => 'Сильное совпадение', 'color' => 'info'],
+                                                        'medium' => ['label' => 'Среднее совпадение', 'color' => 'warning'],
+                                                        'weak' => ['label' => 'Слабое совпадение', 'color' => 'secondary']
+                                                    ];
+                                                    
+                                                    $typeInfo = $typeClasses[$matchType] ?? $typeClasses['weak'];
+                                                @endphp
+                                                
+                                                <span class="badge bg-{{ $typeInfo['color'] }}">
+                                                    {{ $typeInfo['label'] }}
                                                 </span>
                                                 <span class="badge bg-light text-dark ms-2">
-                                                    Сходство: {{ number_format($symptom->pivot->match_score * 100, 1) }}%
+                                                    Сходство: {{ number_format($matchScore * 100, 1) }}%
                                                 </span>
                                             </div>
                                         </div>
@@ -208,11 +241,13 @@
                     <div class="card-body text-center py-5">
                         <i class="bi bi-unlink display-1 text-muted"></i>
                         <p class="mt-3 text-muted">Совпадения с симптомами диагностики не найдены</p>
-                        <button type="button" 
-                                class="btn btn-outline-primary match-symptoms-btn"
-                                data-id="{{ $priceItem->id }}">
-                            <i class="bi bi-search me-2"></i> Найти совпадения
-                        </button>
+                        @if($priceItem->id ?? false)
+                            <button type="button" 
+                                    class="btn btn-outline-primary match-symptoms-btn"
+                                    data-id="{{ $priceItem->id }}">
+                                <i class="bi bi-search me-2"></i> Найти совпадения
+                            </button>
+                        @endif
                     </div>
                 </div>
             @endif
@@ -229,76 +264,73 @@
                 </div>
                 <div class="card-body">
                     @php
-                        $matchesByType = $priceItem->matchedSymptoms->groupBy('pivot.match_type');
+                        // Безопасная группировка по типу совпадения
+                        $matchesByType = collect();
+                        if ($priceItem->matchedSymptoms) {
+                            $matchesByType = $priceItem->matchedSymptoms->groupBy('pivot.match_type');
+                        }
+                        
                         $matchTypes = [
                             'exact' => ['name' => 'Точные', 'color' => 'success', 'icon' => 'bi-check-circle'],
                             'strong' => ['name' => 'Сильные', 'color' => 'info', 'icon' => 'bi-check-square'],
                             'medium' => ['name' => 'Средние', 'color' => 'warning', 'icon' => 'bi-dash-circle'],
                             'weak' => ['name' => 'Слабые', 'color' => 'secondary', 'icon' => 'bi-dot']
                         ];
+                        
+                        // Счетчики по типам
+                        $exactCount = $matchesByType->has('exact') ? $matchesByType->get('exact')->count() : 0;
+                        $strongCount = $matchesByType->has('strong') ? $matchesByType->get('strong')->count() : 0;
+                        $mediumCount = $matchesByType->has('medium') ? $matchesByType->get('medium')->count() : 0;
+                        $weakCount = $matchesByType->has('weak') ? $matchesByType->get('weak')->count() : 0;
+                        
+                        $totalMatches = $exactCount + $strongCount + $mediumCount + $weakCount;
+                        
+                        // Проценты
+                        $exactPercent = $totalMatches > 0 ? ($exactCount / $totalMatches * 100) : 0;
+                        $strongPercent = $totalMatches > 0 ? ($strongCount / $totalMatches * 100) : 0;
+                        $mediumPercent = $totalMatches > 0 ? ($mediumCount / $totalMatches * 100) : 0;
+                        $weakPercent = $totalMatches > 0 ? ($weakCount / $totalMatches * 100) : 0;
                     @endphp
                     
                     @foreach($matchTypes as $typeKey => $typeInfo)
+                        @php
+                            $count = 0;
+                            switch($typeKey) {
+                                case 'exact': $count = $exactCount; break;
+                                case 'strong': $count = $strongCount; break;
+                                case 'medium': $count = $mediumCount; break;
+                                case 'weak': $count = $weakCount; break;
+                            }
+                        @endphp
                         <div class="d-flex justify-content-between align-items-center mb-3">
                             <div>
                                 <i class="{{ $typeInfo['icon'] }} me-2 text-{{ $typeInfo['color'] }}"></i>
                                 <span class="text-muted">{{ $typeInfo['name'] }}:</span>
                             </div>
                             <span class="badge bg-{{ $typeInfo['color'] }}">
-                                {{ $matchesByType[$typeKey]->count() ?? 0 }}
+                                {{ $count }}
                             </span>
                         </div>
                     @endforeach
                     
-                    <div class="progress mt-3" style="height: 8px;">
-                      @php
-    $matchesByType = $priceItem->matchedSymptoms->groupBy('pivot.match_type');
-    $matchTypes = [
-        'exact' => ['name' => 'Точные', 'color' => 'success', 'icon' => 'bi-check-circle'],
-        'strong' => ['name' => 'Сильные', 'color' => 'info', 'icon' => 'bi-check-square'],
-        'medium' => ['name' => 'Средние', 'color' => 'warning', 'icon' => 'bi-dash-circle'],
-        'weak' => ['name' => 'Слабые', 'color' => 'secondary', 'icon' => 'bi-dot']
-    ];
-@endphp
-
-@foreach($matchTypes as $typeKey => $typeInfo)
-    <div class="d-flex justify-content-between align-items-center mb-3">
-        <div>
-            <i class="{{ $typeInfo['icon'] }} me-2 text-{{ $typeInfo['color'] }}"></i>
-            <span class="text-muted">{{ $typeInfo['name'] }}:</span>
-        </div>
-        <span class="badge bg-{{ $typeInfo['color'] }}">
-            {{ $matchesByType->get($typeKey, collect())->count() }}
-        </span>
-    </div>
-@endforeach
-
-<div class="progress mt-3" style="height: 8px;">
-    @php
-        $totalMatches = $priceItem->matchedSymptoms->count();
-        
-        // Безопасное получение через get()
-        $exactCount = $matchesByType->get('exact', collect())->count();
-        $strongCount = $matchesByType->get('strong', collect())->count();
-        $mediumCount = $matchesByType->get('medium', collect())->count();
-        $weakCount = $matchesByType->get('weak', collect())->count();
-        
-        // Рассчитываем проценты
-        $exactPercent = $totalMatches > 0 ? ($exactCount / $totalMatches * 100) : 0;
-        $strongPercent = $totalMatches > 0 ? ($strongCount / $totalMatches * 100) : 0;
-        $mediumPercent = $totalMatches > 0 ? ($mediumCount / $totalMatches * 100) : 0;
-        $weakPercent = $totalMatches > 0 ? ($weakCount / $totalMatches * 100) : 0;
-    @endphp
-    
-    <div class="progress-bar bg-success" style="width: {{ $exactPercent }}%" 
-         title="Точные совпадения: {{ number_format($exactPercent, 1) }}%"></div>
-    <div class="progress-bar bg-info" style="width: {{ $strongPercent }}%" 
-         title="Сильные совпадения: {{ number_format($strongPercent, 1) }}%"></div>
-    <div class="progress-bar bg-warning" style="width: {{ $mediumPercent }}%" 
-         title="Средние совпадения: {{ number_format($mediumPercent, 1) }}%"></div>
-    <div class="progress-bar bg-secondary" style="width: {{ $weakPercent }}%" 
-         title="Слабые совпадения: {{ number_format($weakPercent, 1) }}%"></div>
-</div>
+                    @if($totalMatches > 0)
+                        <div class="progress mt-3" style="height: 8px;">
+                            <div class="progress-bar bg-success" style="width: {{ $exactPercent }}%" 
+                                 title="Точные совпадения: {{ number_format($exactPercent, 1) }}%"></div>
+                            <div class="progress-bar bg-info" style="width: {{ $strongPercent }}%" 
+                                 title="Сильные совпадения: {{ number_format($strongPercent, 1) }}%"></div>
+                            <div class="progress-bar bg-warning" style="width: {{ $mediumPercent }}%" 
+                                 title="Средние совпадения: {{ number_format($mediumPercent, 1) }}%"></div>
+                            <div class="progress-bar bg-secondary" style="width: {{ $weakPercent }}%" 
+                                 title="Слабые совпадения: {{ number_format($weakPercent, 1) }}%"></div>
+                        </div>
+                    @endif
+                    
+                    <div class="text-center mt-3">
+                        <small class="text-muted">Всего совпадений: {{ $totalMatches }}</small>
+                    </div>
+                </div>
+            </div>
             
             <!-- Быстрые действия -->
             <div class="card mb-4">
@@ -309,17 +341,21 @@
                 </div>
                 <div class="card-body">
                     <div class="d-grid gap-2">
-                        <a href="{{ route('admin.price.index', ['search' => $priceItem->sku]) }}" 
-                           class="btn btn-outline-primary">
-                            <i class="bi bi-search me-2"></i> Найти похожие по SKU
-                        </a>
+                        @if($priceItem->sku ?? false)
+                            <a href="{{ route('admin.price.index', ['search' => $priceItem->sku]) }}" 
+                               class="btn btn-outline-primary">
+                                <i class="bi bi-search me-2"></i> Найти похожие по SKU
+                            </a>
+                        @endif
                         
-                        <a href="{{ route('admin.price.index', ['search' => $priceItem->name]) }}" 
-                           class="btn btn-outline-secondary">
-                            <i class="bi bi-search me-2"></i> Найти по названию
-                        </a>
+                        @if($priceItem->name ?? false)
+                            <a href="{{ route('admin.price.index', ['search' => $priceItem->name]) }}" 
+                               class="btn btn-outline-secondary">
+                                <i class="bi bi-search me-2"></i> Найти по названию
+                            </a>
+                        @endif
                         
-                        @if($priceItem->brand)
+                        @if($priceItem->brand_id ?? false)
                             <a href="{{ route('admin.price.index', ['brand_id' => $priceItem->brand_id]) }}" 
                                class="btn btn-outline-info">
                                 <i class="bi bi-tag me-2"></i> Все запчасти бренда
@@ -340,13 +376,13 @@
                     <div class="small">
                         <div class="d-flex justify-content-between mb-2">
                             <span class="text-muted">ID:</span>
-                            <span class="fw-bold">{{ $priceItem->id }}</span>
+                            <span class="fw-bold">{{ $priceItem->id ?? '—' }}</span>
                         </div>
                         
                         <div class="d-flex justify-content-between mb-2">
                             <span class="text-muted">Добавил:</span>
                             <span>
-                                @if($priceItem->created_by)
+                                @if($priceItem->created_by ?? false)
                                     ID: {{ $priceItem->created_by }}
                                 @else
                                     <span class="text-muted">—</span>
@@ -357,7 +393,7 @@
                         <div class="d-flex justify-content-between mb-2">
                             <span class="text-muted">Обновил:</span>
                             <span>
-                                @if($priceItem->updated_by)
+                                @if($priceItem->updated_by ?? false)
                                     ID: {{ $priceItem->updated_by }}
                                 @else
                                     <span class="text-muted">—</span>
@@ -368,7 +404,7 @@
                         <div class="d-flex justify-content-between">
                             <span class="text-muted">Статус:</span>
                             <span>
-                                @if($priceItem->deleted_at)
+                                @if($priceItem->deleted_at ?? false)
                                     <span class="badge bg-danger">Удалена</span>
                                 @else
                                     <span class="badge bg-success">Активна</span>
@@ -429,6 +465,12 @@ document.addEventListener('DOMContentLoaded', function() {
     document.querySelectorAll('.match-symptoms-btn').forEach(button => {
         button.addEventListener('click', function() {
             const itemId = this.dataset.id;
+            
+            if (!itemId) {
+                showToast('Ошибка: ID запчасти не найден', 'error');
+                return;
+            }
+            
             const button = this;
             
             // Сохраняем оригинальный текст
@@ -445,7 +487,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     'Accept': 'application/json'
                 }
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) {
+                    throw new Error('Network response was not ok');
+                }
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     showToast(data.message, 'success');
@@ -454,14 +501,14 @@ document.addEventListener('DOMContentLoaded', function() {
                         window.location.reload();
                     }, 1500);
                 } else {
-                    showToast(data.message, 'error');
+                    showToast(data.message || 'Ошибка при поиске совпадений', 'error');
                     button.disabled = false;
                     button.innerHTML = originalText;
                 }
             })
             .catch(error => {
                 console.error('Error:', error);
-                showToast('Ошибка при поиске совпадений', 'error');
+                showToast('Ошибка при поиске совпадений: ' + error.message, 'error');
                 button.disabled = false;
                 button.innerHTML = originalText;
             });

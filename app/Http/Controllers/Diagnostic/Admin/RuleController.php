@@ -7,6 +7,7 @@ use App\Models\Brand;
 use App\Models\CarModel;
 use App\Models\Diagnostic\Symptom;
 use App\Models\Diagnostic\Rule;
+use App\Models\PriceItem;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Log;
 
@@ -108,24 +109,159 @@ class RuleController extends Controller
         return response()->json($models);
     }
 
-      public function show($id)
-    {
-        try {
-            $rule = Rule::with(['symptom', 'brand', 'model'])
-                ->findOrFail($id);
+    public function show($id)
+{
+    try {
+        $rule = Rule::with(['symptom', 'brand', 'model'])
+            ->findOrFail($id);
 
-                $brands = Brand::orderBy('name')->get();
-            //dd($brand);
-            return view('admin.diagnostic.rules.show', [
-                'rule' => $rule,
-                'brands' => $brands,
-                'title' => 'Правило диагностики: ' . ($rule->symptom->name ?? 'Unknown')
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error showing rule', ['rule_id' => $id, 'error' => $e->getMessage()]);
-            
-            return redirect()->route('admin.diagnostic.rules.index')
-                ->with('error', 'Правило не найдено: ' . $e->getMessage());
-        }
+        $brands = Brand::orderBy('name')->get();
+        
+        // Поиск связанных запчастей (с защитой от ошибок)
+        $matchedPriceItems = $this->findMatchingPriceItemsSafely($rule);
+        
+        return view('admin.diagnostic.rules.show', [
+            'rule' => $rule,
+            'brands' => $brands,
+            'matchedPriceItems' => $matchedPriceItems,
+            'title' => 'Правило диагностики: ' . ($rule->symptom->name ?? 'Unknown')
+        ]);
+    } catch (\Exception $e) {
+        Log::error('Error showing rule', ['rule_id' => $id, 'error' => $e->getMessage()]);
+        
+        return redirect()->route('admin.diagnostic.rules.index')
+            ->with('error', 'Правило не найдено: ' . $e->getMessage());
     }
+}
+
+/**
+ * Безопасный поиск связанных запчастей
+ */
+private function findMatchingPriceItemsSafely(Rule $rule)
+{
+    try {
+        // Проверяем, существует ли модель PriceItem
+        if (!class_exists(\App\Models\PriceItem::class)) {
+            Log::warning('PriceItem model not found');
+            return collect();
+        }
+        
+        // Проверяем, существует ли таблица
+        if (!\Illuminate\Support\Facades\Schema::hasTable('price_items')) {
+            Log::warning('price_items table not found');
+            return collect();
+        }
+        
+        $searchTerms = [];
+        
+        // 1. Ищем по названию симптома
+        if ($rule->symptom && !empty($rule->symptom->name)) {
+            $searchTerms[] = $rule->symptom->name;
+        }
+        
+        // 2. Ищем по возможным причинам из поля possible_causes
+        if ($rule->possible_causes && is_array($rule->possible_causes)) {
+            foreach ($rule->possible_causes as $cause) {
+                if (!empty(trim($cause))) {
+                    // Разбиваем сложные причины на отдельные слова
+                    $words = preg_split('/[\s,;]+/', $cause);
+                    foreach ($words as $word) {
+                        if (strlen($word) > 3) { // Только слова длиннее 3 символов
+                            $searchTerms[] = $word;
+                        }
+                    }
+                }
+            }
+        }
+        
+        // 3. Ищем по описанию симптома
+        if ($rule->symptom && !empty($rule->symptom->description)) {
+            // Извлекаем ключевые слова из описания
+            preg_match_all('/\b(\w{4,})\b/', $rule->symptom->description, $matches);
+            if (!empty($matches[1])) {
+                foreach ($matches[1] as $keyword) {
+                    $searchTerms[] = $keyword;
+                }
+            }
+        }
+        
+        // Убираем дубликаты и ограничиваем количество терминов
+        $searchTerms = array_unique($searchTerms);
+        $searchTerms = array_slice($searchTerms, 0, 10); // Не более 10 терминов
+        
+        if (empty($searchTerms)) {
+            return collect();
+        }
+        
+        // Выполняем поиск
+        $query = \App\Models\PriceItem::query()
+            ->with(['brand'])
+            ->where('quantity', '>', 0); // Только в наличии
+        
+        // Динамическое построение запроса
+        $query->where(function($q) use ($searchTerms) {
+            foreach ($searchTerms as $term) {
+                $term = trim($term);
+                if (!empty($term)) {
+                    $q->orWhere('name', 'like', '%' . $term . '%')
+                      ->orWhere('description', 'like', '%' . $term . '%')
+                      ->orWhere('sku', 'like', '%' . $term . '%')
+                      ->orWhere('catalog_brand', 'like', '%' . $term . '%');
+                }
+            }
+        });
+        
+        $priceItems = $query->limit(8)->get();
+        
+        // Если найдено мало запчастей, делаем более широкий поиск
+        if ($priceItems->count() < 3 && $rule->symptom && !empty($rule->symptom->name)) {
+            $mainTerm = $rule->symptom->name;
+            $fallbackItems = \App\Models\PriceItem::query()
+                ->with(['brand'])
+                ->where('quantity', '>', 0)
+                ->where(function($q) use ($mainTerm) {
+                    $q->where('name', 'like', '%' . $mainTerm . '%')
+                      ->orWhere('description', 'like', '%' . $mainTerm . '%');
+                })
+                ->limit(6)
+                ->get();
+            
+            $priceItems = $priceItems->merge($fallbackItems)->unique('id');
+        }
+        
+        // Сортируем по релевантности
+        return $priceItems->sortByDesc(function($item) use ($searchTerms) {
+            $score = 0;
+            $itemText = strtolower($item->name . ' ' . $item->description . ' ' . $item->sku);
+            
+            foreach ($searchTerms as $term) {
+                $termLower = strtolower($term);
+                
+                // Полное совпадение слова дает больше баллов
+                if (preg_match('/\b' . preg_quote($termLower, '/') . '\b/', $itemText)) {
+                    $score += 2;
+                }
+                // Частичное совпадение
+                elseif (str_contains($itemText, $termLower)) {
+                    $score += 1;
+                }
+            }
+            
+            // Дополнительные баллы за наличие и цену
+            if ($item->quantity > 10) $score += 1;
+            if ($item->price > 0) $score += 0.5;
+            
+            return $score;
+        })->take(6);
+        
+    } catch (\Exception $e) {
+        // В случае ошибки возвращаем пустую коллекцию
+        Log::error('Error finding matching price items', [
+            'rule_id' => $rule->id,
+            'error' => $e->getMessage()
+        ]);
+        
+        return collect();
+    }
+}
 }

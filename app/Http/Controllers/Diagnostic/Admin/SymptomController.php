@@ -70,4 +70,14 @@ class SymptomController extends Controller
         return redirect()->route('admin.diagnostic.symptoms.index')
             ->with('success', 'Симптом удалён');
     }
+
+     /**
+     * Показать карточку симптома
+     */
+    public function show(Symptom $symptom)
+    {
+        $symptom->load(['rules.brand', 'rules.model']);
+        
+        return view('admin.diagnostic.symptoms.show', compact('symptom'));
+    }
 }
