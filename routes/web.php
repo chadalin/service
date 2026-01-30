@@ -667,13 +667,20 @@ Route::prefix('admin/price')->name('admin.price.')->group(function () {
     Route::post('/{priceItem}/match-symptoms', [PriceItemController::class, 'matchSymptoms'])->name('match.symptoms');
 });
 
+
+
+
 Route::prefix('diagnostic')->group(function () {
-    Route::get('/ai-search/enhanced', [EnhancedAISearchController::class, 'index'])
-        ->name('diagnostic.ai-search.enhanced');
+    Route::get('/ai-search', [EnhancedAISearchController::class, 'index'])
+        ->name('diagnostic.ai-search.index');
     
     Route::post('/ai-search/enhanced', [EnhancedAISearchController::class, 'enhancedSearch'])
         ->name('diagnostic.ai.enhanced.search');
     
     Route::get('/rules/{id}/with-parts', [EnhancedAISearchController::class, 'showRuleWithParts'])
         ->name('diagnostic.rules.with-parts');
+    
+    Route::get('/symptoms/{id}', function($id) {
+        return redirect("/admin/diagnostic/symptoms/{$id}");
+    });
 });

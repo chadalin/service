@@ -1,54 +1,162 @@
 @extends('layouts.app')
 
-@section('title', 'AI поиск с запчастями и документами')
+@section('title', 'AI Диагностический поиск')
 
 @push('styles')
 <style>
-    .enhanced-search-container {
+    /* Основные стили */
+    .ai-search-container {
         display: grid;
         grid-template-columns: 1fr;
         gap: 1.5rem;
-        min-height: calc(100vh - 150px);
+        max-width: 1400px;
+        margin: 0 auto;
     }
     
     @media (min-width: 1200px) {
-        .enhanced-search-container {
-            grid-template-columns: 400px 1fr;
+        .ai-search-container {
+            grid-template-columns: 350px 1fr;
         }
     }
     
-    /* Стили для секций результатов */
-    .results-section {
-        background: white;
-        border-radius: 10px;
-        padding: 1.5rem;
-        margin-bottom: 1.5rem;
-        box-shadow: 0 2px 10px rgba(0,0,0,0.08);
+    /* Карточка формы */
+    .search-form-card {
+        position: sticky;
+        top: 1rem;
+        height: fit-content;
     }
     
-    .section-header {
+    /* Результаты - компактный вид */
+    .results-container {
+        display: flex;
+        flex-direction: column;
+        gap: 1rem;
+    }
+    
+    /* Основной результат - симптом с правилами */
+    .main-result-card {
+        border: none;
+        border-radius: 12px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+        margin-bottom: 1rem;
+        overflow: hidden;
+    }
+    
+    .result-header {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        padding: 1.25rem;
+        border-bottom: 1px solid rgba(255,255,255,0.1);
+    }
+    
+    .result-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
         display: flex;
         align-items: center;
         justify-content: space-between;
+    }
+    
+    .result-meta {
+        display: flex;
+        gap: 0.75rem;
+        flex-wrap: wrap;
+        align-items: center;
+    }
+    
+    .meta-badge {
+        background: rgba(255,255,255,0.2);
+        padding: 0.25rem 0.75rem;
+        border-radius: 20px;
+        font-size: 0.85rem;
+    }
+    
+    /* Контент результата */
+    .result-content {
+        padding: 1.5rem;
+    }
+    
+    .result-section {
         margin-bottom: 1.5rem;
-        padding-bottom: 0.75rem;
-        border-bottom: 2px solid #f0f0f0;
+        padding-bottom: 1.5rem;
+        border-bottom: 1px solid #f0f0f0;
+    }
+    
+    .result-section:last-child {
+        border-bottom: none;
+        margin-bottom: 0;
+        padding-bottom: 0;
     }
     
     .section-title {
-        font-size: 1.25rem;
+        font-size: 1.1rem;
         font-weight: 600;
+        color: #333;
+        margin-bottom: 1rem;
         display: flex;
         align-items: center;
         gap: 0.5rem;
     }
     
-    /* Стили для списка запчастей */
+    /* Списки */
+    .step-list, .cause-list, .data-list {
+        list-style: none;
+        padding: 0;
+        margin: 0;
+    }
+    
+    .step-list li {
+        padding: 0.75rem 0;
+        border-bottom: 1px solid #f5f5f5;
+        display: flex;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .step-list li:last-child {
+        border-bottom: none;
+    }
+    
+    .step-number {
+        background: #667eea;
+        color: white;
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+        flex-shrink: 0;
+    }
+    
+    .cause-list {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+    }
+    
+    .cause-tag {
+        background: #e3f2fd;
+        color: #1565c0;
+        padding: 0.5rem 1rem;
+        border-radius: 8px;
+        font-size: 0.9rem;
+        transition: all 0.2s;
+    }
+    
+    .cause-tag:hover {
+        background: #bbdefb;
+        transform: translateY(-2px);
+    }
+    
+    /* Запчасти */
     .parts-grid {
         display: grid;
-        grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+        grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
         gap: 1rem;
-        margin-bottom: 1.5rem;
+        margin-top: 1rem;
     }
     
     .part-card {
@@ -56,13 +164,11 @@
         border-radius: 8px;
         padding: 1rem;
         transition: all 0.3s ease;
-        position: relative;
     }
     
     .part-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 5px 15px rgba(0,0,0,0.1);
         border-color: #4CAF50;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.1);
     }
     
     .part-header {
@@ -73,87 +179,56 @@
     }
     
     .part-sku {
-        background: #e3f2fd;
-        color: #1565c0;
-        padding: 0.25rem 0.75rem;
+        font-family: monospace;
+        background: #f5f5f5;
+        padding: 0.25rem 0.5rem;
         border-radius: 4px;
         font-size: 0.85rem;
-        font-family: monospace;
+        color: #666;
     }
     
     .part-price {
-        font-size: 1.5rem;
         font-weight: bold;
         color: #2e7d32;
+        font-size: 1.25rem;
     }
     
     .part-name {
-        font-weight: 600;
+        font-weight: 500;
         margin-bottom: 0.5rem;
-        color: #333;
+        line-height: 1.3;
     }
     
-    .part-description {
-        color: #666;
-        font-size: 0.9rem;
-        margin-bottom: 1rem;
-        line-height: 1.4;
-    }
-    
-    .part-meta {
+    .part-footer {
         display: flex;
         justify-content: space-between;
         align-items: center;
+        margin-top: 1rem;
         padding-top: 0.75rem;
         border-top: 1px solid #f0f0f0;
     }
     
-    .availability-badge {
-        padding: 0.25rem 0.75rem;
-        border-radius: 12px;
-        font-size: 0.85rem;
-    }
-    
-    .availability-instock {
-        background: #c8e6c9;
-        color: #2e7d32;
-    }
-    
-    .availability-low {
-        background: #ffecb3;
-        color: #f57c00;
-    }
-    
-    .availability-out {
-        background: #ffcdd2;
-        color: #c62828;
-    }
-    
-    /* Стили для документов */
-    .documents-list {
+    /* Документы */
+    .document-item {
         display: flex;
-        flex-direction: column;
-        gap: 1rem;
-    }
-    
-    .document-card {
-        display: flex;
-        align-items: flex-start;
+        align-items: center;
         padding: 1rem;
         border: 1px solid #e0e0e0;
         border-radius: 8px;
-        transition: all 0.3s ease;
-        cursor: pointer;
+        margin-bottom: 0.75rem;
+        transition: all 0.2s;
+        text-decoration: none;
+        color: inherit;
     }
     
-    .document-card:hover {
+    .document-item:hover {
         background: #f8f9fa;
         border-color: #4CAF50;
-        transform: translateX(5px);
+        transform: translateX(4px);
     }
     
     .document-icon {
-        font-size: 2rem;
+        font-size: 1.5rem;
         color: #666;
         margin-right: 1rem;
         min-width: 40px;
@@ -164,63 +239,34 @@
     }
     
     .document-title {
-        font-weight: 600;
+        font-weight: 500;
         margin-bottom: 0.25rem;
-        color: #333;
     }
     
     .document-meta {
-        display: flex;
-        gap: 1rem;
         font-size: 0.85rem;
         color: #666;
-        margin-top: 0.5rem;
     }
     
-    /* Стили для инструкции по ремонту */
-    .repair-guide {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        padding: 1.5rem;
+    /* AI Ответ */
+    .ai-response-box {
+        background: #f8f9fa;
         border-radius: 10px;
+        padding: 1.5rem;
         margin-bottom: 1.5rem;
+        border-left: 4px solid #667eea;
     }
     
-    .guide-step {
-        background: rgba(255,255,255,0.1);
-        padding: 1rem;
-        border-radius: 8px;
-        margin-bottom: 1rem;
-        backdrop-filter: blur(10px);
+    .ai-response-content {
+        white-space: pre-line;
+        line-height: 1.6;
     }
     
-    .guide-step:last-child {
-        margin-bottom: 0;
+    .ai-response-content strong {
+        color: #667eea;
     }
     
-    .step-header {
-        display: flex;
-        align-items: center;
-        gap: 0.75rem;
-        margin-bottom: 0.75rem;
-    }
-    
-    .step-title {
-        font-weight: 600;
-        font-size: 1.1rem;
-    }
-    
-    .step-content ul {
-        margin: 0;
-        padding-left: 1.5rem;
-    }
-    
-    .step-content li {
-        margin-bottom: 0.5rem;
-        padding-left: 0.5rem;
-    }
-    
-    /* Анимации */
+    /* Анимации для постепенного появления */
     @keyframes fadeInUp {
         from {
             opacity: 0;
@@ -236,93 +282,83 @@
         animation: fadeInUp 0.5s ease forwards;
     }
     
-    /* Кастомные вкладки */
-    .nav-tabs-custom .nav-link {
-        border: none;
-        border-bottom: 3px solid transparent;
-        color: #666;
-        font-weight: 500;
-        padding: 0.75rem 1.5rem;
-        transition: all 0.3s;
+    /* Кастомный скролл */
+    .custom-scroll {
+        max-height: 70vh;
+        overflow-y: auto;
+        padding-right: 10px;
     }
     
-    .nav-tabs-custom .nav-link:hover {
-        color: #4CAF50;
-        border-bottom-color: #ddd;
+    .custom-scroll::-webkit-scrollbar {
+        width: 6px;
     }
     
-    .nav-tabs-custom .nav-link.active {
-        color: #4CAF50;
-        border-bottom-color: #4CAF50;
-        background: none;
+    .custom-scroll::-webkit-scrollbar-track {
+        background: #f1f1f1;
+        border-radius: 3px;
     }
     
-    /* Кнопки действий */
-    .action-buttons {
-        display: flex;
-        gap: 0.5rem;
-        margin-top: 1rem;
+    .custom-scroll::-webkit-scrollbar-thumb {
+        background: #888;
+        border-radius: 3px;
     }
     
-    .btn-order {
-        background: linear-gradient(135deg, #4CAF50 0%, #2e7d32 100%);
-        color: white;
-        border: none;
-        padding: 0.5rem 1.5rem;
-        border-radius: 6px;
-        font-weight: 500;
-        transition: all 0.3s;
+    .custom-scroll::-webkit-scrollbar-thumb:hover {
+        background: #555;
     }
     
-    .btn-order:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 12px rgba(76, 175, 80, 0.3);
+    /* Загрузка с точками */
+    .typing-indicator {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        margin-left: 8px;
+    }
+    
+    .typing-dot {
+        width: 8px;
+        height: 8px;
+        background: #667eea;
+        border-radius: 50%;
+        animation: typing 1.4s infinite ease-in-out;
+    }
+    
+    .typing-dot:nth-child(1) { animation-delay: -0.32s; }
+    .typing-dot:nth-child(2) { animation-delay: -0.16s; }
+    
+    @keyframes typing {
+        0%, 80%, 100% { transform: translateY(0); }
+        40% { transform: translateY(-10px); }
     }
 </style>
 @endpush
 
 @section('content')
-<div class="enhanced-search-container">
+<div class="ai-search-container">
     <!-- Левая колонка - форма поиска -->
     <div>
-        <div class="card shadow-lg sticky-top" style="top: 1rem;">
-            <div class="card-header bg-primary text-white d-flex align-items-center">
-                <i class="bi bi-robot fs-4 me-2"></i>
-                <h4 class="mb-0">🤖 AI Поиск с запчастями</h4>
+        <div class="card search-form-card shadow">
+            <div class="card-header bg-primary text-white">
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-robot fs-4 me-2"></i>
+                    <h5 class="mb-0">🤖 AI Диагностика</h5>
+                </div>
             </div>
             
-            <div class="card-body position-relative">
-                <form id="enhancedSearchForm">
+            <div class="card-body">
+                <form id="aiSearchForm">
                     @csrf
                     
-                    <!-- Быстрая статистика -->
-                    <div class="row g-2 mb-3">
-                        <div class="col-6">
-                            <div class="bg-light p-2 rounded text-center">
-                                <small class="text-muted d-block">Запчастей</small>
-                                <strong class="text-primary" id="partsCount">{{ $stats['price_items_count'] }}</strong>
-                            </div>
-                        </div>
-                        <div class="col-6">
-                            <div class="bg-light p-2 rounded text-center">
-                                <small class="text-muted d-block">Документов</small>
-                                <strong class="text-primary" id="docsCount">{{ $stats['documents_count'] }}</strong>
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Описание проблемы -->
                     <div class="mb-3">
                         <label class="form-label fw-bold">Опишите проблему</label>
                         <textarea class="form-control" 
                                   id="query" 
                                   name="query" 
                                   rows="4"
-                                  placeholder="Пример: Не заводится двигатель, слышен щелчок при повороте ключа"
+                                  placeholder="Пример: Не заводится двигатель, щелкает стартер"
                                   required></textarea>
                     </div>
                     
-                    <!-- Фильтры -->
                     <div class="row g-2 mb-3">
                         <div class="col-md-6">
                             <label class="form-label">Марка авто</label>
@@ -331,9 +367,6 @@
                                 @foreach($brands as $brand)
                                     <option value="{{ $brand->id }}">
                                         {{ $brand->name }}
-                                        @if($brand->name_cyrillic)
-                                            ({{ $brand->name_cyrillic }})
-                                        @endif
                                     </option>
                                 @endforeach
                             </select>
@@ -341,42 +374,42 @@
                         <div class="col-md-6">
                             <label class="form-label">Модель</label>
                             <select class="form-select" id="model_id" name="model_id" disabled>
-                                <option value="">Сначала выберите марку</option>
+                                <option value="">Все модели</option>
                             </select>
                         </div>
                     </div>
                     
-                    <!-- Дополнительные опции -->
                     <div class="mb-3">
-                        <label class="form-label fw-bold">Что искать?</label>
+                        <label class="form-label fw-bold">Тип поиска</label>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="show_parts" name="show_parts" checked>
-                            <label class="form-check-label" for="show_parts">
-                                Показывать запчасти
+                            <input class="form-check-input" type="radio" name="search_type" 
+                                   id="search_basic" value="basic" checked>
+                            <label class="form-check-label" for="search_basic">
+                                Базовый (быстрый)
                             </label>
                         </div>
                         <div class="form-check">
-                            <input class="form-check-input" type="checkbox" id="show_docs" name="show_docs" checked>
-                            <label class="form-check-label" for="show_docs">
-                                Показывать документы
+                            <input class="form-check-input" type="radio" name="search_type" 
+                                   id="search_advanced" value="advanced">
+                            <label class="form-check-label" for="search_advanced">
+                                Расширенный (точный)
                             </label>
                         </div>
                     </div>
                     
-                    <!-- Кнопка поиска -->
                     <button type="submit" class="btn btn-primary w-100" id="searchBtn">
                         <i class="bi bi-search me-2"></i>
-                        <span>Начать AI-поиск</span>
+                        <span>Начать диагностику</span>
                         <span class="spinner-border spinner-border-sm ms-2 d-none" id="searchSpinner"></span>
                     </button>
                 </form>
                 
-                <!-- Индикатор загрузки -->
-                <div class="loading-overlay d-none" id="loadingOverlay">
-                    <div class="text-center text-white">
-                        <div class="spinner-border mb-3"></div>
-                        <p class="mb-0">AI анализирует проблему...</p>
-                    </div>
+                <div class="mt-3 text-center">
+                    <small class="text-muted">
+                        <i class="bi bi-info-circle me-1"></i>
+                        База содержит {{ $stats['symptoms_count'] }} симптомов
+                        и {{ $stats['rules_count'] }} правил диагностики
+                    </small>
                 </div>
             </div>
         </div>
@@ -384,99 +417,40 @@
     
     <!-- Правая колонка - результаты -->
     <div>
-        <!-- Вкладки -->
-        <ul class="nav nav-tabs nav-tabs-custom mb-3" id="resultsTabs">
-            <li class="nav-item">
-                <a class="nav-link active" data-bs-toggle="tab" href="#tab-results">
-                    <i class="bi bi-search me-1"></i> Результаты
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" data-bs-toggle="tab" href="#tab-parts">
-                    <i class="bi bi-tools me-1"></i> Запчасти
-                </a>
-            </li>
-            <li class="nav-item">
-                <a class="nav-link" data-bs-toggle="tab" href="#tab-docs">
-                    <i class="bi bi-files me-1"></i> Документы
-                </a>
-            </li>
-        </ul>
-        
-        <!-- Контент вкладок -->
-        <div class="tab-content" id="resultsContent">
-            <!-- Вкладка результатов -->
-            <div class="tab-pane fade show active" id="tab-results">
-                <div id="aiResponse" class="results-section fade-in-up">
-                    <div class="section-header">
-                        <h5 class="section-title">
-                            <i class="bi bi-robot"></i> AI-анализ
-                        </h5>
-                        <span class="badge bg-secondary" id="resultsCount">Ожидание запроса</span>
-                    </div>
-                    <div id="aiResponseContent" class="ai-response-content">
-                        <div class="text-center py-5">
-                            <i class="bi bi-robot display-1 text-muted mb-3"></i>
-                            <h4 class="text-muted">AI-помощник по диагностике</h4>
-                            <p class="text-muted">Опишите проблему для получения анализа</p>
-                        </div>
-                    </div>
-                </div>
-                
-                <div id="symptomsResults" class="results-section d-none">
-                    <!-- Сюда будут добавляться результаты -->
-                </div>
+        <div class="card shadow">
+            <div class="card-header bg-light d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">
+                    <i class="bi bi-file-earmark-text me-2"></i>Результаты диагностики
+                </h5>
+                <span class="badge bg-secondary" id="resultsCounter">Ожидание запроса</span>
             </div>
             
-            <!-- Вкладка запчастей -->
-            <div class="tab-pane fade" id="tab-parts">
-                <div id="partsResults" class="results-section">
-                    <div class="section-header">
-                        <h5 class="section-title">
-                            <i class="bi bi-tools"></i> Рекомендуемые запчасти
-                        </h5>
-                        <span class="badge bg-success" id="partsCountBadge">0</span>
-                    </div>
-                    <div id="partsContent">
-                        <div class="text-center py-5">
-                            <i class="bi bi-tools display-1 text-muted mb-3"></i>
-                            <p class="text-muted">Выполните поиск для просмотра запчастей</p>
+            <div class="card-body p-0">
+                <div class="custom-scroll p-3" id="resultsContainer">
+                    <!-- Начальное состояние -->
+                    <div class="text-center py-5">
+                        <div class="mb-4">
+                            <i class="bi bi-robot display-1 text-primary"></i>
+                        </div>
+                        <h3 class="text-primary mb-3">AI-диагностика автомобиля</h3>
+                        <p class="text-muted mb-4">
+                            Опишите проблему, и AI найдет соответствующие симптомы,<br>
+                            правила диагностики и рекомендации по ремонту
+                        </p>
+                        <div class="row justify-content-center">
+                            <div class="col-md-8">
+                                <div class="alert alert-info">
+                                    <i class="bi bi-lightbulb me-2"></i>
+                                    <strong>Примеры запросов:</strong><br>
+                                    • Не заводится двигатель<br>
+                                    • Горит Check Engine<br>
+                                    • Стук в двигателе на холодную<br>
+                                    • Не работает кондиционер
+                                </div>
+                            </div>
                         </div>
                     </div>
                 </div>
-            </div>
-            
-            <!-- Вкладка документов -->
-            <div class="tab-pane fade" id="tab-docs">
-                <div id="docsResults" class="results-section">
-                    <div class="section-header">
-                        <h5 class="section-title">
-                            <i class="bi bi-files"></i> Инструкции и документы
-                        </h5>
-                        <span class="badge bg-info" id="docsCountBadge">0</span>
-                    </div>
-                    <div id="docsContent">
-                        <div class="text-center py-5">
-                            <i class="bi bi-files display-1 text-muted mb-3"></i>
-                            <p class="text-muted">Выполните поиск для просмотра документов</p>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
-
-<!-- Модальное окно деталей -->
-<div class="modal fade" id="ruleDetailsModal" tabindex="-1">
-    <div class="modal-dialog modal-lg">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h5 class="modal-title">Детали диагностики</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="ruleDetailsContent">
-                <!-- Контент будет загружаться динамически -->
             </div>
         </div>
     </div>
@@ -487,7 +461,9 @@
 <script>
 // Глобальные переменные
 let allModels = @json($models);
+let isLoading = false;
 let currentResults = null;
+let typingInterval = null;
 
 document.addEventListener('DOMContentLoaded', function() {
     initForm();
@@ -500,20 +476,27 @@ function initForm() {
     
     if (brandSelect) {
         brandSelect.addEventListener('change', function() {
-            const brandId = this.value;
-            updateModelSelect(brandId);
+            updateModelSelect(this.value);
         });
     }
 }
 
 function initEventListeners() {
-    const form = document.getElementById('enhancedSearchForm');
+    const form = document.getElementById('aiSearchForm');
     if (form) {
-        form.addEventListener('submit', function(e) {
+        form.addEventListener('submit', async function(e) {
             e.preventDefault();
-            performEnhancedSearch();
+            await performEnhancedSearch();
         });
     }
+    
+    // Горячие клавиши
+    document.getElementById('query')?.addEventListener('keydown', function(e) {
+        if (e.ctrlKey && e.key === 'Enter') {
+            e.preventDefault();
+            performEnhancedSearch();
+        }
+    });
 }
 
 function updateModelSelect(brandId) {
@@ -539,47 +522,51 @@ function updateModelSelect(brandId) {
         });
         modelSelect.disabled = false;
     } else {
-        modelSelect.innerHTML = '<option value="">Нет доступных моделей</option>';
         modelSelect.disabled = true;
     }
 }
 
 async function performEnhancedSearch() {
-    const form = document.getElementById('enhancedSearchForm');
+    if (isLoading) return;
+    
+    const form = document.getElementById('aiSearchForm');
     const searchBtn = document.getElementById('searchBtn');
     const searchSpinner = document.getElementById('searchSpinner');
-    const loadingOverlay = document.getElementById('loadingOverlay');
+    const queryInput = document.getElementById('query');
     
-    const formData = new FormData(form);
-    const query = formData.get('query');
-    
-    if (!query || query.trim().length < 3) {
+    const query = queryInput.value.trim();
+    if (!query || query.length < 3) {
         showToast('Введите описание проблемы (минимум 3 символа)', 'warning');
         return;
     }
     
-    // Показываем загрузку
+    // Настройка UI
+    isLoading = true;
     searchBtn.disabled = true;
     searchSpinner.classList.remove('d-none');
-    loadingOverlay.classList.remove('d-none');
+    
+    // Показываем состояние загрузки
+    showLoadingState();
+    
+    // Собираем данные формы
+    const formData = new FormData(form);
+    const searchData = {
+        query: formData.get('query'),
+        brand_id: formData.get('brand_id') || null,
+        model_id: document.getElementById('model_id').disabled ? null : formData.get('model_id'),
+        search_type: formData.get('search_type'),
+        _token: '{{ csrf_token() }}'
+    };
     
     try {
         const response = await fetch('{{ route("diagnostic.ai.enhanced.search") }}', {
             method: 'POST',
             headers: {
-                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'Content-Type': 'application/json'
+                'X-CSRF-TOKEN': searchData._token
             },
-            body: JSON.stringify({
-                query: formData.get('query'),
-                brand_id: formData.get('brand_id') || null,
-                model_id: formData.get('model_id') || null,
-                search_type: 'full',
-                show_parts: document.getElementById('show_parts').checked,
-                show_docs: document.getElementById('show_docs').checked,
-                max_results: 15
-            })
+            body: JSON.stringify(searchData)
         });
         
         const data = await response.json();
@@ -593,293 +580,400 @@ async function performEnhancedSearch() {
         }
         
         currentResults = data;
-        displayEnhancedResults(data);
+        displayStructuredResults(data);
+        
+        // Показываем уведомление
+        const totalResults = data.results.length + data.parts.length + data.documents.length;
+        showToast(`Найдено ${totalResults} результатов`, 'success');
         
     } catch (error) {
         console.error('Search error:', error);
+        showErrorState(error.message);
         showToast('Ошибка поиска: ' + error.message, 'danger');
     } finally {
+        isLoading = false;
         searchBtn.disabled = false;
         searchSpinner.classList.add('d-none');
-        loadingOverlay.classList.add('d-none');
     }
 }
 
-function displayEnhancedResults(data) {
-    // Обновляем AI ответ
-    updateAIResponse(data.ai_response);
+function showLoadingState() {
+    const container = document.getElementById('resultsContainer');
+    container.innerHTML = `
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary mb-3" style="width: 3rem; height: 3rem;"></div>
+            <h4 class="text-primary mb-3">AI анализирует проблему</h4>
+            <p class="text-muted">
+                <span class="typing-indicator">
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                    <span class="typing-dot"></span>
+                </span>
+                Поиск симптомов и правил диагностики...
+            </p>
+        </div>
+    `;
     
-    // Обновляем счетчики
-    updateCounters(data);
-    
-    // Отображаем симптомы и правила
-    displaySymptoms(data.results);
-    
-    // Отображаем запчасти если есть
-    if (data.parts && data.parts.length > 0) {
-        displayParts(data.parts);
-    }
-    
-    // Отображаем документы если есть
-    if (data.documents && data.documents.length > 0) {
-        displayDocuments(data.documents);
-    }
-    
-    // Показываем уведомление
-    const total = (data.results?.length || 0) + (data.parts?.length || 0) + (data.documents?.length || 0);
-    showToast(`Найдено ${total} результатов за ${data.execution_time}мс`, 'success');
+    // Обновляем счетчик
+    document.getElementById('resultsCounter').textContent = 'Поиск...';
+    document.getElementById('resultsCounter').className = 'badge bg-warning';
 }
 
-function updateAIResponse(response) {
-    const aiContent = document.getElementById('aiResponseContent');
-    if (!aiContent) return;
+function showErrorState(errorMessage) {
+    const container = document.getElementById('resultsContainer');
+    container.innerHTML = `
+        <div class="text-center py-5">
+            <i class="bi bi-exclamation-triangle display-1 text-danger mb-3"></i>
+            <h4 class="text-danger mb-3">Ошибка поиска</h4>
+            <p class="text-muted mb-4">${errorMessage}</p>
+            <button class="btn btn-primary" onclick="performEnhancedSearch()">
+                <i class="bi bi-arrow-clockwise me-1"></i>Повторить
+            </button>
+        </div>
+    `;
     
-    // Форматируем AI ответ
-    const formattedResponse = response
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/\n/g, '<br>')
-        .replace(/🤖/g, '<i class="bi bi-robot"></i>')
-        .replace(/🔍/g, '<i class="bi bi-search"></i>')
-        .replace(/🎯/g, '<i class="bi bi-bullseye"></i>')
-        .replace(/🛒/g, '<i class="bi bi-cart"></i>')
-        .replace(/📄/g, '<i class="bi bi-file-earmark-text"></i>')
-        .replace(/🔧/g, '<i class="bi bi-tools"></i>')
-        .replace(/⚠️/g, '<i class="bi bi-exclamation-triangle"></i>')
-        .replace(/⏱️/g, '<i class="bi bi-clock"></i>')
-        .replace(/💰/g, '<i class="bi bi-currency-ruble"></i>')
-        .replace(/📦/g, '<i class="bi bi-box"></i>')
-        .replace(/🏷️/g, '<i class="bi bi-tag"></i>')
-        .replace(/📈/g, '<i class="bi bi-graph-up"></i>')
-        .replace(/💡/g, '<i class="bi bi-lightbulb"></i>');
+    document.getElementById('resultsCounter').textContent = 'Ошибка';
+    document.getElementById('resultsCounter').className = 'badge bg-danger';
+}
+
+function displayStructuredResults(data) {
+    const container = document.getElementById('resultsContainer');
+    const counter = document.getElementById('resultsCounter');
     
-    aiContent.innerHTML = `
-        <div class="ai-response-content bg-light p-3 rounded">
+    // Обновляем счетчик
+    const totalResults = data.results.length;
+    counter.textContent = `Найдено: ${totalResults}`;
+    counter.className = totalResults > 0 ? 'badge bg-success' : 'badge bg-secondary';
+    
+    // Очищаем контейнер
+    container.innerHTML = '';
+    
+    // Постепенно добавляем контент
+    setTimeout(() => {
+        addAIResponse(data.ai_response, container);
+        
+        setTimeout(() => {
+            if (data.results.length > 0) {
+                addSymptomsResults(data.results, container);
+                
+                setTimeout(() => {
+                    if (data.parts.length > 0) {
+                        addPartsResults(data.parts, container);
+                    }
+                    
+                    setTimeout(() => {
+                        if (data.documents.length > 0) {
+                            addDocumentsResults(data.documents, container);
+                        }
+                    }, 300);
+                }, 300);
+            }
+        }, 500);
+    }, 300);
+}
+
+function addAIResponse(response, container) {
+    const responseDiv = document.createElement('div');
+    responseDiv.className = 'ai-response-box fade-in-up';
+    
+    // Форматируем ответ
+    const formattedResponse = formatAIResponse(response);
+    
+    responseDiv.innerHTML = `
+        <div class="ai-response-content">
             ${formattedResponse}
         </div>
     `;
+    
+    container.appendChild(responseDiv);
 }
 
-function updateCounters(data) {
-    // Обновляем счетчик результатов
-    const resultsCount = document.getElementById('resultsCount');
-    if (resultsCount) {
-        const count = data.results?.length || 0;
-        resultsCount.textContent = count + ' найдено';
-        resultsCount.className = count > 0 ? 'badge bg-success' : 'badge bg-secondary';
-    }
+function addSymptomsResults(results, container) {
+    // Показываем только топ-5 результатов
+    const topResults = results.slice(0, 5);
     
-    // Обновляем счетчик запчастей
-    const partsBadge = document.getElementById('partsCountBadge');
-    if (partsBadge && data.parts) {
-        partsBadge.textContent = data.parts.length;
-        partsBadge.className = data.parts.length > 0 ? 'badge bg-success' : 'badge bg-secondary';
-    }
-    
-    // Обновляем счетчик документов
-    const docsBadge = document.getElementById('docsCountBadge');
-    if (docsBadge && data.documents) {
-        docsBadge.textContent = data.documents.length;
-        docsBadge.className = data.documents.length > 0 ? 'badge bg-success' : 'badge bg-secondary';
-    }
+    topResults.forEach((result, index) => {
+        setTimeout(() => {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'main-result-card fade-in-up';
+            resultDiv.style.animationDelay = `${index * 0.2}s`;
+            
+            resultDiv.innerHTML = createSymptomCardHTML(result, index);
+            container.appendChild(resultDiv);
+            
+            // Плавное появление
+            setTimeout(() => {
+                resultDiv.style.opacity = '1';
+            }, 100);
+        }, index * 200);
+    });
 }
 
-function displaySymptoms(symptoms) {
-    const container = document.getElementById('symptomsResults');
-    if (!container) return;
+function addPartsResults(parts, container) {
+    const partsDiv = document.createElement('div');
+    partsDiv.className = 'main-result-card fade-in-up';
+    partsDiv.style.animationDelay = '0.1s';
     
-    if (!symptoms || symptoms.length === 0) {
-        container.classList.add('d-none');
-        return;
-    }
+    let partsHTML = `
+        <div class="result-header">
+            <div class="result-title">
+                <span><i class="bi bi-tools me-2"></i>Рекомендуемые запчасти</span>
+                <span class="badge bg-light text-dark">${parts.length} шт.</span>
+            </div>
+        </div>
+        <div class="result-content">
+            <div class="parts-grid">
+    `;
     
-    let html = `
-        <div class="section-header">
-            <h5 class="section-title">
-                <i class="bi bi-clipboard-check"></i> Симптомы и решения
-            </h5>
-            <span class="badge bg-primary">${symptoms.length}</span>
+    parts.forEach((part, index) => {
+        partsHTML += createPartCardHTML(part, index);
+    });
+    
+    partsHTML += `
+            </div>
         </div>
     `;
     
-    symptoms.forEach((item, index) => {
-        const relevancePercent = Math.round((item.relevance_score || 0.5) * 100);
-        const badgeClass = relevancePercent > 70 ? 'bg-success' : 
-                          relevancePercent > 40 ? 'bg-warning' : 'bg-secondary';
-        
-        html += `
-            <div class="card mb-3 fade-in-up" style="animation-delay: ${index * 0.1}s">
-                <div class="card-body">
-                    <div class="d-flex justify-content-between align-items-start mb-2">
-                        <h6 class="card-title mb-0">
-                            ${item.type === 'rule' ? 
-                                '<i class="bi bi-clipboard-check text-success me-2"></i>' : 
-                                '<i class="bi bi-exclamation-triangle text-warning me-2"></i>'}
-                            ${item.title}
-                        </h6>
-                        <span class="badge ${badgeClass}">
-                            ${relevancePercent}%
-                        </span>
-                    </div>
-                    
-                    ${item.description ? `
-                        <p class="card-text text-muted small mb-3">
-                            ${item.description.substring(0, 150)}${item.description.length > 150 ? '...' : ''}
-                        </p>
-                    ` : ''}
-                    
-                    ${item.brand || item.model ? `
-                        <div class="mb-3">
-                            ${item.brand ? `
-                                <span class="badge bg-info me-2">
-                                    <i class="bi bi-car-front"></i> ${item.brand}
-                                </span>
-                            ` : ''}
-                            ${item.model ? `
-                                <span class="badge bg-secondary me-2">
-                                    ${item.model}
-                                </span>
-                            ` : ''}
-                        </div>
-                    ` : ''}
-                    
-                    ${item.possible_causes && item.possible_causes.length > 0 ? `
-                        <div class="mb-3">
-                            <small class="text-muted d-block mb-1">
-                                <strong>Возможные причины:</strong>
-                            </small>
-                            <div class="d-flex flex-wrap gap-1">
-                                ${item.possible_causes.slice(0, 3).map(cause => 
-                                    `<span class="badge bg-light text-dark">${cause}</span>`
-                                ).join('')}
-                            </div>
-                        </div>
-                    ` : ''}
-                    
-                    <div class="d-flex justify-content-between align-items-center">
-                        <small class="text-muted">
-                            ${item.type === 'rule' ? `
-                                <i class="bi bi-clock"></i> ~${item.estimated_time} мин. | 
-                                <i class="bi bi-currency-ruble"></i> ${item.consultation_price?.toLocaleString() || '0'}
-                            ` : 'Требуется дополнительная диагностика'}
-                        </small>
-                        <div class="btn-group">
-                            <button class="btn btn-sm btn-outline-primary" 
-                                    onclick="viewRuleDetails(${item.type === 'rule' ? item.id : item.symptom_id})">
-                                <i class="bi bi-eye"></i> Подробнее
-                            </button>
-                            ${item.type === 'rule' ? `
-                                <button class="btn btn-sm btn-success" 
-                                        onclick="orderConsultation(${item.id})">
-                                    <i class="bi bi-chat-dots"></i> Консультация
-                                </button>
-                            ` : ''}
-                        </div>
-                    </div>
-                </div>
+    partsDiv.innerHTML = partsHTML;
+    container.appendChild(partsDiv);
+}
+
+function addDocumentsResults(docs, container) {
+    const docsDiv = document.createElement('div');
+    docsDiv.className = 'main-result-card fade-in-up';
+    docsDiv.style.animationDelay = '0.1s';
+    
+    let docsHTML = `
+        <div class="result-header">
+            <div class="result-title">
+                <span><i class="bi bi-files me-2"></i>Инструкции по ремонту</span>
+                <span class="badge bg-light text-dark">${docs.length} шт.</span>
             </div>
-        `;
+        </div>
+        <div class="result-content">
+    `;
+    
+    docs.forEach((doc, index) => {
+        docsHTML += createDocumentCardHTML(doc, index);
     });
     
-    container.innerHTML = html;
-    container.classList.remove('d-none');
+    docsHTML += `</div>`;
+    docsDiv.innerHTML = docsHTML;
+    container.appendChild(docsDiv);
 }
 
-function displayParts(parts) {
-    const container = document.getElementById('partsContent');
-    if (!container) return;
+function createSymptomCardHTML(result, index) {
+    const relevancePercent = Math.round(result.relevance_score * 100);
+    const matchTypeBadge = result.match_type === 'exact' ? 'success' : 
+                          result.match_type === 'keyword' ? 'primary' : 'secondary';
+    const matchTypeText = result.match_type === 'exact' ? 'Точное совпадение' :
+                         result.match_type === 'keyword' ? 'По ключевым словам' : 'Похожий симптом';
     
-    let html = '';
-    
-    if (parts.length === 0) {
-        html = '<div class="text-center py-3 text-muted">Запчасти не найдены</div>';
-    } else {
-        parts.forEach((part, index) => {
-            const availabilityClass = part.availability === 'В наличии' ? 'availability-instock' :
-                                    part.availability === 'Мало' ? 'availability-low' : 'availability-out';
+    let html = `
+        <div class="result-header">
+            <div class="result-title">
+                <span>${index + 1}. ${result.title}</span>
+                <div>
+                    <span class="badge bg-${matchTypeBadge} me-2">${matchTypeText}</span>
+                    <span class="badge bg-info">${relevancePercent}%</span>
+                </div>
+            </div>
             
-            html += `
-                <div class="part-card fade-in-up" style="animation-delay: ${index * 0.1}s">
-                    <div class="part-header">
-                        <span class="part-sku">${part.sku}</span>
-                        <div class="part-price">${part.formatted_price} ₽</div>
-                    </div>
-                    
-                    <div class="part-name">${part.name}</div>
-                    
-                    ${part.description ? `
-                        <div class="part-description">
-                            ${part.description.substring(0, 100)}${part.description.length > 100 ? '...' : ''}
-                        </div>
-                    ` : ''}
-                    
-                    <div class="part-meta">
-                        <div>
-                            ${part.brand ? `
-                                <span class="badge bg-light text-dark me-2">
-                                    ${part.brand}
-                                </span>
-                            ` : ''}
-                            <span class="availability-badge ${availabilityClass}">
-                                ${part.availability}
-                            </span>
-                        </div>
-                        <div class="action-buttons">
-                            <button class="btn btn-sm btn-outline-primary" onclick="viewPartDetails(${part.id})">
-                                <i class="bi bi-eye"></i>
-                            </button>
-                            <button class="btn btn-sm btn-success" onclick="addToCart(${part.id})">
-                                <i class="bi bi-cart-plus"></i>
-                            </button>
-                        </div>
-                    </div>
+            <div class="result-meta">
+                ${result.type === 'rule' && result.brand ? `
+                    <span class="meta-badge">
+                        <i class="bi bi-car-front me-1"></i>${result.brand} ${result.model || ''}
+                    </span>
+                ` : ''}
+                
+                ${result.complexity_level ? `
+                    <span class="meta-badge">
+                        <i class="bi bi-speedometer2 me-1"></i>Сложность: ${result.complexity_level}/10
+                    </span>
+                ` : ''}
+                
+                ${result.estimated_time ? `
+                    <span class="meta-badge">
+                        <i class="bi bi-clock me-1"></i>${result.estimated_time} мин.
+                    </span>
+                ` : ''}
+            </div>
+        </div>
+        
+        <div class="result-content">
+    `;
+    
+    // Описание
+    if (result.description) {
+        html += `
+            <div class="result-section">
+                <div class="section-title">
+                    <i class="bi bi-card-text"></i>Описание
                 </div>
-            `;
-        });
+                <p>${result.description}</p>
+            </div>
+        `;
     }
     
-    container.innerHTML = html;
+    // Шаги диагностики (только для правил)
+    if (result.type === 'rule' && result.diagnostic_steps && result.diagnostic_steps.length > 0) {
+        html += `
+            <div class="result-section">
+                <div class="section-title">
+                    <i class="bi bi-list-check"></i>Шаги диагностики
+                </div>
+                <ol class="step-list">
+        `;
+        
+        result.diagnostic_steps.forEach((step, stepIndex) => {
+            html += `
+                <li>
+                    <div class="step-number">${stepIndex + 1}</div>
+                    <div>${step}</div>
+                </li>
+            `;
+        });
+        
+        html += `</ol></div>`;
+    }
+    
+    // Возможные причины
+    if (result.possible_causes && result.possible_causes.length > 0) {
+        html += `
+            <div class="result-section">
+                <div class="section-title">
+                    <i class="bi bi-exclamation-triangle"></i>Возможные причины
+                </div>
+                <div class="cause-list">
+        `;
+        
+        result.possible_causes.forEach(cause => {
+            html += `<span class="cause-tag">${cause}</span>`;
+        });
+        
+        html += `</div></div>`;
+    }
+    
+    // Кнопки действий
+    html += `
+        <div class="d-flex justify-content-between align-items-center mt-3">
+            <div>
+                ${result.type === 'rule' ? `
+                    <small class="text-muted">
+                        <i class="bi bi-currency-ruble"></i>
+                        Консультация: <strong>${result.consultation_price?.toLocaleString() || '0'} ₽</strong>
+                    </small>
+                ` : 'Симптом требует дополнительной диагностики'}
+            </div>
+            <div class="btn-group">
+                ${result.type === 'rule' ? `
+                    <button class="btn btn-sm btn-primary" onclick="viewRuleDetails(${result.id})">
+                        <i class="bi bi-eye me-1"></i>Подробнее
+                    </button>
+                    <button class="btn btn-sm btn-success" onclick="orderConsultation(${result.id})">
+                        <i class="bi bi-chat-dots me-1"></i>Консультация
+                    </button>
+                ` : `
+                    <button class="btn btn-sm btn-warning" onclick="viewSymptomDetails(${result.symptom_id || result.id})">
+                        <i class="bi bi-info-circle me-1"></i>Подробнее о симптоме
+                    </button>
+                `}
+            </div>
+        </div>
+    `;
+    
+    html += `</div>`;
+    return html;
 }
 
-function displayDocuments(documents) {
-    const container = document.getElementById('docsContent');
-    if (!container) return;
-    
-    let html = '';
-    
-    if (documents.length === 0) {
-        html = '<div class="text-center py-3 text-muted">Документы не найдены</div>';
-    } else {
-        documents.forEach((doc, index) => {
-            html += `
-                <div class="document-card fade-in-up" style="animation-delay: ${index * 0.1}s"
-                     onclick="openDocument(${doc.id})">
-                    <div class="document-icon">
-                        <i class="bi ${doc.icon}"></i>
-                    </div>
-                    <div class="document-info">
-                        <div class="document-title">${doc.title}</div>
-                        ${doc.excerpt ? `
-                            <div class="text-muted small mb-2">
-                                ${doc.excerpt}
-                            </div>
-                        ` : ''}
-                        <div class="document-meta">
-                            <span><i class="bi bi-file-earmark"></i> ${doc.file_type}</span>
-                            ${doc.total_pages ? `<span><i class="bi bi-file-text"></i> ${doc.total_pages} стр.</span>` : ''}
-                            ${doc.views ? `<span><i class="bi bi-eye"></i> ${doc.views}</span>` : ''}
-                        </div>
-                    </div>
+function createPartCardHTML(part, index) {
+    return `
+        <div class="part-card" style="animation-delay: ${index * 0.1}s">
+            <div class="part-header">
+                <span class="part-sku">${part.sku}</span>
+                <div class="part-price">${part.formatted_price} ₽</div>
+            </div>
+            
+            <div class="part-name">${part.name}</div>
+            
+            ${part.description ? `
+                <div class="text-muted small mb-2" style="font-size: 0.85rem;">
+                    ${part.description.substring(0, 80)}${part.description.length > 80 ? '...' : ''}
                 </div>
-            `;
-        });
-    }
+            ` : ''}
+            
+            <div class="part-footer">
+                <div>
+                    ${part.brand ? `
+                        <span class="badge bg-light text-dark me-2">${part.brand}</span>
+                    ` : ''}
+                    <span class="badge ${part.availability === 'В наличии' ? 'bg-success' : 
+                                      part.availability === 'Мало' ? 'bg-warning' : 'bg-danger'}">
+                        ${part.availability}
+                    </span>
+                </div>
+                <div class="btn-group">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewPartDetails(${part.id})">
+                        <i class="bi bi-eye"></i>
+                    </button>
+                    <button class="btn btn-sm btn-success" onclick="addToCart(${part.id})">
+                        <i class="bi bi-cart-plus"></i>
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+}
+
+function createDocumentCardHTML(doc, index) {
+    const icon = doc.icon || 'bi-file-earmark';
+    const fileType = doc.file_type || 'документ';
+    const pages = doc.total_pages ? `(${doc.total_pages} стр.)` : '';
     
-    container.innerHTML = html;
+    return `
+        <a href="/documents/${doc.id}" target="_blank" class="document-item fade-in-up" 
+           style="animation-delay: ${index * 0.1}s">
+            <div class="document-icon">
+                <i class="bi ${icon}"></i>
+            </div>
+            <div class="document-info">
+                <div class="document-title">${doc.title}</div>
+                <div class="document-meta">
+                    <span><i class="bi bi-file-earmark"></i> ${fileType} ${pages}</span>
+                </div>
+            </div>
+            <div>
+                <i class="bi bi-arrow-right"></i>
+            </div>
+        </a>
+    `;
+}
+
+function formatAIResponse(text) {
+    return text
+        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+        .replace(/🤖/g, '<i class="bi bi-robot text-primary"></i>')
+        .replace(/🔍/g, '<i class="bi bi-search text-info"></i>')
+        .replace(/🎯/g, '<i class="bi bi-bullseye text-danger"></i>')
+        .replace(/🛒/g, '<i class="bi bi-cart text-success"></i>')
+        .replace(/📄/g, '<i class="bi bi-file-earmark-text text-info"></i>')
+        .replace(/🔧/g, '<i class="bi bi-tools text-primary"></i>')
+        .replace(/⚠️/g, '<i class="bi bi-exclamation-triangle text-warning"></i>')
+        .replace(/⏱️/g, '<i class="bi bi-clock text-secondary"></i>')
+        .replace(/💰/g, '<i class="bi bi-currency-ruble text-success"></i>')
+        .replace(/✅/g, '<i class="bi bi-check-circle text-success"></i>')
+        .replace(/🔗/g, '<i class="bi bi-link text-info"></i>')
+        .replace(/💡/g, '<i class="bi bi-lightbulb text-warning"></i>')
+        .replace(/\n/g, '<br>');
 }
 
 // Вспомогательные функции
 function viewRuleDetails(ruleId) {
     window.open(`/diagnostic/rules/${ruleId}/with-parts`, '_blank');
+}
+
+function viewSymptomDetails(symptomId) {
+    window.open(`/admin/diagnostic/symptoms/${symptomId}`, '_blank');
 }
 
 function orderConsultation(ruleId) {
@@ -895,13 +989,23 @@ function addToCart(partId) {
     showToast('Запчасть добавлена в корзину', 'success');
 }
 
-function openDocument(docId) {
-    window.open(`/documents/${docId}`, '_blank');
-}
-
 function showToast(message, type = 'info') {
-    // Используем существующий механизм нотаций или создаем простой
-    alert(message); // Временная реализация
+    // Используйте существующую систему нотаций или Bootstrap Toast
+    const toast = new bootstrap.Toast(document.getElementById('liveToast'));
+    const toastBody = document.querySelector('.toast-body');
+    if (toastBody) {
+        toastBody.textContent = message;
+        document.querySelector('.toast').className = `toast align-items-center text-bg-${type}`;
+        toast.show();
+    }
 }
 </script>
+
+<!-- Добавьте в layout если нет -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3">
+    <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
+        <div class="toast-body"></div>
+        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+    </div>
+</div>
 @endpush

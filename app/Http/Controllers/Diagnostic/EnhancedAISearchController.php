@@ -14,6 +14,7 @@ use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
+use Illuminate\Support\Str;
 
 class EnhancedAISearchController extends Controller
 {
@@ -31,32 +32,12 @@ class EnhancedAISearchController extends Controller
             ->get()
             ->groupBy('brand_id');
         
-        // Получаем статистику с проверкой существования таблиц
         $stats = [
             'symptoms_count' => Symptom::where('is_active', true)->count(),
             'rules_count' => Rule::where('is_active', true)->count(),
             'brands_count' => Brand::count(),
             'models_count' => CarModel::count(),
         ];
-        
-        // Добавляем статистику по документам если таблица существует
-        if (Schema::hasTable('documents')) {
-            $stats['documents_count'] = Document::where('status', 'active')->count();
-        } else {
-            $stats['documents_count'] = 0;
-        }
-        
-        // Добавляем статистику по запчастям если таблица существует
-        if (Schema::hasTable('price_items')) {
-            // Проверяем существование колонки quantity
-            if (Schema::hasColumn('price_items', 'quantity')) {
-                $stats['price_items_count'] = PriceItem::where('quantity', '>', 0)->count();
-            } else {
-                $stats['price_items_count'] = PriceItem::count();
-            }
-        } else {
-            $stats['price_items_count'] = 0;
-        }
         
         return view('diagnostic.ai-search.enhanced', compact('brands', 'models', 'stats'));
     }
@@ -71,9 +52,6 @@ class EnhancedAISearchController extends Controller
             'brand_id' => 'nullable|integer',
             'model_id' => 'nullable|integer',
             'search_type' => 'nullable|in:basic,advanced,full',
-            'show_parts' => 'nullable|boolean',
-            'show_docs' => 'nullable|boolean',
-            'max_results' => 'nullable|integer|min:1|max:50',
         ]);
 
         if ($validator->fails()) {
@@ -85,13 +63,12 @@ class EnhancedAISearchController extends Controller
         }
 
         $startTime = microtime(true);
-        $query = trim($request->input('query'));
+        
+        // Очищаем и нормализуем UTF-8 строку
+        $query = $this->cleanUtf8String(trim($request->input('query')));
         $brandId = $request->input('brand_id');
         $modelId = $request->input('model_id');
-        $searchType = $request->input('search_type', 'basic');
-        $showParts = $request->boolean('show_parts', true);
-        $showDocs = $request->boolean('show_docs', true);
-        $maxResults = $request->input('max_results', 15);
+        $searchType = $request->input('search_type', 'advanced');
 
         Log::info('Enhanced AI Search', [
             'query' => $query,
@@ -101,42 +78,63 @@ class EnhancedAISearchController extends Controller
         ]);
 
         try {
-            // 1. Поиск симптомов и правил
-            $searchResults = $this->searchSymptomsAndRules($query, $brandId, $modelId, $searchType);
+            // 1. Приоритетный поиск симптомов
+            $exactSymptoms = $this->searchExactSymptoms($query, $brandId, $modelId);
             
-            // 2. Поиск запчастей если нужно и если таблица существует
-            $partsResults = [];
-            if ($showParts && Schema::hasTable('price_items')) {
-                $partsResults = $this->searchMatchingParts($searchResults, $brandId);
+            // 2. Поиск по ключевым словам если точных нет
+            if (empty($exactSymptoms)) {
+                $keywordSymptoms = $this->searchByKeywords($query, $brandId, $modelId);
+            } else {
+                $keywordSymptoms = [];
             }
             
-            // 3. Поиск документов если нужно и если таблица существует
-            $docsResults = [];
-            if ($showDocs && Schema::hasTable('documents')) {
-                $docsResults = $this->searchRelatedDocuments($searchResults, $brandId, $modelId);
+            // 3. Объединяем результаты
+            $allSymptoms = array_merge($exactSymptoms, $keywordSymptoms);
+            
+            if (empty($allSymptoms)) {
+                // Если ничего не найдено, ищем похожие
+                $allSymptoms = $this->searchSimilarSymptoms($query, $brandId, $modelId);
             }
             
-            // 4. Генерируем интегрированный AI ответ
-            $aiResponse = $this->generateIntegratedAIResponse($query, $searchResults, $partsResults, $docsResults, $brandId, $modelId);
+            // 4. Группируем симптомы с правилами
+            $groupedResults = $this->groupSymptomsWithRules($allSymptoms);
+            
+            // 5. Ищем документы только если есть симптомы
+            $documents = [];
+            $parts = [];
+            
+            if (!empty($groupedResults)) {
+                $topSymptoms = array_slice($groupedResults, 0, 3);
+                $documents = $this->searchDocumentsForSymptoms($topSymptoms, $brandId, $modelId);
+                $parts = $this->searchPartsForSymptoms($topSymptoms, $brandId);
+            }
+            
+            // 6. Генерируем AI ответ
+            $aiResponse = $this->generateStructuredAIResponse($query, $groupedResults, $parts, $documents, $brandId, $modelId);
             
             $executionTime = round((microtime(true) - $startTime) * 1000, 2);
+
+            // Очищаем данные перед отправкой JSON
+            $cleanedResults = $this->cleanDataForJson($groupedResults);
+            $cleanedParts = $this->cleanDataForJson($parts);
+            $cleanedDocuments = $this->cleanDataForJson($documents);
+            $cleanedAiResponse = $this->cleanUtf8String($aiResponse);
 
             return response()->json([
                 'success' => true,
                 'query' => $query,
-                'results' => $searchResults,
-                'parts' => $partsResults,
-                'documents' => $docsResults,
-                'ai_response' => $aiResponse,
+                'results' => $cleanedResults,
+                'parts' => $cleanedParts,
+                'documents' => $cleanedDocuments,
+                'ai_response' => $cleanedAiResponse,
                 'search_type' => $searchType,
                 'execution_time' => $executionTime,
                 'stats' => [
-                    'symptoms_found' => count($searchResults),
-                    'parts_found' => count($partsResults),
-                    'documents_found' => count($docsResults),
-                    'total_results' => count($searchResults) + count($partsResults) + count($docsResults),
+                    'symptoms_found' => count($cleanedResults),
+                    'parts_found' => count($cleanedParts),
+                    'documents_found' => count($cleanedDocuments),
                 ]
-            ]);
+            ], 200, [], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
 
         } catch (\Exception $e) {
             Log::error('Enhanced AI Search Error: ' . $e->getMessage(), [
@@ -147,25 +145,65 @@ class EnhancedAISearchController extends Controller
                 'success' => false,
                 'message' => 'Ошибка при выполнении поиска: ' . $e->getMessage(),
                 'query' => $query
-            ], 500);
+            ], 500, [], JSON_UNESCAPED_UNICODE);
         }
     }
 
     /**
-     * Поиск симптомов и правил с учетом бренда
+     * Очистка строки UTF-8
      */
-    private function searchSymptomsAndRules($query, $brandId = null, $modelId = null, $searchType = 'basic')
+    private function cleanUtf8String($string)
     {
-        $keywords = $this->extractKeywords($query);
-        
-        if (empty($keywords)) {
-            return [];
+        if (!mb_check_encoding($string, 'UTF-8')) {
+            $string = mb_convert_encoding($string, 'UTF-8', 'UTF-8');
         }
+        
+        // Удаляем невалидные UTF-8 символы
+        $string = preg_replace('/[^\x{0009}\x{000a}\x{000d}\x{0020}-\x{D7FF}\x{E000}-\x{FFFD}]+/u', ' ', $string);
+        
+        // Удаляем BOM
+        $string = preg_replace('/^\x{EF}\x{BB}\x{BF}/', '', $string);
+        
+        // Нормализуем пробелы
+        $string = trim(preg_replace('/\s+/', ' ', $string));
+        
+        return $string;
+    }
 
+    /**
+     * Очистка данных для JSON
+     */
+    private function cleanDataForJson($data)
+    {
+        if (is_array($data)) {
+            foreach ($data as $key => $value) {
+                if (is_array($value) || is_object($value)) {
+                    $data[$key] = $this->cleanDataForJson($value);
+                } elseif (is_string($value)) {
+                    $data[$key] = $this->cleanUtf8String($value);
+                }
+            }
+        } elseif (is_string($data)) {
+            $data = $this->cleanUtf8String($data);
+        }
+        
+        return $data;
+    }
+
+    /**
+     * Поиск точных совпадений симптомов
+     */
+    private function searchExactSymptoms($query, $brandId = null, $modelId = null)
+    {
+        // Нормализуем запрос для поиска
+        $searchQuery = $this->normalizeSearchQuery($query);
+        
         $symptomsQuery = Symptom::where('is_active', true)
             ->with(['rules' => function($q) use ($brandId, $modelId) {
                 $q->where('is_active', true)
-                  ->with(['brand', 'model']);
+                  ->with(['brand', 'model'])
+                  ->orderBy('brand_id')
+                  ->orderBy('model_id');
                 
                 if ($brandId) {
                     $q->where('brand_id', $brandId);
@@ -175,336 +213,276 @@ class EnhancedAISearchController extends Controller
                     $q->where('model_id', $modelId);
                 }
             }]);
-
-        if ($searchType === 'advanced' || $searchType === 'full') {
-            // Расширенный поиск с учетом всех полей
-            $symptomsQuery->where(function($q) use ($keywords) {
-                foreach ($keywords as $keyword) {
-                    if (strlen($keyword) > 2) {
-                        $q->orWhere('name', 'like', "%{$keyword}%")
-                          ->orWhere('description', 'like', "%{$keyword}%")
-                          ->orWhere('related_systems', 'like', "%{$keyword}%");
-                    }
-                }
-            });
-        } else {
-            // Базовый поиск
-            $symptomsQuery->where(function($q) use ($keywords) {
-                foreach ($keywords as $keyword) {
-                    if (strlen($keyword) > 2) {
-                        $q->orWhere('name', 'like', "%{$keyword}%")
-                          ->orWhere('description', 'like', "%{$keyword}%");
-                    }
-                }
-            });
+        
+        // Разбиваем запрос на слова для поиска
+        $words = $this->extractSearchWords($searchQuery);
+        
+        if (empty($words)) {
+            return [];
         }
-
+        
+        $symptomsQuery->where(function($q) use ($words) {
+            foreach ($words as $word) {
+                if (mb_strlen($word) > 2) {
+                    $q->orWhere('name', 'like', "%{$word}%");
+                }
+            }
+        });
+        
         $symptoms = $symptomsQuery->get();
         
-        // Формируем результаты с релевантностью
-        $results = [];
-        
+        // Рассчитываем точность совпадения
+        $scoredSymptoms = [];
         foreach ($symptoms as $symptom) {
-            $relevanceScore = $this->calculateRelevance($symptom, $keywords);
+            $score = $this->calculateExactMatchScore($symptom->name, $searchQuery);
+            if ($score > 0.3) {
+                $scoredSymptoms[] = [
+                    'symptom' => $symptom,
+                    'score' => $score,
+                    'match_type' => 'exact'
+                ];
+            }
+        }
+        
+        // Сортируем по убыванию точности
+        usort($scoredSymptoms, function($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        
+        return array_slice($scoredSymptoms, 0, 5);
+    }
+
+    /**
+     * Поиск по ключевым словам
+     */
+    private function searchByKeywords($query, $brandId = null, $modelId = null)
+    {
+        $keywords = $this->extractRelevantKeywords($query);
+        
+        if (empty($keywords)) {
+            return [];
+        }
+        
+        $symptomsQuery = Symptom::where('is_active', true)
+            ->with(['rules' => function($q) use ($brandId, $modelId) {
+                $q->where('is_active', true)
+                  ->with(['brand', 'model'])
+                  ->orderBy('brand_id')
+                  ->orderBy('model_id');
+                
+                if ($brandId) {
+                    $q->where('brand_id', $brandId);
+                }
+                
+                if ($modelId) {
+                    $q->where('model_id', $modelId);
+                }
+            }]);
+        
+        $symptomsQuery->where(function($q) use ($keywords) {
+            foreach ($keywords as $keyword) {
+                if (mb_strlen($keyword) > 2) {
+                    $q->orWhere('name', 'like', "%{$keyword}%")
+                      ->orWhere('description', 'like', "%{$keyword}%");
+                }
+            }
+        });
+        
+        $symptoms = $symptomsQuery->get();
+        
+        $scoredSymptoms = [];
+        foreach ($symptoms as $symptom) {
+            $score = $this->calculateKeywordScore($symptom, $keywords);
+            if ($score > 0.2) {
+                $scoredSymptoms[] = [
+                    'symptom' => $symptom,
+                    'score' => $score,
+                    'match_type' => 'keyword'
+                ];
+            }
+        }
+        
+        usort($scoredSymptoms, function($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        
+        return array_slice($scoredSymptoms, 0, 5);
+    }
+
+    /**
+     * Поиск похожих симптомов
+     */
+    private function searchSimilarSymptoms($query, $brandId = null, $modelId = null)
+    {
+        $keywords = $this->extractRelevantKeywords($query);
+        
+        if (empty($keywords)) {
+            return [];
+        }
+        
+        $symptomsQuery = Symptom::where('is_active', true)
+            ->with(['rules' => function($q) use ($brandId, $modelId) {
+                $q->where('is_active', true)
+                  ->with(['brand', 'model'])
+                  ->orderBy('brand_id')
+                  ->orderBy('model_id');
+                
+                if ($brandId) {
+                    $q->where('brand_id', $brandId);
+                }
+                
+                if ($modelId) {
+                    $q->where('model_id', $modelId);
+                }
+            }])
+            ->where('frequency', '>', 0)
+            ->orderBy('frequency', 'desc');
+        
+        $symptoms = $symptomsQuery->limit(10)->get();
+        
+        return $symptoms->map(function($symptom) use ($keywords) {
+            $score = $this->calculateKeywordScore($symptom, $keywords) * 0.5; // Понижаем вес
+            return [
+                'symptom' => $symptom,
+                'score' => max(0.1, $score),
+                'match_type' => 'similar'
+            ];
+        })->toArray();
+    }
+
+    /**
+     * Группировка симптомов с правилами
+     */
+    private function groupSymptomsWithRules($symptoms)
+    {
+        $groupedResults = [];
+        
+        foreach ($symptoms as $item) {
+            $symptom = $item['symptom'];
+            $score = $item['score'];
+            $matchType = $item['match_type'];
             
-            if ($symptom->rules->isNotEmpty()) {
+            if ($symptom->rules->isEmpty()) {
+                // Симптом без правил
+                $groupedResults[] = [
+                    'type' => 'symptom',
+                    'id' => $symptom->id,
+                    'title' => $this->cleanUtf8String($symptom->name),
+                    'description' => $this->cleanUtf8String($symptom->description ?? ''),
+                    'relevance_score' => $score,
+                    'match_type' => $matchType,
+                    'has_rules' => false,
+                    'related_systems' => $symptom->related_systems,
+                    'frequency' => $symptom->frequency ?? 0,
+                ];
+            } else {
+                // Группируем правила по симптомам
                 foreach ($symptom->rules as $rule) {
-                    $results[] = [
+                    $groupedResults[] = [
                         'type' => 'rule',
                         'id' => $rule->id,
                         'symptom_id' => $symptom->id,
-                        'title' => $symptom->name,
-                        'description' => $symptom->description,
-                        'brand' => $rule->brand->name ?? null,
+                        'title' => $this->cleanUtf8String($symptom->name),
+                        'description' => $this->cleanUtf8String($symptom->description ?? ''),
+                        'brand' => $this->cleanUtf8String($rule->brand->name ?? ''),
                         'brand_id' => $rule->brand_id,
-                        'model' => $rule->model->name ?? null,
+                        'model' => $this->cleanUtf8String($rule->model->name ?? ''),
                         'model_id' => $rule->model_id,
-                        'diagnostic_steps' => $rule->diagnostic_steps ?? [],
-                        'possible_causes' => $rule->possible_causes ?? [],
-                        'required_data' => $rule->required_data ?? [],
+                        'diagnostic_steps' => $this->cleanArrayForJson($rule->diagnostic_steps ?? []),
+                        'possible_causes' => $this->cleanArrayForJson($rule->possible_causes ?? []),
+                        'required_data' => $this->cleanArrayForJson($rule->required_data ?? []),
                         'complexity_level' => $rule->complexity_level ?? 1,
                         'estimated_time' => $rule->estimated_time ?? 60,
                         'consultation_price' => $rule->base_consultation_price ?? 3000,
-                        'relevance_score' => $relevanceScore,
-                        'matched_keywords' => $keywords,
+                        'relevance_score' => $score,
+                        'match_type' => $matchType,
+                        'has_rules' => true,
+                        'related_systems' => $symptom->related_systems,
+                        'frequency' => $symptom->frequency ?? 0,
                     ];
                 }
-            } else {
-                $results[] = [
-                    'type' => 'symptom',
-                    'id' => $symptom->id,
-                    'title' => $symptom->name,
-                    'description' => $symptom->description,
-                    'relevance_score' => $relevanceScore,
-                    'has_rules' => false,
-                    'matched_keywords' => $keywords,
-                ];
             }
         }
         
         // Сортируем по релевантности
-        usort($results, function($a, $b) {
-            return $b['relevance_score'] <=> $a['relevance_score'];
+        usort($groupedResults, function($a, $b) {
+            if ($a['relevance_score'] != $b['relevance_score']) {
+                return $b['relevance_score'] <=> $a['relevance_score'];
+            }
+            
+            if ($a['has_rules'] != $b['has_rules']) {
+                return $b['has_rules'] <=> $a['has_rules'];
+            }
+            
+            return $b['frequency'] <=> $a['frequency'];
         });
         
-        return array_slice($results, 0, 10);
+        return array_slice($groupedResults, 0, 10);
     }
 
     /**
-     * Улучшенный поиск соответствующих запчастей
+     * Поиск документов для симптомов
      */
-    private function searchMatchingParts($symptoms, $brandId = null)
-    {
-        if (empty($symptoms)) {
-            return [];
-        }
-        
-        $searchTerms = [];
-        
-        // Собираем ключевые слова из симптомов и возможных причин
-        foreach ($symptoms as $symptom) {
-            // Добавляем название симптома (только ключевые слова)
-            $titleWords = $this->extractKeywords($symptom['title']);
-            $searchTerms = array_merge($searchTerms, $titleWords);
-            
-            // Добавляем возможные причины из правил
-            if (!empty($symptom['possible_causes']) && is_array($symptom['possible_causes'])) {
-                foreach ($symptom['possible_causes'] as $cause) {
-                    $causeWords = $this->extractKeywords($cause);
-                    $searchTerms = array_merge($searchTerms, $causeWords);
-                }
-            }
-        }
-        
-        // Фильтруем и уникализируем
-        $searchTerms = array_filter(array_unique($searchTerms), function($term) {
-            return strlen($term) > 2 && !$this->isStopWord($term);
-        });
-        
-        if (empty($searchTerms)) {
-            return [];
-        }
-        
-        // Получаем доступные колонки таблицы price_items
-        $tableColumns = Schema::getColumnListing('price_items');
-        $selectColumns = ['id', 'sku', 'name', 'description', 'price'];
-        
-        // Добавляем только существующие колонки
-        $availableColumns = [
-            'quantity', 'catalog_brand', 'brand_id', 'category',
-            'image_url', 'unit', 'min_order_qty'
-        ];
-        
-        foreach ($availableColumns as $column) {
-            if (in_array($column, $tableColumns)) {
-                $selectColumns[] = $column;
-            }
-        }
-        
-        $partsQuery = PriceItem::query()
-            ->select($selectColumns);
-        
-        // Условия наличия
-        if (in_array('quantity', $tableColumns)) {
-            $partsQuery->where('quantity', '>', 0);
-        }
-        
-        if (in_array('price', $tableColumns)) {
-            $partsQuery->where('price', '>', 0);
-        }
-        
-        // Фильтр по бренду автомобиля если указан
-        if ($brandId && in_array('catalog_brand', $tableColumns)) {
-            $brand = Brand::find($brandId);
-            if ($brand) {
-                $partsQuery->where(function($q) use ($brand, $tableColumns) {
-                    if (in_array('catalog_brand', $tableColumns)) {
-                        $q->orWhere('catalog_brand', 'like', "%{$brand->name}%");
-                    }
-                    if (in_array('brand_id', $tableColumns)) {
-                        $q->orWhere('brand_id', $brandId);
-                    }
-                });
-            }
-        }
-        
-        // Поиск по ключевым словам
-        $partsQuery->where(function($q) use ($searchTerms, $tableColumns) {
-            foreach ($searchTerms as $term) {
-                $term = trim($term);
-                if (strlen($term) > 2) {
-                    if (in_array('name', $tableColumns)) {
-                        $q->orWhere('name', 'like', "%{$term}%");
-                    }
-                    if (in_array('description', $tableColumns)) {
-                        $q->orWhere('description', 'like', "%{$term}%");
-                    }
-                    if (in_array('sku', $tableColumns)) {
-                        $q->orWhere('sku', 'like', "%{$term}%");
-                    }
-                    if (in_array('catalog_brand', $tableColumns)) {
-                        $q->orWhere('catalog_brand', 'like', "%{$term}%");
-                    }
-                }
-            }
-        });
-        
-        try {
-            $parts = $partsQuery->limit(20)->get();
-            
-            return $parts->map(function($item) use ($tableColumns) {
-                $partData = [
-                    'id' => $item->id,
-                    'sku' => $item->sku ?? '',
-                    'name' => $item->name ?? '',
-                    'description' => $item->description ?? '',
-                    'price' => $item->price ?? 0,
-                    'formatted_price' => number_format($item->price ?? 0, 2, '.', ' '),
-                ];
-                
-                // Добавляем только существующие поля
-                if (in_array('quantity', $tableColumns)) {
-                    $quantity = $item->quantity ?? 0;
-                    $partData['quantity'] = $quantity;
-                    $partData['availability'] = $quantity > 10 ? 'В наличии' : 
-                                               ($quantity > 0 ? 'Мало' : 'Нет в наличии');
-                }
-                
-                if (in_array('catalog_brand', $tableColumns) && !empty($item->catalog_brand)) {
-                    $partData['brand'] = $item->catalog_brand;
-                }
-                
-                if (in_array('category', $tableColumns) && !empty($item->category)) {
-                    $partData['category'] = $item->category;
-                }
-                
-                if (in_array('image_url', $tableColumns) && !empty($item->image_url)) {
-                    $partData['image_url'] = $item->image_url;
-                }
-                
-                return $partData;
-            })->toArray();
-            
-        } catch (\Exception $e) {
-            Log::error('Error searching parts: ' . $e->getMessage());
-            return [];
-        }
-    }
-
-    /**
-     * Поиск связанных документов
-     */
-    private function searchRelatedDocuments($symptoms, $brandId = null, $modelId = null)
+    private function searchDocumentsForSymptoms($symptoms, $brandId = null, $modelId = null)
     {
         if (empty($symptoms) || !Schema::hasTable('documents')) {
             return [];
         }
         
         $searchTerms = [];
-        
         foreach ($symptoms as $symptom) {
-            $titleWords = $this->extractKeywords($symptom['title']);
-            $searchTerms = array_merge($searchTerms, $titleWords);
+            if (!empty($symptom['title'])) {
+                $keywords = $this->extractRelevantKeywords($symptom['title']);
+                $searchTerms = array_merge($searchTerms, $keywords);
+            }
         }
         
-        $searchTerms = array_filter(array_unique($searchTerms), function($term) {
-            return strlen($term) > 2;
-        });
+        $searchTerms = array_unique(array_filter($searchTerms, function($term) {
+            return mb_strlen($term) > 2;
+        }));
         
         if (empty($searchTerms)) {
             return [];
         }
         
-        // Получаем доступные колонки таблицы documents
-        $tableColumns = Schema::getColumnListing('documents');
-        $selectColumns = ['id', 'title'];
-        
-        // Добавляем только существующие колонки
-        $availableColumns = [
-            'content_text', 'total_pages', 'file_type', 'file_path', 'source_url',
-            'detected_section', 'detected_system', 'detected_component',
-            'search_count', 'view_count'
-        ];
-        
-        foreach ($availableColumns as $column) {
-            if (in_array($column, $tableColumns)) {
-                $selectColumns[] = $column;
-            }
-        }
-        
-        $docsQuery = Document::query()
-            ->select($selectColumns);
-        
-        if (in_array('status', $tableColumns)) {
-            $docsQuery->where('status', 'active');
-        }
-        
-        if (in_array('is_parsed', $tableColumns)) {
-            $docsQuery->where('is_parsed', true);
-        }
-        
-        // Фильтр по модели автомобиля если указана
-        if ($modelId && in_array('car_model_id', $tableColumns)) {
-            $docsQuery->where('car_model_id', $modelId);
-        } elseif ($brandId && in_array('car_model_id', $tableColumns)) {
-            // Или фильтр по бренду через модель
-            $docsQuery->whereHas('carModel', function($q) use ($brandId) {
-                $q->where('brand_id', $brandId);
-            });
-        }
-        
-        // Поиск по ключевым словам
-        $docsQuery->where(function($q) use ($searchTerms, $tableColumns) {
-            foreach ($searchTerms as $term) {
-                $term = trim($term);
-                if (strlen($term) > 2) {
-                    if (in_array('title', $tableColumns)) {
-                        $q->orWhere('title', 'like', "%{$term}%");
-                    }
-                    if (in_array('content_text', $tableColumns)) {
-                        $q->orWhere('content_text', 'like', "%{$term}%");
-                    }
-                    if (in_array('keywords_text', $tableColumns)) {
-                        $q->orWhere('keywords_text', 'like', "%{$term}%");
-                    }
-                }
-            }
-        });
-        
         try {
-            $documents = $docsQuery->limit(10)->get();
+            $docsQuery = Document::query()
+                ->where('status', 'active');
             
-            return $documents->map(function($doc) use ($tableColumns) {
-                $docData = [
+            if ($modelId) {
+                $docsQuery->where('car_model_id', $modelId);
+            } elseif ($brandId) {
+                $docsQuery->whereHas('carModel', function($q) use ($brandId) {
+                    $q->where('brand_id', $brandId);
+                });
+            }
+            
+            $docsQuery->where(function($q) use ($searchTerms) {
+                foreach ($searchTerms as $term) {
+                    $q->orWhere('title', 'like', "%{$term}%")
+                      ->orWhere('content_text', 'like', "%{$term}%");
+                }
+            });
+            
+            $documents = $docsQuery->select([
+                    'id', 'title', 'content_text', 'total_pages', 
+                    'file_type', 'file_path', 'source_url'
+                ])
+                ->orderBy('view_count', 'desc')
+                ->limit(3)
+                ->get();
+            
+            return $documents->map(function($doc) {
+                return [
                     'id' => $doc->id,
-                    'title' => $doc->title ?? '',
-                    'icon' => $this->getFileIcon($doc->file_type ?? ''),
+                    'title' => $this->cleanUtf8String($doc->title ?? ''),
+                    'excerpt' => $this->truncateText($doc->content_text ?? '', 150),
+                    'file_type' => $doc->file_type ?? 'pdf',
+                    'total_pages' => $doc->total_pages ?? 0,
+                    'icon' => $this->getFileIcon($doc->file_type ?? 'pdf'),
                 ];
-                
-                // Добавляем только существующие поля
-                if (in_array('content_text', $tableColumns) && !empty($doc->content_text)) {
-                    $docData['excerpt'] = $this->truncateText($doc->content_text, 200);
-                }
-                
-                if (in_array('total_pages', $tableColumns)) {
-                    $docData['total_pages'] = $doc->total_pages;
-                }
-                
-                if (in_array('file_type', $tableColumns) && !empty($doc->file_type)) {
-                    $docData['file_type'] = $doc->file_type;
-                }
-                
-                if (in_array('file_path', $tableColumns) && !empty($doc->file_path)) {
-                    $docData['file_path'] = $doc->file_path;
-                }
-                
-                if (in_array('view_count', $tableColumns)) {
-                    $docData['views'] = $doc->view_count ?? 0;
-                }
-                
-                return $docData;
             })->toArray();
-            
+                
         } catch (\Exception $e) {
             Log::error('Error searching documents: ' . $e->getMessage());
             return [];
@@ -512,95 +490,187 @@ class EnhancedAISearchController extends Controller
     }
 
     /**
-     * Генерация интегрированного AI ответа
+     * Поиск запчастей для возможных причин
      */
-    private function generateIntegratedAIResponse($query, $symptoms, $parts, $docs, $brandId = null, $modelId = null)
+    private function searchPartsForSymptoms($symptoms, $brandId = null)
+    {
+        if (empty($symptoms) || !Schema::hasTable('price_items')) {
+            return [];
+        }
+        
+        $causes = [];
+        foreach ($symptoms as $symptom) {
+            if (!empty($symptom['possible_causes']) && is_array($symptom['possible_causes'])) {
+                $causes = array_merge($causes, $symptom['possible_causes']);
+            }
+        }
+        
+        if (empty($causes)) {
+            return [];
+        }
+        
+        $searchTerms = [];
+        foreach ($causes as $cause) {
+            $keywords = $this->extractRelevantKeywords($cause);
+            $searchTerms = array_merge($searchTerms, $keywords);
+        }
+        
+        $searchTerms = array_unique(array_filter($searchTerms, function($term) {
+            return mb_strlen($term) > 2 && !$this->isGenericTerm($term);
+        }));
+        
+        if (empty($searchTerms)) {
+            return [];
+        }
+        
+        try {
+            $partsQuery = PriceItem::query()
+                ->where('quantity', '>', 0)
+                ->where('price', '>', 0);
+            
+            if ($brandId) {
+                $brand = Brand::find($brandId);
+                if ($brand) {
+                    $partsQuery->where(function($q) use ($brand) {
+                        $q->orWhere('catalog_brand', 'like', "%{$brand->name}%")
+                          ->orWhere('brand_id', $brandId);
+                    });
+                }
+            }
+            
+            $limitedTerms = array_slice($searchTerms, 0, 3);
+            
+            $partsQuery->where(function($q) use ($limitedTerms) {
+                foreach ($limitedTerms as $term) {
+                    $q->orWhere('name', 'like', "%{$term}%")
+                      ->orWhere('description', 'like', "%{$term}%");
+                }
+            });
+            
+            $parts = $partsQuery->select([
+                    'id', 'sku', 'name', 'description', 'price', 
+                    'quantity', 'catalog_brand', 'brand_id'
+                ])
+                ->orderBy('quantity', 'desc')
+                ->limit(5)
+                ->get();
+            
+            return $parts->map(function($item) {
+                return [
+                    'id' => $item->id,
+                    'sku' => $item->sku ?? '',
+                    'name' => $this->cleanUtf8String($item->name ?? ''),
+                    'description' => $this->cleanUtf8String($item->description ?? ''),
+                    'price' => $item->price ?? 0,
+                    'formatted_price' => number_format($item->price ?? 0, 2, '.', ' '),
+                    'quantity' => $item->quantity ?? 0,
+                    'brand' => $this->cleanUtf8String($item->catalog_brand ?? ''),
+                    'availability' => ($item->quantity ?? 0) > 10 ? 'В наличии' : 
+                                     (($item->quantity ?? 0) > 0 ? 'Мало' : 'Нет в наличии'),
+                ];
+            })->toArray();
+                
+        } catch (\Exception $e) {
+            Log::error('Error searching parts: ' . $e->getMessage());
+            return [];
+        }
+    }
+
+    /**
+     * Генерация структурированного AI ответа
+     */
+    private function generateStructuredAIResponse($query, $symptoms, $parts, $docs, $brandId = null, $modelId = null)
     {
         $response = "🤖 **AI-анализ диагностической проблемы**\n\n";
         $response .= "🔍 **Запрос:** {$query}\n";
         
         if ($brandId) {
             $brand = Brand::find($brandId);
-            $response .= "🏷️ **Марка:** {$brand->name}\n";
-        }
-        
-        $response .= "\n📊 **Обнаружено:**\n";
-        $response .= "• 🔧 **Симптомы и правила:** " . count($symptoms) . "\n";
-        $response .= "• 🛒 **Запчасти:** " . count($parts) . "\n";
-        $response .= "• 📄 **Документы:** " . count($docs) . "\n";
-        
-        if (!empty($symptoms)) {
-            $response .= "\n🎯 **Топ симптомы и решения:**\n\n";
-            
-            foreach (array_slice($symptoms, 0, 3) as $index => $item) {
-                $response .= ($index + 1) . ". **{$item['title']}**\n";
-                
-                if (!empty($item['brand'])) {
-                    $response .= "   🚗 Для: {$item['brand']}";
-                    if (!empty($item['model'])) {
-                        $response .= " {$item['model']}";
-                    }
-                    $response .= "\n";
-                }
-                
-                if (!empty($item['possible_causes']) && count($item['possible_causes']) > 0) {
-                    $causes = implode(', ', array_slice($item['possible_causes'], 0, 2));
-                    $response .= "   ⚠️ Возможные причины: {$causes}\n";
-                }
-                
-                if (!empty($item['estimated_time'])) {
-                    $response .= "   ⏱️ Примерное время: {$item['estimated_time']} мин.\n";
-                }
-                
-                $response .= "   📈 Релевантность: " . round($item['relevance_score'] * 100) . "%\n\n";
+            if ($brand) {
+                $response .= "🏷️ **Марка:** {$brand->name}\n";
             }
         }
+        if ($modelId) {
+            $model = CarModel::find($modelId);
+            if ($model) {
+                $response .= "🚗 **Модель:** {$model->name}\n";
+            }
+        }
+        
+        $response .= "\n📊 **Результаты поиска:**\n";
+        
+        if (empty($symptoms)) {
+            $response .= "⚠️ **Совпадений не найдено.**\n";
+            $response .= "\n💡 **Рекомендации:**\n";
+            $response .= "• Проверьте правильность написания\n";
+            $response .= "• Используйте более простые формулировки\n";
+            $response .= "• Уточните детали проблемы\n";
+            $response .= "• Попробуйте поискать по отдельным словам\n";
+            
+            return $response;
+        }
+        
+        $exactMatches = array_filter($symptoms, function($item) {
+            return $item['match_type'] === 'exact' && $item['relevance_score'] > 0.7;
+        });
+        
+        if (!empty($exactMatches)) {
+            $response .= "✅ **Точные совпадения:** " . count($exactMatches) . "\n";
+        }
+        
+        $response .= "🔍 **Найдено симптомов:** " . count($symptoms) . "\n";
         
         if (!empty($parts)) {
-            $response .= "🛒 **Рекомендуемые запчасти:**\n\n";
-            
-            foreach (array_slice($parts, 0, 3) as $index => $part) {
-                $response .= ($index + 1) . ". **{$part['name']}**\n";
-                $response .= "   🔢 Артикул: {$part['sku']}\n";
-                $response .= "   💰 Цена: {$part['formatted_price']} ₽\n";
-                if (isset($part['availability'])) {
-                    $response .= "   📦 Наличие: {$part['availability']}";
-                    if (isset($part['quantity'])) {
-                        $response .= " ({$part['quantity']} шт.)";
-                    }
-                    $response .= "\n";
-                }
-                if (!empty($part['brand'])) {
-                    $response .= "   🏷️ Производитель: {$part['brand']}\n";
-                }
-                $response .= "\n";
-            }
+            $response .= "🛒 **Запчасти:** " . count($parts) . " наименований\n";
         }
         
         if (!empty($docs)) {
-            $response .= "📄 **Инструкции и документы:**\n\n";
-            
-            foreach (array_slice($docs, 0, 3) as $index => $doc) {
-                $response .= ($index + 1) . ". **{$doc['title']}**\n";
-                if (!empty($doc['file_type'])) {
-                    $response .= "   📂 Тип: {$doc['file_type']}";
-                    if (!empty($doc['total_pages'])) {
-                        $response .= " ({$doc['total_pages']} стр.)";
-                    }
-                    $response .= "\n";
-                }
-                if (isset($doc['views'])) {
-                    $response .= "   👀 Просмотров: {$doc['views']}\n";
-                }
-                $response .= "\n";
-            }
+            $response .= "📄 **Документы:** " . count($docs) . " инструкций\n";
         }
         
-        $response .= "💡 **Рекомендации по ремонту:**\n";
-        $response .= "1. Изучите шаги диагностики для вашего симптома\n";
-        $response .= "2. Проверьте рекомендуемые запчасти\n";
-        $response .= "3. Ознакомьтесь с инструкциями по замене\n";
-        $response .= "4. При необходимости закажите консультацию специалиста\n";
+        // Показываем топ-3 наиболее релевантных результата
+        $response .= "\n🎯 **Наиболее релевантные результаты:**\n\n";
+        
+        foreach (array_slice($symptoms, 0, 3) as $index => $item) {
+            $number = $index + 1;
+            $relevance = round($item['relevance_score'] * 100);
+            
+            $response .= "**{$number}. {$item['title']}** ";
+            
+            if ($item['type'] === 'rule' && !empty($item['brand'])) {
+                $response .= "({$item['brand']}";
+                if (!empty($item['model'])) {
+                    $response .= " {$item['model']}";
+                }
+                $response .= ")";
+            }
+            
+            $response .= " - {$relevance}%\n";
+            
+            if ($item['type'] === 'rule') {
+                if (!empty($item['possible_causes']) && count($item['possible_causes']) > 0) {
+                    $causes = implode(', ', array_slice($item['possible_causes'], 0, 2));
+                    $response .= "   ⚠️ **Возможные причины:** {$causes}\n";
+                }
+                
+                if (!empty($item['estimated_time'])) {
+                    $response .= "   ⏱️ **Время диагностики:** {$item['estimated_time']} мин.\n";
+                }
+            }
+            
+            $response .= "\n";
+        }
+        
+        $response .= "💡 **Следующие шаги:**\n";
+        $response .= "1. Изучите диагностические шаги\n";
+        $response .= "2. Проверьте возможные причины\n";
+        $response .= "3. Ознакомьтесь с инструкциями\n";
+        
+        if (!empty($parts)) {
+            $response .= "4. Закажите необходимые запчасти\n";
+        }
+        
+        $response .= "5. При необходимости - консультация специалиста\n";
         
         return $response;
     }
@@ -608,42 +678,86 @@ class EnhancedAISearchController extends Controller
     /**
      * Вспомогательные методы
      */
-    private function extractKeywords($query)
+    private function normalizeSearchQuery($query)
     {
-        $stopWords = ['и', 'или', 'но', 'на', 'в', 'с', 'по', 'у', 'о', 'об', 'за', 'из', 'к'];
-        $query = mb_strtolower(trim($query));
-        $words = preg_split('/[\s,\.\-\(\)\[\]:;!?]+/', $query);
+        $query = mb_strtolower($query, 'UTF-8');
+        $query = preg_replace('/[^\w\sа-яА-ЯёЁ\-]/u', ' ', $query);
+        $query = trim(preg_replace('/\s+/', ' ', $query));
+        
+        return $query;
+    }
+    
+    private function extractSearchWords($query)
+    {
+        $words = explode(' ', $query);
+        $words = array_filter($words, function($word) {
+            return mb_strlen($word) > 2;
+        });
+        
+        return array_values($words);
+    }
+    
+    private function extractRelevantKeywords($text)
+    {
+        $stopWords = [
+            'и', 'или', 'но', 'на', 'в', 'с', 'по', 'у', 'о', 'об', 'от', 'до', 'за',
+            'из', 'к', 'со', 'то', 'же', 'бы', 'ли', 'не', 'нет', 'да', 'как', 'что',
+            'это', 'так', 'вот', 'ну', 'нужно', 'очень', 'можно', 'надо'
+        ];
+        
+        $text = mb_strtolower($this->cleanUtf8String($text), 'UTF-8');
+        $words = preg_split('/[\s,\.\-\(\)\[\]:;!?]+/', $text);
         
         $keywords = array_filter($words, function($word) use ($stopWords) {
             $word = trim($word);
-            return strlen($word) > 2 && !in_array($word, $stopWords);
+            return mb_strlen($word) > 2 && !in_array($word, $stopWords);
         });
         
         return array_unique($keywords);
     }
     
-    private function isStopWord($word)
+    private function calculateExactMatchScore($symptomName, $query)
     {
-        $stopWords = [
-            'неисправность', 'повреждение', 'проблема', 'симптом',
-            'диагностика', 'ремонт', 'замена', 'проверка', 'завод',
-            'двигатель', 'автомобиль', 'машина'
-        ];
+        $symptomLower = mb_strtolower($this->cleanUtf8String($symptomName), 'UTF-8');
+        $queryLower = mb_strtolower($this->cleanUtf8String($query), 'UTF-8');
         
-        return in_array(mb_strtolower($word), $stopWords);
+        // Полное совпадение
+        if (strpos($symptomLower, $queryLower) !== false) {
+            return 1.0;
+        }
+        
+        // Совпадение всех слов
+        $symptomWords = $this->extractSearchWords($symptomLower);
+        $queryWords = $this->extractSearchWords($queryLower);
+        
+        if (empty($queryWords)) {
+            return 0;
+        }
+        
+        $matchedWords = 0;
+        foreach ($queryWords as $queryWord) {
+            foreach ($symptomWords as $symptomWord) {
+                if (strpos($symptomWord, $queryWord) !== false) {
+                    $matchedWords++;
+                    break;
+                }
+            }
+        }
+        
+        return $matchedWords / count($queryWords);
     }
-
-    private function calculateRelevance($symptom, $keywords)
+    
+    private function calculateKeywordScore($symptom, $keywords)
     {
-        $score = 0.0;
-        $name = mb_strtolower($symptom->name);
-        $description = mb_strtolower($symptom->description);
+        $score = 0;
+        $name = mb_strtolower($this->cleanUtf8String($symptom->name), 'UTF-8');
+        $description = mb_strtolower($this->cleanUtf8String($symptom->description ?? ''), 'UTF-8');
         
         foreach ($keywords as $keyword) {
-            $keyword = mb_strtolower($keyword);
+            $keyword = mb_strtolower($this->cleanUtf8String($keyword), 'UTF-8');
             
             if (strpos($name, $keyword) !== false) {
-                $score += 0.4;
+                $score += 0.5;
             }
             
             if (strpos($description, $keyword) !== false) {
@@ -651,25 +765,42 @@ class EnhancedAISearchController extends Controller
             }
         }
         
+        // Бонус за частоту симптома
+        if ($symptom->frequency > 0) {
+            $score += min(0.3, $symptom->frequency / 100);
+        }
+        
         return min(1.0, $score);
     }
-
+    
+    private function isGenericTerm($term)
+    {
+        $genericTerms = [
+            'неисправность', 'повреждение', 'проблема', 'симптом',
+            'диагностика', 'ремонт', 'замена', 'проверка'
+        ];
+        
+        return in_array(mb_strtolower($this->cleanUtf8String($term), 'UTF-8'), $genericTerms);
+    }
+    
     private function truncateText($text, $length = 150)
     {
+        $text = $this->cleanUtf8String($text);
+        
         if (mb_strlen($text) <= $length) {
             return $text;
         }
         
-        $truncated = mb_substr($text, 0, $length);
-        $lastSpace = mb_strrpos($truncated, ' ');
+        $truncated = mb_substr($text, 0, $length, 'UTF-8');
+        $lastSpace = mb_strrpos($truncated, ' ', 0, 'UTF-8');
         
         if ($lastSpace !== false) {
-            $truncated = mb_substr($truncated, 0, $lastSpace);
+            $truncated = mb_substr($truncated, 0, $lastSpace, 'UTF-8');
         }
         
         return $truncated . '...';
     }
-
+    
     private function getFileIcon($fileType)
     {
         $icons = [
@@ -683,270 +814,27 @@ class EnhancedAISearchController extends Controller
             'txt' => 'bi-file-text',
         ];
         
-        return $icons[strtolower($fileType)] ?? 'bi-file-earmark';
+        $fileType = strtolower($fileType);
+        return $icons[$fileType] ?? 'bi-file-earmark';
     }
-
-    /**
-     * Получить детали правила с запчастями
-     */
-    public function showRuleWithParts($id)
+    
+    private function cleanArrayForJson($array)
     {
-        try {
-            $rule = Rule::with(['symptom', 'brand', 'model'])
-                ->findOrFail($id);
-
-            // Поиск запчастей с учетом бренда и возможных причин
-            $parts = $this->findPartsForRule($rule);
-            
-            // Поиск документов
-            $documents = $this->findDocumentsForRule($rule);
-            
-            // Генерируем инструкцию по ремонту
-            $repairGuide = $this->generateRepairGuide($rule, $parts, $documents);
-            
-            return view('diagnostic.ai-search.rule-details', [
-                'rule' => $rule,
-                'parts' => $parts,
-                'documents' => $documents,
-                'repair_guide' => $repairGuide,
-                'title' => 'Диагностика: ' . ($rule->symptom->name ?? 'Unknown')
-            ]);
-        } catch (\Exception $e) {
-            Log::error('Error showing rule with parts', ['rule_id' => $id, 'error' => $e->getMessage()]);
-            
-            return redirect()->back()->with('error', 'Ошибка загрузки деталей: ' . $e->getMessage());
-        }
-    }
-
-    /**
-     * Поиск запчастей для правила с учетом бренда
-     */
-    private function findPartsForRule(Rule $rule)
-    {
-        if (!Schema::hasTable('price_items')) {
-            return collect();
+        if (!is_array($array)) {
+            return [];
         }
         
-        $searchTerms = [];
-        
-        // Добавляем название симптома
-        if ($rule->symptom && $rule->symptom->name) {
-            $titleWords = $this->extractKeywords($rule->symptom->name);
-            $searchTerms = array_merge($searchTerms, $titleWords);
-        }
-        
-        // Добавляем возможные причины
-        if ($rule->possible_causes && is_array($rule->possible_causes)) {
-            foreach ($rule->possible_causes as $cause) {
-                $causeWords = $this->extractKeywords($cause);
-                $searchTerms = array_merge($searchTerms, $causeWords);
+        $cleaned = [];
+        foreach ($array as $item) {
+            if (is_string($item)) {
+                $cleaned[] = $this->cleanUtf8String($item);
+            } elseif (is_array($item)) {
+                $cleaned[] = $this->cleanArrayForJson($item);
+            } else {
+                $cleaned[] = $item;
             }
         }
         
-        $searchTerms = array_filter(array_unique($searchTerms), function($term) {
-            return strlen($term) > 2 && !$this->isStopWord($term);
-        });
-        
-        if (empty($searchTerms)) {
-            return collect();
-        }
-        
-        // Получаем доступные колонки
-        $tableColumns = Schema::getColumnListing('price_items');
-        $selectColumns = ['id', 'sku', 'name', 'description', 'price'];
-        
-        $availableColumns = [
-            'quantity', 'catalog_brand', 'brand_id', 'category',
-            'image_url', 'unit', 'min_order_qty'
-        ];
-        
-        foreach ($availableColumns as $column) {
-            if (in_array($column, $tableColumns)) {
-                $selectColumns[] = $column;
-            }
-        }
-        
-        $partsQuery = PriceItem::query()
-            ->select($selectColumns);
-        
-        if (in_array('quantity', $tableColumns)) {
-            $partsQuery->where('quantity', '>', 0);
-        }
-        
-        // Фильтр по бренду автомобиля
-        if ($rule->brand_id && in_array('catalog_brand', $tableColumns)) {
-            $brand = Brand::find($rule->brand_id);
-            if ($brand) {
-                $partsQuery->where(function($q) use ($brand, $tableColumns) {
-                    if (in_array('catalog_brand', $tableColumns)) {
-                        $q->orWhere('catalog_brand', 'like', "%{$brand->name}%");
-                    }
-                    if (in_array('brand_id', $tableColumns)) {
-                        $q->orWhere('brand_id', $brand->id);
-                    }
-                });
-            }
-        }
-        
-        // Поиск по ключевым словам
-        if (!empty($searchTerms)) {
-            $partsQuery->where(function($q) use ($searchTerms, $tableColumns) {
-                foreach ($searchTerms as $term) {
-                    $term = trim($term);
-                    if (strlen($term) > 2) {
-                        if (in_array('name', $tableColumns)) {
-                            $q->orWhere('name', 'like', "%{$term}%");
-                        }
-                        if (in_array('description', $tableColumns)) {
-                            $q->orWhere('description', 'like', "%{$term}%");
-                        }
-                        if (in_array('sku', $tableColumns)) {
-                            $q->orWhere('sku', 'like', "%{$term}%");
-                        }
-                    }
-                }
-            });
-        }
-        
-        try {
-            return $partsQuery->limit(15)->get();
-        } catch (\Exception $e) {
-            Log::error('Error finding parts for rule: ' . $e->getMessage());
-            return collect();
-        }
-    }
-
-    /**
-     * Поиск документов для правила
-     */
-    private function findDocumentsForRule(Rule $rule)
-    {
-        if (!Schema::hasTable('documents')) {
-            return collect();
-        }
-        
-        $searchTerms = [];
-        
-        if ($rule->symptom && $rule->symptom->name) {
-            $titleWords = $this->extractKeywords($rule->symptom->name);
-            $searchTerms = array_merge($searchTerms, $titleWords);
-        }
-        
-        $searchTerms = array_filter(array_unique($searchTerms), function($term) {
-            return strlen($term) > 2;
-        });
-        
-        if (empty($searchTerms)) {
-            return collect();
-        }
-        
-        $tableColumns = Schema::getColumnListing('documents');
-        $selectColumns = ['id', 'title'];
-        
-        $availableColumns = [
-            'content_text', 'total_pages', 'file_type', 'file_path', 'source_url',
-            'detected_section', 'detected_system', 'detected_component'
-        ];
-        
-        foreach ($availableColumns as $column) {
-            if (in_array($column, $tableColumns)) {
-                $selectColumns[] = $column;
-            }
-        }
-        
-        $docsQuery = Document::query()
-            ->select($selectColumns);
-        
-        if (in_array('status', $tableColumns)) {
-            $docsQuery->where('status', 'active');
-        }
-        
-        if (in_array('is_parsed', $tableColumns)) {
-            $docsQuery->where('is_parsed', true);
-        }
-        
-        // Фильтр по модели автомобиля
-        if ($rule->model_id && in_array('car_model_id', $tableColumns)) {
-            $docsQuery->where('car_model_id', $rule->model_id);
-        } elseif ($rule->brand_id && in_array('car_model_id', $tableColumns)) {
-            $docsQuery->whereHas('carModel', function($q) use ($rule) {
-                $q->where('brand_id', $rule->brand_id);
-            });
-        }
-        
-        // Поиск по ключевым словам
-        if (!empty($searchTerms)) {
-            $docsQuery->where(function($q) use ($searchTerms, $tableColumns) {
-                foreach ($searchTerms as $term) {
-                    $term = trim($term);
-                    if (strlen($term) > 2) {
-                        if (in_array('title', $tableColumns)) {
-                            $q->orWhere('title', 'like', "%{$term}%");
-                        }
-                        if (in_array('content_text', $tableColumns)) {
-                            $q->orWhere('content_text', 'like', "%{$term}%");
-                        }
-                    }
-                }
-            });
-        }
-        
-        try {
-            return $docsQuery->limit(5)->get();
-        } catch (\Exception $e) {
-            Log::error('Error finding documents for rule: ' . $e->getMessage());
-            return collect();
-        }
-    }
-
-    /**
-     * Генерация инструкции по ремонту
-     */
-    private function generateRepairGuide(Rule $rule, $parts, $documents)
-    {
-        $guide = [];
-        
-        $guide[] = [
-            'title' => 'Диагностика проблемы',
-            'steps' => $rule->diagnostic_steps ?? [],
-            'icon' => 'bi-search'
-        ];
-        
-        if ($rule->possible_causes && count($rule->possible_causes) > 0) {
-            $guide[] = [
-                'title' => 'Возможные причины',
-                'steps' => $rule->possible_causes,
-                'icon' => 'bi-exclamation-triangle'
-            ];
-        }
-        
-        if ($parts->count() > 0) {
-            $guide[] = [
-                'title' => 'Рекомендуемые запчасти',
-                'parts' => $parts,
-                'icon' => 'bi-tools'
-            ];
-        }
-        
-        if ($documents->count() > 0) {
-            $guide[] = [
-                'title' => 'Инструкции по ремонту',
-                'documents' => $documents,
-                'icon' => 'bi-file-earmark-text'
-            ];
-        }
-        
-        $guide[] = [
-            'title' => 'Проверка и завершение',
-            'steps' => [
-                'Проверить правильность установки всех деталей',
-                'Очистить коды ошибок (если есть сканер)',
-                'Протестировать работу системы',
-                'Убедиться в отсутствии посторонних шумов и запахов',
-            ],
-            'icon' => 'bi-check-circle'
-        ];
-        
-        return $guide;
+        return $cleaned;
     }
 }
