@@ -689,7 +689,6 @@ Route::prefix('diagnostic')->group(function () {
 
 // Обработка документов
 Route::prefix('admin')->middleware(['auth'])->group(function () {
-    // Обработка документов
     Route::prefix('documents/processing')->name('admin.documents.processing.')->group(function () {
         Route::get('/', [DocumentProcessingController::class, 'index'])->name('index');
         Route::get('/{id}/advanced', [DocumentProcessingController::class, 'advancedProcessing'])->name('advanced');
@@ -713,8 +712,17 @@ Route::prefix('admin')->middleware(['auth'])->group(function () {
         
         // Просмотр
         Route::get('/{id}/images', [DocumentProcessingController::class, 'viewImages'])->name('view-images');
+
+  // Просмотр страниц документа
+Route::get('/{id}/pages', [DocumentProcessingController::class, 'pagesList'])->name('pages.list');
+Route::get('/{id}/page/{pageId}', [DocumentProcessingController::class, 'showPage'])->name('page.show');
+Route::get('/{id}/page/{pageId}/raw', [DocumentProcessingController::class, 'showPageRaw'])->name('page.raw');
+
     });
+
+ 
 });
+
 
 
 
