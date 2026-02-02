@@ -519,7 +519,7 @@ class DocumentProcessingController extends Controller
                     'content_text' => null,
                     'content' => null,
                     'keywords' => null,
-                    'keywords_text' => null,
+                    //'keywords' => null,
                     'detected_section' => null,
                     'detected_system' => null,
                     'detected_component' => null,
