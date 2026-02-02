@@ -7,6 +7,7 @@ use App\Models\Document;
 use App\Models\DocumentPage;
 use App\Models\DocumentImage;
 use App\Services\SimpleImageExtractionService;
+use App\Services\ImageScreenshotService;
 use App\Services\ImageProcessingService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -17,10 +18,12 @@ use Exception;
 class DocumentProcessingController extends Controller
 {
     protected $imageProcessor;
+    protected $screenshotService;
     
     public function __construct()
     {
         $this->imageProcessor = new ImageProcessingService();
+        $this->screenshotService = new ImageScreenshotService();
     }
     
     /**
@@ -712,158 +715,194 @@ class DocumentProcessingController extends Controller
  * Улучшенное извлечение изображений с привязкой к страницам
  */
 private function extractImagesWithPages($documentId, $filePath)
-{
-    try {
-        // Создаем директории в public storage
-        $imagesDir = 'document_images/' . $documentId;
-        $thumbsDir = 'document_images/thumbs/' . $documentId;
-        $screenshotsDir = 'document_images/screenshots/' . $documentId;
-        
-        // Убедимся что директории существуют
-        if (!Storage::disk('public')->exists($imagesDir)) {
-            Storage::disk('public')->makeDirectory($imagesDir, 0755, true);
-        }
-        if (!Storage::disk('public')->exists($thumbsDir)) {
-            Storage::disk('public')->makeDirectory($thumbsDir, 0755, true);
-        }
-        if (!Storage::disk('public')->exists($screenshotsDir)) {
-            Storage::disk('public')->makeDirectory($screenshotsDir, 0755, true);
-        }
-        
-        // Используем сервис извлечения изображений
-        $imageService = new SimpleImageExtractionService();
-        $images = $imageService->extractAllImages($filePath, $imagesDir);
-        
-        Log::info("Extracted " . count($images) . " images for document {$documentId}");
-        
-        if (empty($images)) {
-            Log::warning("No images extracted from document {$documentId}");
-            return [
-                'success' => false,
-                'error' => 'Изображения не найдены в PDF документе'
-            ];
-        }
-        
-        // Получаем все страницы документа
-        $pages = DocumentPage::where('document_id', $documentId)
-            ->orderBy('page_number')
-            ->get();
-        
-        if ($pages->isEmpty()) {
-            // Если страниц нет, создаем хотя бы одну
-            DocumentPage::create([
-                'document_id' => $documentId,
-                'page_number' => 1,
-                'content' => 'Документ для изображений',
-                'content_text' => 'Документ для изображений',
-                'word_count' => 0,
-                'character_count' => 0,
-                'is_preview' => false,
-                'has_images' => false,
-                'parsing_quality' => 0.0,
-                'status' => 'parsed'
-            ]);
+    {
+        try {
+            // Создаем директории
+            $imagesDir = 'document_images/' . $documentId;
+            $thumbsDir = 'document_images/thumbs/' . $documentId;
+            $screenshotsDir = 'document_images/screenshots/' . $documentId;
             
-            $pages = DocumentPage::where('document_id', $documentId)->get();
-        }
-        
-        $pageMapping = [];
-        foreach ($pages as $page) {
-            $pageMapping[$page->page_number] = $page->id;
-        }
-        
-        $savedCount = 0;
-        $totalImages = count($images);
-        $totalPages = $pages->count();
-        
-        // Распределяем изображения по страницам
-        foreach ($images as $index => $imageData) {
-            try {
-                // Проверяем наличие данных изображения
-                if (!isset($imageData['path']) || empty($imageData['path'])) {
-                    Log::warning("Image data missing path at index {$index}");
-                    continue;
-                }
-                
-                // Проверяем существует ли файл
-                if (!Storage::disk('public')->exists($imageData['path'])) {
-                    Log::warning("Image file not found: {$imageData['path']}");
-                    continue;
-                }
-                
-                // Определяем номер страницы
-                $pageNumber = $this->calculatePageNumberForImage($index, $totalImages, $totalPages);
-                $pageId = $pageMapping[$pageNumber] ?? null;
-                
-                $filename = basename($imageData['path']);
-                
-                // Создаем превью
-                $thumbnailPath = $thumbsDir . '/thumb_' . $filename;
-                $this->createThumbnail($imageData['path'], $thumbnailPath, 300, 200);
-                
-                // Создаем скриншот
-                $screenshotPath = $screenshotsDir . '/screen_' . $filename;
-                $this->createScreenshot($imageData['path'], $screenshotPath, 800, 600);
-                
-                // Получаем размеры изображения
-                $imageInfo = $this->getImageInfo($imageData['path']);
-                
-                // Создаем запись изображения
-                $documentImage = DocumentImage::create([
+            Storage::disk('public')->makeDirectory($imagesDir, 0755, true);
+            Storage::disk('public')->makeDirectory($thumbsDir, 0755, true);
+            Storage::disk('public')->makeDirectory($screenshotsDir, 0755, true);
+            
+            // Используем сервис извлечения изображений
+            $imageService = new SimpleImageExtractionService();
+            $images = $imageService->extractAllImages($filePath, $imagesDir);
+            
+            Log::info("Extracted " . count($images) . " images for document {$documentId}");
+            
+            if (empty($images)) {
+                Log::warning("No images extracted from document {$documentId}");
+                return [
+                    'success' => false,
+                    'error' => 'Изображения не найдены в PDF документе'
+                ];
+            }
+            
+            // Получаем все страницы документа
+            $pages = DocumentPage::where('document_id', $documentId)
+                ->orderBy('page_number')
+                ->get();
+            
+            if ($pages->isEmpty()) {
+                // Если страниц нет, создаем хотя бы одну
+                DocumentPage::create([
                     'document_id' => $documentId,
-                    'page_id' => $pageId,
-                    'page_number' => $pageNumber,
-                    'filename' => $filename,
-                    'path' => $imageData['path'],
-                    'url' => Storage::url($imageData['path']),
-                    'thumbnail_path' => $thumbnailPath,
-                    'thumbnail_url' => Storage::url($thumbnailPath),
-                    'screenshot_path' => $screenshotPath,
-                    'screenshot_url' => Storage::url($screenshotPath),
-                    'width' => $imageInfo['width'] ?? ($imageData['width'] ?? null),
-                    'height' => $imageInfo['height'] ?? ($imageData['height'] ?? null),
-                    'original_width' => $imageData['width'] ?? null,
-                    'original_height' => $imageData['height'] ?? null,
-                    'size' => Storage::disk('public')->size($imageData['path']),
-                    'thumbnail_size' => Storage::disk('public')->exists($thumbnailPath) ? Storage::disk('public')->size($thumbnailPath) : 0,
-                    'mime_type' => $this->getMimeTypeFromPath($imageData['path']),
-                    'extension' => pathinfo($imageData['path'], PATHINFO_EXTENSION),
-                    'description' => $this->generateImageDescription($pageNumber, $index),
-                    'position' => $index,
-                    'is_preview' => ($index === 0),
-                    'status' => 'active'
+                    'page_number' => 1,
+                    'content' => 'Документ для изображений',
+                    'content_text' => 'Документ для изображений',
+                    'word_count' => 0,
+                    'character_count' => 0,
+                    'is_preview' => false,
+                    'has_images' => false,
+                    'parsing_quality' => 0.0,
+                    'status' => 'parsed'
                 ]);
                 
-                // Обновляем страницу
-                if ($pageId) {
-                    DocumentPage::where('id', $pageId)->update(['has_images' => true]);
-                }
-                
-                $savedCount++;
-                Log::info("Saved image {$savedCount}/{$totalImages}: {$filename}");
-                
-            } catch (\Exception $e) {
-                Log::error("Error saving image {$index}: " . $e->getMessage() . "\n" . $e->getTraceAsString());
-                continue;
+                $pages = DocumentPage::where('document_id', $documentId)->get();
             }
+            
+            $pageMapping = [];
+            foreach ($pages as $page) {
+                $pageMapping[$page->page_number] = $page->id;
+            }
+            
+            $savedCount = 0;
+            $totalImages = count($images);
+            $totalPages = $pages->count();
+            
+            // Распределяем изображения по страницам
+            foreach ($images as $index => $imageData) {
+                try {
+                    // Проверяем наличие данных изображения
+                    if (!isset($imageData['path']) || empty($imageData['path'])) {
+                        Log::warning("Image data missing path at index {$index}");
+                        continue;
+                    }
+                    
+                    // Проверяем существует ли файл
+                    if (!Storage::disk('public')->exists($imageData['path'])) {
+                        Log::warning("Image file not found: {$imageData['path']}");
+                        continue;
+                    }
+                    
+                    // Определяем номер страницы
+                    $pageNumber = $this->calculatePageNumberForImage($index, $totalImages, $totalPages);
+                    $pageId = $pageMapping[$pageNumber] ?? null;
+                    
+                    $filename = basename($imageData['path']);
+                    $baseName = pathinfo($filename, PATHINFO_FILENAME);
+                    $extension = pathinfo($filename, PATHINFO_EXTENSION);
+                    
+                    // 1. Создаем миниатюру (300×200)
+                    $thumbnailFilename = "thumb_{$baseName}.{$extension}";
+                    $thumbnailPath = $thumbsDir . '/' . $thumbnailFilename;
+                    
+                    $thumbnailCreated = $this->screenshotService->createThumbnail(
+                        $imageData['path'], 
+                        $thumbnailPath, 
+                        300, 
+                        200
+                    );
+                    
+                    // 2. Создаем скриншот с обрезкой белого (800×600)
+                    $screenshotFilename = "screen_{$baseName}.{$extension}";
+                    $screenshotPath = $screenshotsDir . '/' . $screenshotFilename;
+                    
+                    $screenshotCreated = $this->screenshotService->createScreenshot(
+                        $imageData['path'], 
+                        $screenshotPath, 
+                        800, 
+                        600
+                    );
+                    
+                    // 3. Анализируем изображение
+                    $analysis = $this->screenshotService->analyzeImage($imageData['path']);
+                    
+                    // Получаем размеры файлов
+                    $originalSize = Storage::disk('public')->size($imageData['path']);
+                    $thumbnailSize = $thumbnailCreated ? Storage::disk('public')->size($thumbnailPath) : 0;
+                    $screenshotSize = $screenshotCreated ? Storage::disk('public')->size($screenshotPath) : 0;
+                    
+                    // 4. Создаем запись изображения в БД
+                    $documentImage = DocumentImage::create([
+                        'document_id' => $documentId,
+                        'page_id' => $pageId,
+                        'page_number' => $pageNumber,
+                        'filename' => $filename,
+                        'original_filename' => $filename,
+                        'path' => $imageData['path'],
+                        'url' => Storage::url($imageData['path']),
+                        'thumbnail_path' => $thumbnailCreated ? $thumbnailPath : null,
+                        'thumbnail_url' => $thumbnailCreated ? Storage::url($thumbnailPath) : null,
+                        'screenshot_path' => $screenshotCreated ? $screenshotPath : null,
+                        'screenshot_url' => $screenshotCreated ? Storage::url($screenshotPath) : null,
+                        'width' => $analysis['width'] ?? ($imageData['width'] ?? null),
+                        'height' => $analysis['height'] ?? ($imageData['height'] ?? null),
+                        'original_width' => $analysis['width'] ?? ($imageData['width'] ?? null),
+                        'original_height' => $analysis['height'] ?? ($imageData['height'] ?? null),
+                        'size' => $originalSize,
+                        'thumbnail_size' => $thumbnailSize,
+                        'screenshot_size' => $screenshotSize,
+                        'mime_type' => $analysis['mime'] ?? $this->getMimeTypeFromPath($imageData['path']),
+                        'extension' => $analysis['extension'] ?? $extension,
+                        'description' => $this->generateImageDescription($pageNumber, $index),
+                        'position' => $index,
+                        'is_preview' => ($index === 0),
+                        'has_thumbnail' => $thumbnailCreated,
+                        'has_screenshot' => $screenshotCreated,
+                        'aspect_ratio' => $analysis['aspect_ratio'] ?? null,
+                        'is_portrait' => $analysis['is_portrait'] ?? false,
+                        'is_landscape' => $analysis['is_landscape'] ?? false,
+                        'status' => 'active',
+                        'processing_info' => json_encode([
+                            'original_path' => $imageData['path'],
+                            'thumbnail_created' => $thumbnailCreated,
+                            'screenshot_created' => $screenshotCreated,
+                            'created_at' => now()->toDateTimeString()
+                        ])
+                    ]);
+                    
+                    // 5. Обновляем страницу
+                    if ($pageId) {
+                        DocumentPage::where('id', $pageId)->update(['has_images' => true]);
+                        
+                        // Добавляем изображение в контент страницы
+                        $this->addImageToPageContent($pageId, $documentImage);
+                    }
+                    
+                    $savedCount++;
+                    Log::info("Saved image {$savedCount}/{$totalImages}: {$filename}");
+                    
+                } catch (Exception $e) {
+                    Log::error("Error saving image {$index}: " . $e->getMessage() . "\n" . $e->getTraceAsString());
+                    continue;
+                }
+            }
+            
+            return [
+                'success' => true,
+                'images_count' => $savedCount,
+                'thumbnails_created' => DocumentImage::where('document_id', $documentId)
+                    ->where('has_thumbnail', true)
+                    ->count(),
+                'screenshots_created' => DocumentImage::where('document_id', $documentId)
+                    ->where('has_screenshot', true)
+                    ->count(),
+                'pages_with_images' => DocumentPage::where('document_id', $documentId)
+                    ->where('has_images', true)
+                    ->count()
+            ];
+            
+        } catch (Exception $e) {
+            Log::error('Image extraction error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
+            return [
+                'success' => false,
+                'error' => $e->getMessage()
+            ];
         }
-        
-        return [
-            'success' => true,
-            'images_count' => $savedCount,
-            'pages_with_images' => DocumentPage::where('document_id', $documentId)
-                ->where('has_images', true)
-                ->count()
-        ];
-        
-    } catch (\Exception $e) {
-        Log::error('Image extraction error: ' . $e->getMessage() . "\n" . $e->getTraceAsString());
-        return [
-            'success' => false,
-            'error' => $e->getMessage()
-        ];
     }
-}
 
 /**
  * Создание миниатюры

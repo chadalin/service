@@ -439,32 +439,49 @@
                                 </div>
                                 
                                 <!-- Скриншот -->
-                                <div class="col-md-4">
-                                    <div class="image-preview-item">
-                                        <h6 class="mb-2"><i class="bi bi-aspect-ratio"></i> Скриншот</h6>
-                                        @if($image->screenshot_path && Storage::disk('public')->exists($image->screenshot_path))
-                                        <a href="{{ Storage::url($image->screenshot_path) }}" target="_blank">
-                                            <img src="{{ Storage::url($image->screenshot_path) }}" 
-                                                 alt="Скриншот"
-                                                 onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Скриншот</text></svg>';">
-                                        </a>
-                                        <div class="image-info mt-2">
-                                            <div class="image-info-item">
-                                                <span class="image-info-label">Размер:</span>
-                                                <span class="image-info-value">{{ $image->screenshot_size ? number_format($image->screenshot_size / 1024, 2) : 'N/A' }} KB</span>
-                                            </div>
-                                            <div class="image-info-item">
-                                                <span class="image-info-label">Оптимизирован:</span>
-                                                <span class="image-info-value">800×600px</span>
-                                            </div>
-                                        </div>
-                                        @else
-                                        <div class="alert alert-warning">
-                                            <i class="bi bi-exclamation-triangle"></i> Скриншот не найден
-                                        </div>
-                                        @endif
-                                    </div>
-                                </div>
+                                <!-- Скриншот -->
+<div class="col-md-4">
+    <div class="image-preview-item">
+        <h6 class="mb-2"><i class="bi bi-aspect-ratio"></i> Скриншот</h6>
+        @if($image->screenshot_path && $image->has_screenshot)
+        <a href="{{ Storage::url($image->screenshot_path) }}" target="_blank">
+            <img src="{{ Storage::url($image->screenshot_path) }}" 
+                 alt="Скриншот"
+                 onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Скриншот</text></svg>';">
+        </a>
+        <div class="image-info mt-2">
+            <div class="image-info-item">
+                <span class="image-info-label">Размер:</span>
+                <span class="image-info-value">
+                    @if($image->screenshot_size)
+                        {{ number_format($image->screenshot_size / 1024, 2) }} KB
+                    @else
+                        N/A
+                    @endif
+                </span>
+            </div>
+            <div class="image-info-item">
+                <span class="image-info-label">Размер:</span>
+                <span class="image-info-value">800×600px (оптимизирован)</span>
+            </div>
+            <div class="image-info-item">
+                <span class="image-info-label">Обрезан белый:</span>
+                <span class="image-info-value text-success">✓ Да</span>
+            </div>
+        </div>
+        @else
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle"></i> Скриншот не найден
+            @if($image->processing_info)
+                @php
+                    $info = json_decode($image->processing_info, true);
+                @endphp
+                <br><small>Причина: {{ $info['screenshot_created'] ?? 'Не создавался' }}</small>
+            @endif
+        </div>
+        @endif
+    </div>
+</div>
                                 
                                 <!-- Миниатюра -->
                                 <div class="col-md-4">

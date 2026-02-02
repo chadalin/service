@@ -717,7 +717,9 @@ Route::prefix('admin')->middleware(['auth'])->group(function () {
 Route::get('/{id}/pages', [DocumentProcessingController::class, 'pagesList'])->name('pages.list');
 Route::get('/{id}/page/{pageId}', [DocumentProcessingController::class, 'showPage'])->name('page.show');
 Route::get('/{id}/page/{pageId}/raw', [DocumentProcessingController::class, 'showPageRaw'])->name('page.raw');
-
+ Route::post('/documents-processing/{id}/recreate-screenshots', 
+    [DocumentProcessingController::class, 'recreateScreenshots'])
+    ->name('admin.documents.processing.recreate-screenshots');
     });
 
  
