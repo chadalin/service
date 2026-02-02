@@ -19,6 +19,8 @@ use App\Http\Controllers\Diagnostic\ReportController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\PriceItemController;
 use App\Http\Controllers\Admin\PriceImportController;
+use App\Http\Controllers\SearchTestController;
+
 
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
 use App\Http\Controllers\Diagnostic\Admin\RuleController as DiagnosticRuleController;
@@ -684,3 +686,62 @@ Route::prefix('diagnostic')->group(function () {
         return redirect("/admin/diagnostic/symptoms/{$id}");
     });
 });
+
+// Обработка документов
+Route::prefix('admin')->middleware(['auth'])->group(function () {
+    // Обработка документов
+    Route::prefix('documents/processing')->name('admin.documents.processing.')->group(function () {
+        Route::get('/', [DocumentProcessingController::class, 'index'])->name('index');
+        Route::get('/{id}/advanced', [DocumentProcessingController::class, 'advancedProcessing'])->name('advanced');
+        
+        // Обработка
+        Route::post('/{id}/create-preview', [DocumentProcessingController::class, 'createPreview'])->name('create-preview');
+        Route::post('/{id}/parse-full', [DocumentProcessingController::class, 'parseFull'])->name('parse-full');
+        Route::post('/{id}/parse-single-page', [DocumentProcessingController::class, 'parseSinglePage'])->name('parse-single-page');
+        Route::post('/{id}/parse-images-only', [DocumentProcessingController::class, 'parseImagesOnly'])->name('parse-images-only');
+        Route::post('/{id}/parse-background', [DocumentProcessingController::class, 'parseInBackground'])->name('parse-background');
+        
+        // AJAX методы
+        Route::post('/{id}/start-ajax', [DocumentProcessingController::class, 'startProcessingWithAjax'])->name('start-ajax');
+        Route::get('/{id}/progress', [DocumentProcessingController::class, 'getProcessingProgress'])->name('progress');
+        Route::get('/{id}/pages', [DocumentProcessingController::class, 'getDocumentPages'])->name('pages');
+        Route::post('/{id}/test-images', [DocumentProcessingController::class, 'testImageExtraction'])->name('test-images');
+        
+        // Управление
+        Route::post('/{id}/reset-status', [DocumentProcessingController::class, 'resetStatus'])->name('reset-status');
+        Route::delete('/{id}/delete-preview', [DocumentProcessingController::class, 'deletePreview'])->name('delete-preview');
+        
+        // Просмотр
+        Route::get('/{id}/images', [DocumentProcessingController::class, 'viewImages'])->name('view-images');
+    });
+});
+
+
+
+
+// Тестовые роуты для поиска
+Route::prefix('search-test')->name('search.')->group(function () {
+    Route::get('/', [SearchTestController::class, 'index'])->name('test');
+    Route::get('/results', [SearchTestController::class, 'search'])->name('results');
+    Route::get('/autocomplete', [SearchTestController::class, 'autocomplete'])->name('autocomplete');
+    Route::get('/document/{id}', [SearchTestController::class, 'document'])->name('document');
+    Route::get('/api-test', [SearchTestController::class, 'testSearchApi'])->name('api-test');
+});
+
+// API роуты (тоже для тестирования)
+Route::prefix('api/search')->name('api.search.')->group(function () {
+    Route::get('/autocomplete', [SearchTestController::class, 'autocomplete'])->name('autocomplete');
+    Route::get('/stats', function() {
+        return response()->json([
+            'documents' => \App\Models\Document::count(),
+            'indexed' => \App\Models\Document::where('search_indexed', true)->count(),
+            'pages' => \App\Models\DocumentPage::count(),
+            'status' => 'ok'
+        ]);
+    })->name('stats');
+    
+    Route::post('/', [SearchTestController::class, 'apiSearch'])->name('search');
+});
+
+// Роут по умолчанию для быстрого доступа
+Route::redirect('/', '/search-test');

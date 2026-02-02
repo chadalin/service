@@ -7,234 +7,125 @@ use App\Models\DocumentImage;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Str;
-use Smalot\PdfParser\Parser;
-use Exception;
-use Throwable;
-use Intervention\Image\ImageManager;
-use Intervention\Image\Drivers\Gd\Driver;
 
 class AdvancedImageExtractionService
 {
-    protected $parser;
-    protected $imageManager;
-    
-    public function __construct()
-    {
-        $this->parser = new Parser();
-        $this->imageManager = new ImageManager(new Driver());
-    }
-    
     /**
-     * Универсальное извлечение изображений из PDF
+     * Извлечение изображений из страницы PDF
      */
-    public function extractImagesUniversal(Document $document, string $filePath, int $pageNumber, bool $isPreview): array
+    public function extractImagesFromPage(Document $document, string $filePath, int $pageNumber, bool $isPreview): array
     {
-        Log::info("Универсальное извлечение изображений для документа {$document->id}, страница {$pageNumber}");
-        
-        $images = [];
+        Log::info("Извлечение изображений для документа {$document->id}, страница {$pageNumber}");
         
         try {
             if (!file_exists($filePath)) {
                 throw new \Exception("Файл не найден: {$filePath}");
             }
             
-            // Способ 1: Через библиотеку Smalot (основной)
-            $images = $this->extractWithSmalot($document, $filePath, $pageNumber, $isPreview);
+            $images = [];
             
-            // Способ 2: Через pdftoppm (если первый не сработал)
-            if (empty($images) && $this->commandExists('pdftoppm')) {
-                Log::info("Первый способ не сработал, пробуем pdftoppm");
+            // Способ 1: Через pdftoppm (poppler) - конвертируем всю страницу в изображение
+            if ($this->commandExists('pdftoppm')) {
                 $images = $this->extractWithPdftoppm($document, $filePath, $pageNumber, $isPreview);
             }
             
-            // Способ 3: Простой способ - создаем заглушку
+            // Способ 2: Создаем заглушку если не удалось извлечь
             if (empty($images)) {
-                Log::info("Все способы не сработали, создаем заглушку");
-                $images = $this->createPlaceholderImage($document, $pageNumber, $isPreview);
+                $images = $this->createPagePlaceholder($document, $pageNumber, $isPreview);
             }
             
-            Log::info("Итог: извлечено " . count($images) . " изображений");
+            Log::info("Извлечено изображений для страницы {$pageNumber}: " . count($images));
             return $images;
             
-        } catch (Throwable $e) {
+        } catch (\Exception $e) {
             Log::error("Ошибка извлечения изображений: " . $e->getMessage());
             return [];
         }
     }
     
-    private function extractWithSmalot(Document $document, string $filePath, int $pageNumber, bool $isPreview): array
+    /**
+     * Извлечение через pdftoppm (конвертация страницы в JPEG)
+     */
+    private function extractWithPdftoppm(Document $document, string $filePath, int $pageNumber, bool $isPreview): array
     {
         $images = [];
-        $imageCount = 0;
         
         try {
-            $pdf = $this->parser->parseFile($filePath);
-            $objects = $pdf->getObjects();
-            
-            Log::info("Найдено объектов в PDF: " . count($objects));
-            
-            foreach ($objects as $index => $object) {
-                try {
-                    $details = $object->getDetails();
-                    
-                    // Проверяем, является ли объект изображением
-                    if (isset($details['Subtype']) && $details['Subtype'] === 'Image') {
-                        $imageCount++;
-                        
-                        try {
-                            $imageData = $object->getContent();
-                            
-                            if (empty($imageData)) {
-                                continue;
-                            }
-                            
-                            // Определяем тип изображения
-                            $imageInfo = $this->analyzeImageData($imageData, $details);
-                            
-                            if (!$imageInfo['extension']) {
-                                continue;
-                            }
-                            
-                            // Сохраняем изображение
-                            $savedImage = $this->saveImage(
-                                $document, 
-                                $imageData, 
-                                $imageInfo, 
-                                $pageNumber, 
-                                $imageCount, 
-                                $isPreview
-                            );
-                            
-                            if ($savedImage) {
-                                $images[] = $savedImage;
-                                Log::info("Изображение сохранено: {$savedImage['filename']}");
-                            }
-                            
-                        } catch (Throwable $e) {
-                            Log::warning("Ошибка обработки изображения #{$imageCount}: " . $e->getMessage());
-                            continue;
-                        }
-                    }
-                    
-                } catch (Throwable $e) {
-                    Log::warning("Ошибка обработки объекта #{$index}: " . $e->getMessage());
-                    continue;
-                }
+            $tempDir = storage_path('app/temp_' . Str::random(10));
+            if (!is_dir($tempDir)) {
+                mkdir($tempDir, 0755, true);
             }
             
-        } catch (Throwable $e) {
-            Log::error("Ошибка парсинга PDF через Smalot: " . $e->getMessage());
+            $outputFile = "{$tempDir}/page_{$pageNumber}";
+            
+            // Команда pdftoppm для конвертации страницы в JPEG
+            $command = "pdftoppm -f {$pageNumber} -l {$pageNumber} -jpeg -singlefile \"{$filePath}\" \"{$outputFile}\" 2>&1";
+            
+            exec($command, $output, $returnCode);
+            
+            if ($returnCode === 0) {
+                $jpegFile = "{$outputFile}.jpg";
+                if (file_exists($jpegFile)) {
+                    $imageData = file_get_contents($jpegFile);
+                    
+                    $imageInfo = [
+                        'data' => $imageData,
+                        'size' => filesize($jpegFile),
+                        'width' => 1200,
+                        'height' => 1600,
+                        'extension' => 'jpg',
+                        'mime_type' => 'image/jpeg',
+                    ];
+                    
+                    $savedImage = $this->savePageImage(
+                        $document, 
+                        $imageData, 
+                        $imageInfo, 
+                        $pageNumber, 
+                        1, 
+                        $isPreview,
+                        'page_image'
+                    );
+                    
+                    if ($savedImage) {
+                        $images[] = $savedImage;
+                    }
+                    
+                    unlink($jpegFile);
+                }
+            } else {
+                Log::error("pdftoppm command failed: " . implode("\n", $output));
+            }
+            
+            // Очистка временной директории
+            if (is_dir($tempDir)) {
+                @rmdir($tempDir);
+            }
+            
+        } catch (\Exception $e) {
+            Log::error("Ошибка pdftoppm: " . $e->getMessage());
         }
         
         return $images;
     }
     
-    private function analyzeImageData(string $imageData, array $details): array
-    {
-        $result = [
-            'data' => $imageData,
-            'size' => strlen($imageData),
-            'width' => $details['Width'] ?? 0,
-            'height' => $details['Height'] ?? 0,
-            'extension' => null,
-            'mime_type' => null,
-        ];
-        
-        // Определяем тип по фильтру
-        if (isset($details['Filter'])) {
-            $filter = is_array($details['Filter']) ? end($details['Filter']) : $details['Filter'];
-            
-            switch ($filter) {
-                case 'DCTDecode':
-                    $result['extension'] = 'jpg';
-                    break;
-                case 'FlateDecode':
-                case 'LZWDecode':
-                    $result['extension'] = 'png';
-                    break;
-                case 'CCITTFaxDecode':
-                    $result['extension'] = 'tiff';
-                    break;
-                case 'JPXDecode':
-                    $result['extension'] = 'jp2';
-                    break;
-            }
-        }
-        
-        // Если не определили по фильтру, пробуем по сигнатуре
-        if (!$result['extension']) {
-            $result['extension'] = $this->detectExtensionFromSignature($imageData);
-        }
-        
-        // Определяем MIME-тип
-        $result['mime_type'] = $this->getMimeTypeFromExtension($result['extension']);
-        
-        return $result;
-    }
-    
-    private function detectExtensionFromSignature(string $data): ?string
-    {
-        if (strlen($data) < 2) {
-            return null;
-        }
-        
-        $bytes = substr($data, 0, 8);
-        
-        // JPEG
-        if (bin2hex(substr($bytes, 0, 2)) === 'ffd8') {
-            return 'jpg';
-        }
-        
-        // PNG
-        if (substr($bytes, 0, 8) === "\x89PNG\r\n\x1a\n") {
-            return 'png';
-        }
-        
-        // GIF
-        if (substr($bytes, 0, 3) === 'GIF') {
-            return 'gif';
-        }
-        
-        // BMP
-        if (substr($bytes, 0, 2) === 'BM') {
-            return 'bmp';
-        }
-        
-        return 'jpg'; // По умолчанию JPEG
-    }
-    
-    private function getMimeTypeFromExtension(?string $extension): ?string
-    {
-        if (!$extension) {
-            return null;
-        }
-        
-        $mimeTypes = [
-            'jpg' => 'image/jpeg',
-            'jpeg' => 'image/jpeg',
-            'png' => 'image/png',
-            'gif' => 'image/gif',
-            'bmp' => 'image/bmp',
-            'tiff' => 'image/tiff',
-            'jp2' => 'image/jp2',
-        ];
-        
-        return $mimeTypes[$extension] ?? 'image/jpeg';
-    }
-    
-    private function saveImage(
+    /**
+     * Сохранение изображения страницы
+     */
+    private function savePageImage(
         Document $document, 
         string $imageData, 
         array $imageInfo, 
         int $pageNumber, 
         int $position, 
-        bool $isPreview
+        bool $isPreview,
+        string $type = 'page_image'
     ): ?array
     {
         try {
             // Создаем уникальное имя файла
             $timestamp = time();
-            $originalName = "doc_{$document->id}_page_{$pageNumber}_img_{$position}_{$timestamp}";
+            $originalName = "doc_{$document->id}_page_{$pageNumber}_{$type}_{$timestamp}";
             $extension = $imageInfo['extension'] ?? 'jpg';
             
             // Основное изображение
@@ -251,26 +142,21 @@ class AdvancedImageExtractionService
             // Сохраняем оригинальное изображение
             file_put_contents($mainFullPath, $imageData);
             
-            // Проверяем, что файл сохранен
             if (!file_exists($mainFullPath)) {
                 return null;
             }
             
             // Получаем информацию о сохраненном файле
             $savedFileSize = filesize($mainFullPath);
-            $imageDetails = @getimagesize($mainFullPath);
             
-            if (!$imageDetails) {
-                // Пробуем пересохранить как JPEG
-                return $this->convertToJpeg($document, $mainFullPath, $pageNumber, $position, $isPreview);
-            }
-            
-            $width = $imageDetails[0];
-            $height = $imageDetails[1];
-            $mimeType = $imageDetails['mime'];
+            // Получаем размеры изображения
+            $imageSize = @getimagesize($mainFullPath);
+            $width = $imageSize ? $imageSize[0] : 1200;
+            $height = $imageSize ? $imageSize[1] : 1600;
+            $mimeType = $imageSize ? $imageSize['mime'] : 'image/jpeg';
             
             // Создаем миниатюру
-            $thumbData = $this->createThumbnail($mainFullPath, $width, $height, $mimeType);
+            $thumbData = $this->createThumbnail($mainFullPath, $width, $height);
             
             // Генерируем URL
             $mainUrl = Storage::url($mainStoragePath);
@@ -283,66 +169,25 @@ class AdvancedImageExtractionService
                 'thumbnail_url' => $thumbData['url'],
                 'width' => $width,
                 'height' => $height,
-                'original_width' => $imageInfo['width'] ?: $width,
-                'original_height' => $imageInfo['height'] ?: $height,
                 'size' => $savedFileSize,
                 'thumbnail_size' => $thumbData['size'],
-                'description' => "Изображение {$position} со страницы {$pageNumber}",
+                'description' => "Изображение {$position} со страницы {$pageNumber} ({$type})",
                 'position' => $position,
                 'mime_type' => $mimeType,
                 'extension' => $extension,
+                'image_type' => $type
             ];
             
-        } catch (Throwable $e) {
+        } catch (\Exception $e) {
             Log::error("Ошибка сохранения изображения: " . $e->getMessage());
             return null;
         }
     }
     
-    private function convertToJpeg(Document $document, string $sourcePath, int $pageNumber, int $position, bool $isPreview): ?array
-    {
-        try {
-            // Пытаемся открыть через GD
-            $image = @imagecreatefromstring(file_get_contents($sourcePath));
-            
-            if (!$image) {
-                return null;
-            }
-            
-            // Сохраняем как JPEG
-            $jpgPath = str_replace(['.png', '.gif', '.bmp', '.tiff'], '.jpg', $sourcePath);
-            imagejpeg($image, $jpgPath, 90);
-            imagedestroy($image);
-            
-            // Удаляем оригинальный файл
-            if ($jpgPath !== $sourcePath) {
-                unlink($sourcePath);
-            }
-            
-            $imageDetails = getimagesize($jpgPath);
-            
-            return [
-                'filename' => basename($jpgPath),
-                'path' => str_replace(storage_path('app/'), '', $jpgPath),
-                'url' => Storage::url(str_replace(storage_path('app/'), '', $jpgPath)),
-                'width' => $imageDetails[0],
-                'height' => $imageDetails[1],
-                'size' => filesize($jpgPath),
-                'thumbnail_path' => null,
-                'thumbnail_url' => null,
-                'description' => "Изображение {$position} со страницы {$pageNumber} (конвертировано)",
-                'position' => $position,
-                'mime_type' => 'image/jpeg',
-                'extension' => 'jpg',
-            ];
-            
-        } catch (Throwable $e) {
-            Log::error("Ошибка конвертации изображения: " . $e->getMessage());
-            return null;
-        }
-    }
-    
-    private function createThumbnail(string $sourcePath, int $width, int $height, string $mimeType): array
+    /**
+     * Создать миниатюру
+     */
+    private function createThumbnail(string $sourcePath, int $width, int $height): array
     {
         $thumbFilename = pathinfo($sourcePath, PATHINFO_FILENAME) . '_thumb.jpg';
         $thumbStoragePath = str_replace(
@@ -357,93 +202,59 @@ class AdvancedImageExtractionService
         }
         
         try {
-            $image = $this->imageManager->read($sourcePath);
-            
-            // Масштабируем для миниатюры (макс. 300px по ширине)
-            if ($width > 300) {
-                $image->scale(width: 300);
+            // Простой способ создания миниатюры через GD
+            $sourceImage = @imagecreatefromjpeg($sourcePath);
+            if (!$sourceImage) {
+                $sourceImage = @imagecreatefrompng($sourcePath);
+            }
+            if (!$sourceImage) {
+                $sourceImage = @imagecreatefromgif($sourcePath);
             }
             
-            // Сохраняем как JPEG
-            $image->toJpeg(80)->save($thumbStoragePath);
-            
-            return [
-                'path' => str_replace(storage_path('app/'), '', $thumbStoragePath),
-                'url' => Storage::url(str_replace(storage_path('app/'), '', $thumbStoragePath)),
-                'size' => filesize($thumbStoragePath)
-            ];
-            
-        } catch (Throwable $e) {
-            // Если не удалось создать миниатюру, копируем оригинал
-            copy($sourcePath, $thumbStoragePath);
-            
-            return [
-                'path' => str_replace(storage_path('app/'), '', $thumbStoragePath),
-                'url' => Storage::url(str_replace(storage_path('app/'), '', $thumbStoragePath)),
-                'size' => filesize($thumbStoragePath)
-            ];
-        }
-    }
-    
-    private function extractWithPdftoppm(Document $document, string $filePath, int $pageNumber, bool $isPreview): array
-    {
-        $images = [];
-        
-        try {
-            $tempDir = storage_path('app/temp_' . Str::random(10));
-            mkdir($tempDir, 0755, true);
-            
-            $outputFile = "{$tempDir}/page_{$pageNumber}";
-            $command = "pdftoppm -f {$pageNumber} -l {$pageNumber} -jpeg -singlefile \"{$filePath}\" \"{$outputFile}\" 2>&1";
-            exec($command, $output, $returnCode);
-            
-            if ($returnCode === 0) {
-                $jpegFile = "{$outputFile}.jpg";
-                if (file_exists($jpegFile)) {
-                    $imageData = file_get_contents($jpegFile);
-                    $imageInfo = [
-                        'data' => $imageData,
-                        'size' => filesize($jpegFile),
-                        'width' => 1200,
-                        'height' => 1600,
-                        'extension' => 'jpg',
-                        'mime_type' => 'image/jpeg',
-                    ];
-                    
-                    $savedImage = $this->saveImage(
-                        $document, 
-                        $imageData, 
-                        $imageInfo, 
-                        $pageNumber, 
-                        1, 
-                        $isPreview
-                    );
-                    
-                    if ($savedImage) {
-                        $images[] = $savedImage;
-                    }
-                    
-                    unlink($jpegFile);
-                }
+            if ($sourceImage) {
+                // Размеры миниатюры
+                $thumbWidth = 300;
+                $thumbHeight = floor($height * ($thumbWidth / $width));
+                
+                // Создаем изображение для миниатюры
+                $thumbImage = imagecreatetruecolor($thumbWidth, $thumbHeight);
+                
+                // Копируем и изменяем размер
+                imagecopyresampled($thumbImage, $sourceImage, 0, 0, 0, 0, $thumbWidth, $thumbHeight, $width, $height);
+                
+                // Сохраняем как JPEG
+                imagejpeg($thumbImage, $thumbStoragePath, 80);
+                
+                // Освобождаем память
+                imagedestroy($sourceImage);
+                imagedestroy($thumbImage);
+                
+                return [
+                    'path' => str_replace(storage_path('app/'), '', $thumbStoragePath),
+                    'url' => Storage::url(str_replace(storage_path('app/'), '', $thumbStoragePath)),
+                    'size' => filesize($thumbStoragePath)
+                ];
             }
             
-            // Очистка
-            if (is_dir($tempDir)) {
-                array_map('unlink', glob("{$tempDir}/*"));
-                rmdir($tempDir);
-            }
-            
-        } catch (Throwable $e) {
-            Log::error("Ошибка pdftoppm: " . $e->getMessage());
+        } catch (\Exception $e) {
+            Log::error("Ошибка создания миниатюры: " . $e->getMessage());
         }
         
-        return $images;
+        // Если не удалось создать миниатюру, копируем оригинал
+        copy($sourcePath, $thumbStoragePath);
+        
+        return [
+            'path' => str_replace(storage_path('app/'), '', $thumbStoragePath),
+            'url' => Storage::url(str_replace(storage_path('app/'), '', $thumbStoragePath)),
+            'size' => filesize($thumbStoragePath)
+        ];
     }
     
-    private function createPlaceholderImage(Document $document, int $pageNumber, bool $isPreview): array
+    /**
+     * Создать заглушку страницы
+     */
+    private function createPagePlaceholder(Document $document, int $pageNumber, bool $isPreview): array
     {
-        $images = [];
-        
         try {
             $width = 800;
             $height = 1131;
@@ -480,21 +291,40 @@ class AdvancedImageExtractionService
                 'mime_type' => 'image/jpeg',
             ];
             
-            $savedImage = $this->saveImage($document, $imageData, $imageInfo, $pageNumber, 1, $isPreview);
+            $savedImage = $this->savePageImage(
+                $document, 
+                $imageData, 
+                $imageInfo, 
+                $pageNumber, 
+                1, 
+                $isPreview,
+                'placeholder'
+            );
             
             return $savedImage ? [$savedImage] : [];
             
-        } catch (Throwable $e) {
+        } catch (\Exception $e) {
             Log::error("Ошибка создания заглушки: " . $e->getMessage());
             return [];
         }
     }
     
+    /**
+     * Проверить существование команды в системе
+     */
     private function commandExists(string $command): bool
     {
-        $which = strtoupper(substr(PHP_OS, 0, 3)) === 'WIN' ? 'where' : 'which';
-        $process = new \Symfony\Component\Process\Process([$which, $command]);
-        $process->run();
-        return $process->isSuccessful();
+        try {
+            if (strtoupper(substr(PHP_OS, 0, 3)) === 'WIN') {
+                $output = shell_exec("where {$command} 2>&1");
+            } else {
+                $output = shell_exec("which {$command} 2>&1");
+            }
+            
+            return !empty($output);
+            
+        } catch (\Exception $e) {
+            return false;
+        }
     }
 }
