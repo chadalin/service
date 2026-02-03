@@ -438,50 +438,177 @@
                                     </div>
                                 </div>
                                 
-                                <!-- Скриншот -->
-                                <!-- Скриншот -->
+            <!-- Скриншот -->
+<!-- Скриншот -->
 <div class="col-md-4">
     <div class="image-preview-item">
         <h6 class="mb-2"><i class="bi bi-aspect-ratio"></i> Скриншот</h6>
         @if($image->screenshot_path && $image->has_screenshot)
-        <a href="{{ Storage::url($image->screenshot_path) }}" target="_blank">
-            <img src="{{ Storage::url($image->screenshot_path) }}" 
-                 alt="Скриншот"
-                 onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Скриншот</text></svg>';">
-        </a>
-        <div class="image-info mt-2">
-            <div class="image-info-item">
-                <span class="image-info-label">Размер:</span>
-                <span class="image-info-value">
-                    @if($image->screenshot_size)
-                        {{ number_format($image->screenshot_size / 1024, 2) }} KB
-                    @else
-                        N/A
-                    @endif
-                </span>
+            @php
+                // Получаем размеры файлов для сравнения
+                $screenshotSize = $image->screenshot_size ?? 0;
+                $originalSize = $image->size ?? 0;
+                $isDifferent = $screenshotSize > 0 && $originalSize > 0 && $screenshotSize != $originalSize;
+                $savedPercent = $isDifferent ? round((1 - $screenshotSize / $originalSize) * 100, 2) : 0;
+            @endphp
+            
+            <a href="{{ $image->screenshot_url }}" target="_blank" class="d-block mb-2">
+                <img src="{{ $image->screenshot_url }}" 
+                     alt="Скриншот"
+                     class="img-fluid border rounded"
+                     onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Скриншот</text></svg>';">
+            </a>
+            
+            <div class="image-info mt-2">
+                <div class="image-info-item">
+                    <span class="image-info-label">Размер:</span>
+                    <span class="image-info-value">{{ number_format($screenshotSize / 1024, 2) }} KB</span>
+                </div>
+                <div class="image-info-item">
+                    <span class="image-info-label">Сжатие:</span>
+                    <span class="image-info-value {{ $isDifferent ? 'text-success' : 'text-warning' }}">
+                        @if($isDifferent)
+                            <i class="bi bi-check-circle"></i> {{ $savedPercent }}% меньше
+                        @else
+                            <i class="bi bi-exclamation-triangle"></i> Не сжато
+                        @endif
+                    </span>
+                </div>
+                <div class="image-info-item">
+                    <span class="image-info-label">Формат:</span>
+                    <span class="image-info-value">800×600px</span>
+                </div>
             </div>
-            <div class="image-info-item">
-                <span class="image-info-label">Размер:</span>
-                <span class="image-info-value">800×600px (оптимизирован)</span>
+            
+            <!-- Кнопки действий -->
+            <div class="mt-2">
+                <div class="btn-group btn-group-sm w-100" role="group">
+                    <a href="{{ $image->screenshot_url }}" 
+                       target="_blank" 
+                       class="btn btn-outline-primary">
+                        <i class="bi bi-eye"></i> Просмотр
+                    </a>
+                    <a href="{{ $image->screenshot_url }}" 
+                       download="screenshot_{{ $image->filename }}"
+                       class="btn btn-outline-success">
+                        <i class="bi bi-download"></i> Скачать
+                    </a>
+                </div>
             </div>
-            <div class="image-info-item">
-                <span class="image-info-label">Обрезан белый:</span>
-                <span class="image-info-value text-success">✓ Да</span>
+            
+        @elseif($image->screenshot_path)
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Файл скриншота не найден
+                <div class="small mt-1">
+                    Путь: {{ $image->screenshot_path }}<br>
+                    <a href="{{ Storage::url($image->path) }}" target="_blank" class="btn btn-sm btn-outline-primary mt-1">
+                        <i class="bi bi-eye"></i> Показать оригинал
+                    </a>
+                </div>
             </div>
-        </div>
         @else
-        <div class="alert alert-warning">
-            <i class="bi bi-exclamation-triangle"></i> Скриншот не найден
-            @if($image->processing_info)
-                @php
-                    $info = json_decode($image->processing_info, true);
-                @endphp
-                <br><small>Причина: {{ $info['screenshot_created'] ?? 'Не создавался' }}</small>
-            @endif
-        </div>
+            <div class="alert alert-warning">
+                <i class="bi bi-exclamation-triangle"></i> Скриншот не создан
+                <div class="small mt-1">
+                    Для этого изображения не был создан скриншот.
+                </div>
+            </div>
         @endif
     </div>
 </div>
+
+<!-- В шаблоне page_show.blade.php -->
+@if($image->screenshot_path)
+    <div class="mb-3">
+        <h6>Скриншот (прямая проверка):</h6>
+        @php
+            // Прямая проверка существования файла
+            $screenshotExists = Storage::disk('public')->exists($image->screenshot_path);
+            $screenshotUrl = $screenshotExists ? Storage::url($image->screenshot_path) : null;
+            
+            // Также проверяем оригинал для сравнения
+            $originalExists = Storage::disk('public')->exists($image->path);
+            $originalUrl = $originalExists ? Storage::url($image->path) : null;
+            
+            // Сравниваем размеры
+            if ($screenshotExists && $originalExists) {
+                $screenshotSize = Storage::disk('public')->size($image->screenshot_path);
+                $originalSize = Storage::disk('public')->size($image->path);
+                $isDifferent = $screenshotSize != $originalSize;
+            }
+        @endphp
+        
+        @if($screenshotExists)
+            <div class="row">
+                <div class="col-md-6">
+                    <h6>Оригинал:</h6>
+                    <img src="{{ $originalUrl }}" alt="Оригинал" class="img-fluid border">
+                    <div class="small text-muted mt-1">
+                        {{ $image->width }}×{{ $image->height }}px, 
+                        {{ number_format($originalSize / 1024, 2) }} KB
+                    </div>
+                </div>
+                <div class="col-md-6">
+                    <h6>Скриншот:</h6>
+                    <img src="{{ $screenshotUrl }}" alt="Скриншот" class="img-fluid border">
+                    <div class="small text-muted mt-1">
+                        @if(isset($screenshotSize))
+                            {{ number_format($screenshotSize / 1024, 2) }} KB
+                            @if(isset($isDifferent))
+                                <span class="{{ $isDifferent ? 'text-success' : 'text-warning' }}">
+                                    ({{ $isDifferent ? 'отличается' : 'такой же' }})
+                                </span>
+                            @endif
+                        @endif
+                    </div>
+                </div>
+            </div>
+            
+            @if(isset($isDifferent) && $isDifferent)
+                <div class="alert alert-success mt-2">
+                    <i class="bi bi-check-circle"></i> Скриншот успешно создан и отличается от оригинала!
+                </div>
+            @elseif(isset($isDifferent) && !$isDifferent)
+                <div class="alert alert-warning mt-2">
+                    <i class="bi bi-exclamation-triangle"></i> Скриншот идентичен оригиналу (обрезка не сработала)
+                </div>
+            @endif
+        @else
+            <div class="alert alert-danger">
+                <i class="bi bi-x-circle"></i> Файл скриншота не найден по пути: {{ $image->screenshot_path }}
+            </div>
+        @endif
+    </div>
+@endif
+<!-- Отладочная информация -->
+@if($images->count() > 0)
+<div class="card mb-3">
+    <div class="card-header bg-info text-white">
+        <h6 class="mb-0"><i class="bi bi-bug"></i> Отладка изображений</h6>
+    </div>
+    <div class="card-body">
+        @foreach($images as $image)
+        <div class="mb-2">
+            <strong>{{ $image->filename }}</strong><br>
+            <small class="text-muted">
+                Путь: {{ $image->path }}<br>
+                Скриншот: {{ $image->screenshot_path ?: 'Нет' }}<br>
+                @if($image->screenshot_path)
+                    @php
+                        $screenshotExists = Storage::disk('public')->exists($image->screenshot_path);
+                        $originalExists = Storage::disk('public')->exists($image->path);
+                    @endphp
+                    Существует: {{ $screenshotExists ? 'Да' : 'Нет' }}<br>
+                    URL: {{ Storage::url($image->screenshot_path) }}<br>
+                    Размер: {{ $image->screenshot_size ? number_format($image->screenshot_size / 1024, 2) : 'N/A' }} KB<br>
+                    Оригинал: {{ $image->size ? number_format($image->size / 1024, 2) : 'N/A' }} KB
+                @endif
+            </small>
+        </div>
+        @endforeach
+    </div>
+</div>
+@endif
                                 
                                 <!-- Миниатюра -->
                                 <div class="col-md-4">
@@ -929,6 +1056,143 @@ document.addEventListener('DOMContentLoaded', function() {
         container.addEventListener('mouseleave', function() {
             this.style.boxShadow = 'none';
         });
+    });
+});
+</script>
+<script>
+// Отслеживание прогресса обработки
+function startProgressTracking(documentId) {
+    const progressBar = document.getElementById('processingProgress');
+    const progressText = document.getElementById('progressText');
+    const statusBadge = document.getElementById('processingStatus');
+    
+    // Показываем прогресс бар
+    document.getElementById('progressContainer').style.display = 'block';
+    
+    // Запускаем интервал проверки
+    const progressInterval = setInterval(() => {
+        fetch(`/admin/documents/${documentId}/progress`)
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    // Обновляем прогресс
+                    progressBar.style.width = data.progress + '%';
+                    progressBar.setAttribute('aria-valuenow', data.progress);
+                    progressText.textContent = data.progress + '%';
+                    
+                    // Обновляем статус
+                    statusBadge.textContent = data.message;
+                    
+                    // Меняем цвет в зависимости от статуса
+                    if (data.status === 'processing') {
+                        progressBar.classList.remove('bg-success', 'bg-danger');
+                        progressBar.classList.add('bg-info', 'progress-bar-animated', 'progress-bar-striped');
+                        statusBadge.classList.remove('bg-success', 'bg-danger');
+                        statusBadge.classList.add('bg-info');
+                    } else if (data.status === 'completed') {
+                        progressBar.classList.remove('bg-info', 'progress-bar-animated', 'progress-bar-striped');
+                        progressBar.classList.add('bg-success');
+                        statusBadge.classList.remove('bg-info');
+                        statusBadge.classList.add('bg-success');
+                        clearInterval(progressInterval);
+                        
+                        // Обновляем страницу через 3 секунды
+                        setTimeout(() => {
+                            location.reload();
+                        }, 3000);
+                    } else if (data.status === 'failed') {
+                        progressBar.classList.remove('bg-info', 'progress-bar-animated', 'progress-bar-striped');
+                        progressBar.classList.add('bg-danger');
+                        statusBadge.classList.remove('bg-info');
+                        statusBadge.classList.add('bg-danger');
+                        clearInterval(progressInterval);
+                    }
+                    
+                    // Обновляем статистику
+                    if (data.processed_pages && data.total_pages) {
+                        document.getElementById('pagesProcessed').textContent = 
+                            `${data.processed_pages}/${data.total_pages}`;
+                    }
+                    if (data.images_count) {
+                        document.getElementById('imagesFound').textContent = data.images_count;
+                    }
+                }
+            })
+            .catch(error => {
+                console.error('Ошибка получения прогресса:', error);
+            });
+    }, 2000); // Проверяем каждые 2 секунды
+    
+    // Возвращаем ID интервала для отмены
+    return progressInterval;
+}
+
+// Запуск обработки
+function startProcessing(documentId) {
+    if (!confirm('Запустить полную обработку документа? Это может занять несколько минут.')) {
+        return;
+    }
+    
+    // Блокируем кнопки
+    document.querySelectorAll('.processing-btn').forEach(btn => {
+        btn.disabled = true;
+    });
+    
+    // Показываем уведомление
+    const notification = document.createElement('div');
+    notification.className = 'alert alert-info alert-dismissible fade show';
+    notification.innerHTML = `
+        <i class="bi bi-info-circle"></i> Обработка запущена. Прогресс отображается ниже.
+        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+    `;
+    document.querySelector('.container').prepend(notification);
+    
+    // Запускаем обработку
+    fetch(`/admin/documents/${documentId}/parse-full`, {
+        method: 'POST',
+        headers: {
+            'X-CSRF-TOKEN': '{{ csrf_token() }}',
+            'Content-Type': 'application/json',
+            'Accept': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Запускаем отслеживание прогресса
+            startProgressTracking(documentId);
+        } else {
+            alert('Ошибка запуска: ' + (data.error || 'Неизвестная ошибка'));
+            location.reload();
+        }
+    })
+    .catch(error => {
+        console.error('Ошибка:', error);
+        alert('Ошибка сети. Попробуйте снова.');
+        location.reload();
+    });
+}
+
+// Автоматическое отслеживание если документ в обработке
+document.addEventListener('DOMContentLoaded', function() {
+    const documentId = {{ $document->id }};
+    const documentStatus = '{{ $document->status }}';
+    
+    if (documentStatus === 'processing') {
+        // Если документ уже в обработке, запускаем отслеживание
+        startProgressTracking(documentId);
+    }
+    
+    // Кнопка принудительной проверки
+    document.getElementById('checkProgressBtn')?.addEventListener('click', function() {
+        fetch(`/admin/documents/${documentId}/progress`)
+            .then(response => response.json())
+            .then(data => {
+                alert(`Статус: ${data.status}\nПрогресс: ${data.progress}%\n${data.message}`);
+                if (data.status === 'processing') {
+                    startProgressTracking(documentId);
+                }
+            });
     });
 });
 </script>

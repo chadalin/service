@@ -5,6 +5,7 @@ namespace App\Services;
 use Intervention\Image\Facades\Image;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
+use Intervention\Image\ImageManager;
 use Exception;
 
 class ImageScreenshotService

@@ -238,4 +238,113 @@ class ImageProcessingService
             return false;
         }
     }
+
+    /**
+     * Проверяет, является ли изображение пустым (только белый фон)
+     */
+    public function isEmptyImage($imagePath, $whiteThreshold = 240)
+    {
+        try {
+            $fullPath = Storage::disk('public')->path($imagePath);
+            
+            if (!file_exists($fullPath)) {
+                return true;
+            }
+            
+            $imageInfo = @getimagesize($fullPath);
+            if (!$imageInfo) {
+                return true;
+            }
+            
+            list($width, $height, $type) = $imageInfo;
+            
+            // Если изображение слишком маленькое - пропускаем
+            if ($width < 10 || $height < 10) {
+                return true;
+            }
+            
+            // Создаем изображение
+            switch ($type) {
+                case IMAGETYPE_JPEG:
+                    $image = imagecreatefromjpeg($fullPath);
+                    break;
+                case IMAGETYPE_PNG:
+                    $image = imagecreatefrompng($fullPath);
+                    break;
+                case IMAGETYPE_GIF:
+                    $image = imagecreatefromgif($fullPath);
+                    break;
+                default:
+                    return true;
+            }
+            
+            if (!$image) {
+                return true;
+            }
+            
+            // Проверяем несколько случайных точек
+            $samplePoints = min(100, $width * $height / 100);
+            $whiteCount = 0;
+            
+            for ($i = 0; $i < $samplePoints; $i++) {
+                $x = rand(0, $width - 1);
+                $y = rand(0, $height - 1);
+                
+                $color = imagecolorat($image, $x, $y);
+                $rgb = imagecolorsforindex($image, $color);
+                
+                if ($rgb['red'] >= $whiteThreshold && 
+                    $rgb['green'] >= $whiteThreshold && 
+                    $rgb['blue'] >= $whiteThreshold) {
+                    $whiteCount++;
+                }
+            }
+            
+            imagedestroy($image);
+            
+            // Если более 95% точек белые - считаем изображение пустым
+            return ($whiteCount / $samplePoints) > 0.95;
+            
+        } catch (Exception $e) {
+            Log::error("isEmptyImage error: " . $e->getMessage());
+            return false; // В случае ошибки не пропускаем
+        }
+    }
+    
+    /**
+     * Проверяет, содержит ли изображение только номер страницы
+     */
+    public function isPageNumberOnly($imagePath)
+    {
+        try {
+            $fullPath = Storage::disk('public')->path($imagePath);
+            
+            if (!file_exists($fullPath)) {
+                return false;
+            }
+            
+            // Простая проверка по размеру файла
+            $size = filesize($fullPath);
+            
+            // Если файл очень маленький (меньше 2KB), скорее всего это номер страницы
+            if ($size < 2048) {
+                $imageInfo = @getimagesize($fullPath);
+                if ($imageInfo) {
+                    list($width, $height) = $imageInfo;
+                    
+                    // Если изображение узкое и высокое или маленькое
+                    if ($width < 100 || $height < 100) {
+                        return true;
+                    }
+                }
+            }
+            
+            return false;
+            
+        } catch (Exception $e) {
+            Log::error("isPageNumberOnly error: " . $e->getMessage());
+            return false;
+        }
+    
+}
 }

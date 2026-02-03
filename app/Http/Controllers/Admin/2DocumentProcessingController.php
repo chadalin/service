@@ -77,63 +77,6 @@ class DocumentProcessingController extends Controller
             'stats'
         ));
     }
-
-     /**
-     * Парсинг предпросмотра
-     */
-    private function parsePdfPreview($document, $filePath, $maxPages = 5)
-    {
-        try {
-            $parser = new Parser();
-            $pdf = $parser->parseFile($filePath);
-            $pages = $pdf->getPages();
-            $totalPages = count($pages);
-            
-            $pages = array_slice($pages, 0, min($maxPages, $totalPages));
-            
-            $totalWords = 0;
-            $totalQuality = 0;
-            
-            foreach ($pages as $index => $page) {
-                $pageNumber = $index + 1;
-                $text = $page->getText();
-                $wordCount = str_word_count($text);
-                
-                DocumentPage::create([
-                    'document_id' => $document->id,
-                    'page_number' => $pageNumber,
-                    'content' => $this->formatHtmlContent($text),
-                    'content_text' => $text,
-                    'word_count' => $wordCount,
-                    'character_count' => mb_strlen($text),
-                    'is_preview' => true,
-                    'section_title' => $this->extractSectionTitle($text),
-                    'parsing_quality' => $this->calculateParsingQuality($text),
-                    'status' => 'preview'
-                ]);
-                
-                $totalWords += $wordCount;
-                $totalQuality += $this->calculateParsingQuality($text);
-            }
-            
-            $avgQuality = count($pages) > 0 ? ($totalQuality / count($pages)) : 0.7;
-            
-            return [
-                'success' => true,
-                'processed_pages' => count($pages),
-                'total_pages' => $totalPages,
-                'word_count' => $totalWords,
-                'parsing_quality' => $avgQuality
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error('PDF preview error: ' . $e->getMessage());
-            return [
-                'success' => false,
-                'error' => $e->getMessage()
-            ];
-        }
-    }
     
     /**
      * Создать предпросмотр
@@ -205,90 +148,85 @@ class DocumentProcessingController extends Controller
     /**
      * Полный парсинг документа
      */
-   /**
-     * Полный парсинг документа с разбиением на чанки
-     */
-    public function parseFull(Request $request, $id)
-    {
-        try {
-            $document = Document::findOrFail($id);
+   public function parseFull(Request $request, $id)
+{
+    try {
+        $document = Document::findOrFail($id);
+        
+        if ($document->status === 'processing') {
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', 'Документ уже в обработке.');
+        }
+        
+        $document->update([
+            'status' => 'processing',
+            'processing_started_at' => now(),
+            'parsing_progress' => 0,
+            'parsing_quality' => 0.0
+        ]);
+        
+        $filePath = Storage::disk('local')->path($document->file_path);
+        
+        // Парсим весь PDF документ
+        $result = $this->parsePdfDocument($id, $filePath);
+        
+        if ($result['success']) {
+            // Извлекаем изображения с ресайзом
+            $imagesResult = $this->extractImagesWithPages($id, $filePath);
             
-            if ($document->status === 'processing') {
-                return redirect()->route('admin.documents.processing.advanced', $id)
-                    ->with('error', 'Документ уже в обработке.');
-            }
-            
-            // Начинаем обработку в фоне через AJAX
-            if ($request->ajax()) {
-                // Сохраняем задачу в кэше
-                Cache::put("document_processing_{$id}", [
-                    'status' => 'pending',
-                    'progress' => 0,
-                    'total_pages' => 0,
-                    'processed_pages' => 0,
-                    'started_at' => now(),
-                    'message' => 'Подготовка к обработке...'
-                ], now()->addHours(2));
-                
-                // Запускаем фоновую обработку
-                dispatch(function () use ($document) {
-                    $this->processLargePdfInBackground($document);
-                });
-                
-                return response()->json([
-                    'success' => true,
-                    'message' => 'Обработка запущена в фоне',
-                    'task_id' => "doc_{$id}",
-                    'check_url' => route('admin.documents.processing.progress', $id)
-                ]);
-            }
-            
-            // Синхронная обработка для небольших файлов
-            $filePath = Storage::disk('local')->path($document->file_path);
-            $fileSizeMB = filesize($filePath) / (1024 * 1024);
-            
-            if ($fileSizeMB > 50) {
-                // Для больших файлов запускаем асинхронно
-                Cache::put("document_processing_{$id}", [
-                    'status' => 'pending',
-                    'progress' => 0,
-                    'message' => 'Запуск обработки большого документа...'
-                ], now()->addHours(2));
-                
-                dispatch(function () use ($document) {
-                    $this->processLargePdfInBackground($document);
-                });
-                
-                return redirect()->route('admin.documents.processing.advanced', $id)
-                    ->with('success', "Запущена фоновая обработка документа ({$fileSizeMB} MB). Обновите страницу через несколько минут.");
-            }
-            
-            // Для маленьких файлов - синхронно
             $document->update([
-                'status' => 'processing',
-                'processing_started_at' => now(),
-                'parsing_progress' => 0
+                'status' => 'parsed',
+                'is_parsed' => true,
+                'parsing_progress' => 100,
+                'parsing_quality' => $result['parsing_quality'],
+                'total_pages' => $result['total_pages'],
+                'word_count' => $result['word_count'],
+                'content_text' => $result['full_text'],
+                'parsed_at' => now()
             ]);
             
-            $result = $this->processPdfWithChunks($document);
+            $message = "✅ Документ успешно распарсен!<br>";
+            $message .= "📄 Страниц: {$result['processed_pages']}<br>";
+            $message .= "📝 Слов: {$result['word_count']}<br>";
             
-            if ($result['success']) {
-                return redirect()->route('admin.documents.processing.advanced', $id)
-                    ->with('success', "✅ Документ успешно распарсен!<br>" . 
-                           "📄 Страниц: {$result['pages']}<br>" .
-                           "📝 Слов: {$result['words']}<br>" .
-                           "🖼️ Изображений: {$result['images']}");
-            } else {
-                return redirect()->route('admin.documents.processing.advanced', $id)
-                    ->with('error', "❌ Ошибка: " . $result['error']);
+            if ($imagesResult['success']) {
+                $message .= "🖼️ Изображений: {$imagesResult['images_count']}<br>";
+                $message .= "🖼️ Миниатюр: {$imagesResult['thumbnails_created']}<br>";
+                $message .= "📸 Скриншотов: {$imagesResult['screenshots_created']}<br>";
+                $message .= "📖 Страниц с изображениями: {$imagesResult['pages_with_images']}<br>";
+                if ($imagesResult['skipped_count'] > 0) {
+                    $message .= "⏭️ Пропущено: {$imagesResult['skipped_count']}";
+                }
             }
             
-        } catch (\Exception $e) {
-            Log::error('Full parse error: ' . $e->getMessage());
             return redirect()->route('admin.documents.processing.advanced', $id)
-                ->with('error', "Ошибка сервера: " . $e->getMessage());
+                ->with('success', $message);
+        } else {
+            $document->update([
+                'status' => 'parse_error',
+                'parsing_progress' => 0,
+                'parsing_quality' => 0.0
+            ]);
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', "Ошибка парсинга: " . $result['error']);
         }
+            
+    } catch (\Exception $e) {
+        Log::error('Full parse error: ' . $e->getMessage());
+        
+        if (isset($document)) {
+            $document->update([
+                'status' => 'parse_error',
+                'parsing_progress' => 0,
+                'parsing_quality' => 0.0
+            ]);
+        }
+        
+        return redirect()->route('admin.documents.processing.advanced', $id)
+            ->with('error', "Ошибка сервера: " . $e->getMessage());
     }
+}
     
     /**
      * Извлечь только изображения
@@ -473,37 +411,16 @@ class DocumentProcessingController extends Controller
     /**
      * Получить прогресс обработки (JSON для AJAX)
      */
-     public function getProcessingProgress(Request $request, $id)
+    public function getProcessingProgress(Request $request, $id)
     {
         try {
-            $cacheKey = "document_processing_{$id}";
-            $progressData = Cache::get($cacheKey, [
-                'status' => 'not_started',
-                'progress' => 0,
-                'message' => 'Обработка не начата'
-            ]);
-            
-            // Если нет данных в кэше, проверяем статус документа
-            if ($progressData['status'] === 'not_started') {
-                $document = Document::find($id);
-                if ($document) {
-                    $progressData = [
-                        'status' => $document->status,
-                        'progress' => $document->parsing_progress ?? 0,
-                        'message' => $this->getProgressMessage($document)
-                    ];
-                }
-            }
+            $document = Document::findOrFail($id);
             
             return response()->json([
                 'success' => true,
-                'status' => $progressData['status'],
-                'progress' => $progressData['progress'],
-                'message' => $progressData['message'] ?? '',
-                'processed_pages' => $progressData['processed_pages'] ?? 0,
-                'total_pages' => $progressData['total_pages'] ?? 0,
-                'images_count' => $progressData['images_count'] ?? 0,
-                'timestamp' => now()->toDateTimeString()
+                'progress' => number_format($document->parsing_progress ?? 0, 2),
+                'status' => $document->status,
+                'message' => $this->getProgressMessage($document)
             ]);
             
         } catch (\Exception $e) {
@@ -512,277 +429,6 @@ class DocumentProcessingController extends Controller
                 'success' => false,
                 'error' => $e->getMessage()
             ]);
-        }
-    }
-
-    // =================================================
-    // ОСНОВНЫЕ МЕТОДЫ ОБРАБОТКИ PDF
-    // =================================================
-    
-    /**
-     * Обработка PDF с разбиением на чанки
-     */
-    private function processPdfWithChunks(Document $document)
-    {
-        try {
-            $cacheKey = "document_processing_{$document->id}";
-            
-            // Увеличиваем лимиты
-            ini_set('memory_limit', '2048M');
-            set_time_limit(3600); // 1 час
-            
-            $filePath = Storage::disk('local')->path($document->file_path);
-            $fileSizeMB = filesize($filePath) / (1024 * 1024);
-            
-            Log::info("🚀 Начинаем обработку PDF: {$document->title} ({$fileSizeMB} MB)");
-            
-            // Определяем размер чанка
-            $chunkSize = $this->calculateChunkSize($fileSizeMB);
-            
-            // Получаем количество страниц
-            $pageCount = $this->getPdfPageCount($filePath);
-            
-            Cache::put($cacheKey, [
-                'status' => 'processing',
-                'progress' => 0,
-                'total_pages' => $pageCount,
-                'processed_pages' => 0,
-                'images_count' => 0,
-                'message' => "Начинаем обработку {$pageCount} страниц..."
-            ], now()->addHours(2));
-            
-            $document->update([
-                'status' => 'processing',
-                'processing_started_at' => now(),
-                'parsing_progress' => 0,
-                'total_pages' => $pageCount
-            ]);
-            
-            $totalWords = 0;
-            $totalImages = 0;
-            $fullText = '';
-            
-            // Обрабатываем по чанкам
-            $chunks = ceil($pageCount / $chunkSize);
-            
-            for ($chunkIndex = 0; $chunkIndex < $chunks; $chunkIndex++) {
-                $startPage = ($chunkIndex * $chunkSize) + 1;
-                $endPage = min(($chunkIndex + 1) * $chunkSize, $pageCount);
-                
-                Log::info("🔄 Чанк {$chunkIndex}: страницы {$startPage}-{$endPage}");
-                
-                // Обрабатываем чанк
-                $chunkResult = $this->processPdfChunk($document, $filePath, $startPage, $endPage);
-                
-                $totalWords += $chunkResult['words'];
-                $totalImages += $chunkResult['images'];
-                $fullText .= $chunkResult['text'];
-                
-                // Обновляем прогресс
-                $progress = round(($endPage / $pageCount) * 100);
-                $currentProgress = Cache::get($cacheKey);
-                $currentProgress['progress'] = $progress;
-                $currentProgress['processed_pages'] = $endPage;
-                $currentProgress['images_count'] = $totalImages;
-                $currentProgress['message'] = "Обработано {$endPage}/{$pageCount} страниц, найдено {$totalImages} изображений";
-                
-                Cache::put($cacheKey, $currentProgress, now()->addHours(2));
-                
-                $document->update([
-                    'parsing_progress' => $progress,
-                    'word_count' => $totalWords
-                ]);
-                
-                // Очищаем память
-                if (function_exists('gc_collect_cycles')) {
-                    gc_collect_cycles();
-                }
-            }
-            
-            // Завершаем обработку
-            $document->update([
-                'status' => 'parsed',
-                'is_parsed' => true,
-                'parsing_progress' => 100,
-                'parsing_quality' => 0.9,
-                'word_count' => $totalWords,
-                'content_text' => $fullText,
-                'parsed_at' => now()
-            ]);
-            
-            Cache::put($cacheKey, [
-                'status' => 'completed',
-                'progress' => 100,
-                'processed_pages' => $pageCount,
-                'total_pages' => $pageCount,
-                'images_count' => $totalImages,
-                'message' => "✅ Обработка завершена! Страниц: {$pageCount}, Изображений: {$totalImages}"
-            ], now()->addHours(1));
-            
-            Log::info("🎉 PDF обработка завершена: {$pageCount} страниц, {$totalImages} изображений");
-            
-            return [
-                'success' => true,
-                'pages' => $pageCount,
-                'words' => $totalWords,
-                'images' => $totalImages,
-                'message' => "Обработано {$pageCount} страниц"
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error("❌ PDF processing error: " . $e->getMessage());
-            
-            Cache::put("document_processing_{$document->id}", [
-                'status' => 'failed',
-                'progress' => 0,
-                'error' => $e->getMessage(),
-                'message' => "❌ Ошибка: " . $e->getMessage()
-            ], now()->addHours(1));
-            
-            $document->update([
-                'status' => 'parse_error',
-                'parsing_progress' => 0
-            ]);
-            
-            return [
-                'success' => false,
-                'error' => $e->getMessage()
-            ];
-        }
-    }
-    
-    /**
-     * Обработка чанка PDF
-     */
-    private function processPdfChunk(Document $document, $filePath, $startPage, $endPage)
-    {
-        $totalWords = 0;
-        $totalImages = 0;
-        $chunkText = '';
-        
-        try {
-            $parser = new Parser();
-            $pdf = $parser->parseFile($filePath);
-            $pages = $pdf->getPages();
-            
-            // Обрабатываем только нужные страницы из чанка
-            for ($pageIndex = $startPage - 1; $pageIndex < $endPage; $pageIndex++) {
-                if (!isset($pages[$pageIndex])) continue;
-                
-                $pageNumber = $pageIndex + 1;
-                $page = $pages[$pageIndex];
-                
-                // Извлекаем текст
-                $text = $page->getText();
-                $wordCount = str_word_count($text);
-                
-                // Сохраняем страницу
-                $documentPage = DocumentPage::create([
-                    'document_id' => $document->id,
-                    'page_number' => $pageNumber,
-                    'content' => $this->formatHtmlContent($text),
-                    'content_text' => $text,
-                    'word_count' => $wordCount,
-                    'character_count' => mb_strlen($text),
-                    'section_title' => $this->extractSectionTitle($text),
-                    'parsing_quality' => $this->calculateParsingQuality($text),
-                    'status' => 'parsed'
-                ]);
-                
-                $totalWords += $wordCount;
-                $chunkText .= $text . "\n\n";
-                
-                Log::info("📄 Страница {$pageNumber} сохранена: {$wordCount} слов");
-            }
-            
-            // Извлекаем изображения для этого диапазона страниц
-            $imagesResult = $this->extractImagesForPages($document->id, $filePath, $startPage, $endPage);
-            $totalImages = $imagesResult['images_count'] ?? 0;
-            
-            return [
-                'words' => $totalWords,
-                'images' => $totalImages,
-                'text' => $chunkText,
-                'success' => true
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error("❌ Chunk processing error: " . $e->getMessage());
-            return [
-                'words' => $totalWords,
-                'images' => $totalImages,
-                'text' => $chunkText,
-                'error' => $e->getMessage()
-            ];
-        }
-    }
-    
-    /**
-     * Извлечение изображений для диапазона страниц
-     */
-    private function extractImagesForPages($documentId, $filePath, $startPage, $endPage)
-    {
-        try {
-            // Создаем директории
-            $imagesDir = "document_images/{$documentId}/pages_{$startPage}_{$endPage}";
-            $screenshotsDir = "document_images/screenshots/{$documentId}";
-            
-            Storage::disk('public')->makeDirectory($imagesDir, 0755, true);
-            Storage::disk('public')->makeDirectory($screenshotsDir, 0755, true);
-            
-            // Используем сервис извлечения изображений
-            $imageService = new SimpleImageExtractionService();
-            $images = $imageService->extractImagesForPages($filePath, $imagesDir, $startPage, $endPage);
-            
-            $savedCount = 0;
-            
-            foreach ($images as $index => $imageData) {
-                if (!isset($imageData['path']) || !Storage::disk('public')->exists($imageData['path'])) {
-                    continue;
-                }
-                
-                // Создаем скриншот с обрезкой
-                $filename = basename($imageData['path']);
-                $baseName = pathinfo($filename, PATHINFO_FILENAME);
-                $screenshotPath = $screenshotsDir . '/screen_' . $baseName . '.jpg';
-                
-                $screenshotCreated = $this->createUltraScreenshot($imageData['path'], $screenshotPath, 800, 600);
-                
-                // Сохраняем в базу
-                DocumentImage::create([
-                    'document_id' => $documentId,
-                    'page_number' => $startPage, // Упрощенная логика
-                    'filename' => $filename,
-                    'path' => $imageData['path'],
-                    'url' => Storage::url($imageData['path']),
-                    'screenshot_path' => $screenshotCreated ? $screenshotPath : null,
-                    'screenshot_url' => $screenshotCreated ? Storage::url($screenshotPath) : null,
-                    'width' => $imageData['width'] ?? null,
-                    'height' => $imageData['height'] ?? null,
-                    'size' => Storage::disk('public')->size($imageData['path']),
-                    'has_screenshot' => $screenshotCreated,
-                    'description' => "Изображение " . ($savedCount + 1),
-                    'status' => 'active'
-                ]);
-                
-                $savedCount++;
-            }
-            
-            Log::info("✅ Извлечено изображений: {$savedCount} для страниц {$startPage}-{$endPage}");
-            
-            return [
-                'success' => true,
-                'images_count' => $savedCount,
-                'message' => "Извлечено {$savedCount} изображений"
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error("❌ Image extraction error: " . $e->getMessage());
-            return [
-                'success' => false,
-                'error' => $e->getMessage(),
-                'images_count' => 0
-            ];
         }
     }
     
@@ -1561,17 +1207,6 @@ private function getImageInfo($path)
         
         $images = $page->images ?? collect();
         
-        // Проверяем скриншоты
-        foreach ($images as $image) {
-            if ($image->screenshot_path) {
-                $image->has_screenshot = Storage::disk('public')->exists($image->screenshot_path);
-                if ($image->has_screenshot) {
-                    $image->screenshot_url = Storage::url($image->screenshot_path);
-                    $image->screenshot_size = Storage::disk('public')->size($image->screenshot_path);
-                }
-            }
-        }
-        
         return view('admin.documents.processing.page_show', compact('document', 'page', 'images'));
     }
     
@@ -1594,9 +1229,34 @@ private function getImageInfo($path)
      * Вспомогательные методы
      */
     
-   
+    private function formatHtmlContent($text)
+    {
+        $lines = explode("\n", $text);
+        $html = '';
+        
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (empty($line)) {
+                $html .= "<br>\n";
+            } else {
+                $html .= "<p>" . htmlspecialchars($line) . "</p>\n";
+            }
+        }
+        
+        return $html;
+    }
     
-   
+    private function extractSectionTitle($text)
+    {
+        $lines = explode("\n", $text);
+        foreach ($lines as $line) {
+            $line = trim($line);
+            if (mb_strlen($line) < 100 && !empty($line) && preg_match('/^[А-ЯA-Z]/u', $line)) {
+                return $line;
+            }
+        }
+        return '';
+    }
     
     private function calculateParsingQuality($text)
     {
@@ -1695,9 +1355,6 @@ private function getImageInfo($path)
         }
     }
     
-    /**
-     * Рассчитывает статистику
-     */
     private function calculateStats($document, $pages, $images)
     {
         $pagesCount = $pages->count();
@@ -1706,6 +1363,7 @@ private function getImageInfo($path)
         $wordsCount = $pages->sum('word_count');
         $charactersCount = $pages->sum('character_count');
         
+        // Форматируем размер файла
         $fileSize = 'N/A';
         if ($document->file_path) {
             try {
@@ -1727,9 +1385,6 @@ private function getImageInfo($path)
         ];
     }
     
-    /**
-     * Форматирует размер файла
-     */
     private function formatFileSize($bytes)
     {
         if ($bytes >= 1073741824) {
@@ -1747,6 +1402,21 @@ private function getImageInfo($path)
         }
     }
     
+    private function getProgressMessage($document)
+    {
+        switch ($document->status) {
+            case 'processing':
+                return "Обработка документа... " . number_format($document->parsing_progress ?? 0, 2) . "%";
+            case 'parsed':
+                return "Документ успешно распарсен";
+            case 'preview_created':
+                return "Создан предпросмотр документа";
+            case 'parse_error':
+                return "Ошибка при обработке документа";
+            default:
+                return "Готов к обработке";
+        }
+    }
 
     /**
  * Быстрое извлечение изображений (пропускает пустые)
@@ -3517,7 +3187,27 @@ private function createSimpleResize($sourcePath, $destinationPath, $maxWidth, $m
     }
 }
 
-
+/**
+ * Создает ресурс изображения
+ */
+private function createImageResource($path, $type)
+{
+    switch ($type) {
+        case IMAGETYPE_JPEG:
+            return imagecreatefromjpeg($path);
+        case IMAGETYPE_PNG:
+            $img = imagecreatefrompng($path);
+            if ($img) {
+                imagealphablending($img, false);
+                imagesavealpha($img, true);
+            }
+            return $img;
+        case IMAGETYPE_GIF:
+            return imagecreatefromgif($path);
+        default:
+            return @imagecreatefromstring(file_get_contents($path));
+    }
+}
 
 /**
  * Обрезка границ с учетом содержимого
@@ -3618,105 +3308,146 @@ private function trimTextPageBorders($sourceImage, $width, $height)
 /**
  * Простая но эффективная обрезка белых полей
  */
- private function trimWhiteBordersSimple($sourceImage, $width, $height)
-    {
-        try {
-            $threshold = 240;
-            $top = $height;
-            $bottom = 0;
-            $left = $width;
-            $right = 0;
-            
-            // Сканируем края
-            $step = max(1, floor(min($width, $height) / 50));
-            
-            // Верхняя граница
-            for ($y = 0; $y < $height; $y += $step) {
-                for ($x = 0; $x < $width; $x += $step) {
-                    $color = imagecolorat($sourceImage, $x, $y);
-                    $rgb = imagecolorsforindex($sourceImage, $color);
-                    
-                    if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
-                        $top = $y;
-                        break 2;
-                    }
-                }
-            }
-            
-            // Нижняя граница
-            for ($y = $height - 1; $y >= 0; $y -= $step) {
-                for ($x = 0; $x < $width; $x += $step) {
-                    $color = imagecolorat($sourceImage, $x, $y);
-                    $rgb = imagecolorsforindex($sourceImage, $color);
-                    
-                    if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
-                        $bottom = $y;
-                        break 2;
-                    }
-                }
-            }
-            
-            // Левая граница
+private function trimWhiteBordersSimple($sourceImage, $width, $height)
+{
+    try {
+        // Находим границы НЕ-белого содержимого
+        $top = $height;
+        $bottom = 0;
+        $left = $width;
+        $right = 0;
+        
+        // Порог для "не-белого" (чем ниже, тем более агрессивная обрезка)
+        $threshold = 240;
+        
+        // Сканируем каждую 20-ю строку и столбец для скорости
+        $step = max(1, floor(min($width, $height) / 50));
+        
+        // Ищем верхнюю границу
+        for ($y = 0; $y < $height; $y += $step) {
+            $found = false;
             for ($x = 0; $x < $width; $x += $step) {
-                for ($y = 0; $y < $height; $y += $step) {
-                    $color = imagecolorat($sourceImage, $x, $y);
-                    $rgb = imagecolorsforindex($sourceImage, $color);
-                    
-                    if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
-                        $left = $x;
-                        break 2;
-                    }
+                $color = imagecolorat($sourceImage, $x, $y);
+                $rgb = imagecolorsforindex($sourceImage, $color);
+                
+                // Если пиксель НЕ белый
+                if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
+                    $top = $y;
+                    $found = true;
+                    break;
                 }
             }
-            
-            // Правая граница
-            for ($x = $width - 1; $x >= 0; $x -= $step) {
-                for ($y = 0; $y < $height; $y += $step) {
-                    $color = imagecolorat($sourceImage, $x, $y);
-                    $rgb = imagecolorsforindex($sourceImage, $color);
-                    
-                    if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
-                        $right = $x;
-                        break 2;
-                    }
+            if ($found) break;
+        }
+        
+        // Ищем нижнюю границу
+        for ($y = $height - 1; $y >= 0; $y -= $step) {
+            $found = false;
+            for ($x = 0; $x < $width; $x += $step) {
+                $color = imagecolorat($sourceImage, $x, $y);
+                $rgb = imagecolorsforindex($sourceImage, $color);
+                
+                if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
+                    $bottom = $y;
+                    $found = true;
+                    break;
                 }
             }
-            
-            // Добавляем отступы
-            $paddingX = floor($width * 0.02);
-            $paddingY = floor($height * 0.02);
-            
-            $top = max(0, $top - $paddingY);
-            $bottom = min($height - 1, $bottom + $paddingY);
-            $left = max(0, $left - $paddingX);
-            $right = min($width - 1, $right + $paddingX);
-            
-            $cropWidth = $right - $left + 1;
-            $cropHeight = $bottom - $top + 1;
-            
-            // Если обрезка минимальна, возвращаем оригинал
-            if ($cropWidth > $width * 0.95 && $cropHeight > $height * 0.95) {
-                return [$sourceImage, $width, $height];
+            if ($found) break;
+        }
+        
+        // Ищем левую границу
+        for ($x = 0; $x < $width; $x += $step) {
+            $found = false;
+            for ($y = 0; $y < $height; $y += $step) {
+                $color = imagecolorat($sourceImage, $x, $y);
+                $rgb = imagecolorsforindex($sourceImage, $color);
+                
+                if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
+                    $left = $x;
+                    $found = true;
+                    break;
+                }
             }
-            
-            // Создаем обрезанное изображение
-            $croppedImage = imagecreatetruecolor($cropWidth, $cropHeight);
-            $white = imagecolorallocate($croppedImage, 255, 255, 255);
-            imagefill($croppedImage, 0, 0, $white);
-            
-            imagecopy($croppedImage, $sourceImage, 0, 0, $left, $top, $cropWidth, $cropHeight);
-            
-            imagedestroy($sourceImage);
-            
-            Log::info("✂️ Обрезка: {$width}x{$height} -> {$cropWidth}x{$cropHeight}");
-            
-            return [$croppedImage, $cropWidth, $cropHeight];
-            
-        } catch (\Exception $e) {
-            Log::error("❌ Ошибка обрезки: " . $e->getMessage());
+            if ($found) break;
+        }
+        
+        // Ищем правую границу
+        for ($x = $width - 1; $x >= 0; $x -= $step) {
+            $found = false;
+            for ($y = 0; $y < $height; $y += $step) {
+                $color = imagecolorat($sourceImage, $x, $y);
+                $rgb = imagecolorsforindex($sourceImage, $color);
+                
+                if ($rgb['red'] < $threshold || $rgb['green'] < $threshold || $rgb['blue'] < $threshold) {
+                    $right = $x;
+                    $found = true;
+                    break;
+                }
+            }
+            if ($found) break;
+        }
+        
+        // Если не нашли границ (все пиксели белые)
+        if ($top == $height && $bottom == 0 && $left == $width && $right == 0) {
+            Log::info("Image is completely white, no trimming possible");
             return [$sourceImage, $width, $height];
         }
+        
+        // Проверяем что границы валидны
+        if ($top >= $bottom || $left >= $right) {
+            Log::warning("Invalid borders found: top={$top}, bottom={$bottom}, left={$left}, right={$right}");
+            return [$sourceImage, $width, $height];
+        }
+        
+        // Добавляем небольшой отступ (1% от размеров)
+        $paddingX = floor($width * 0.01);
+        $paddingY = floor($height * 0.01);
+        
+        $top = max(0, $top - $paddingY);
+        $bottom = min($height - 1, $bottom + $paddingY);
+        $left = max(0, $left - $paddingX);
+        $right = min($width - 1, $right + $paddingX);
+        
+        $cropWidth = $right - $left + 1;
+        $cropHeight = $bottom - $top + 1;
+        
+        // Проверяем что обрезка имеет смысл (убрали хотя бы 5% с каждой стороны)
+        $widthReduction = ($width - $cropWidth) / $width * 100;
+        $heightReduction = ($height - $cropHeight) / $height * 100;
+        
+        Log::info("Found borders: top={$top}, bottom={$bottom}, left={$left}, right={$right}");
+        Log::info("Original: {$width}x{$height}, Cropped: {$cropWidth}x{$cropHeight}");
+        Log::info("Reduction: width {$widthReduction}%, height {$heightReduction}%");
+        
+        // Если обрезка убрала меньше 2% с каждой стороны - не обрезаем
+        if ($widthReduction < 2 && $heightReduction < 2) {
+            Log::info("Trim not effective enough (<2% reduction), keeping original");
+            return [$sourceImage, $width, $height];
+        }
+        
+        // Создаем обрезанное изображение
+        $croppedImage = imagecreatetruecolor($cropWidth, $cropHeight);
+        
+        // Белый фон
+        $white = imagecolorallocate($croppedImage, 255, 255, 255);
+        imagefill($croppedImage, 0, 0, $white);
+        
+        // Копируем обрезанную область
+        imagecopy($croppedImage, $sourceImage, 0, 0, $left, $top, $cropWidth, $cropHeight);
+        
+        // Освобождаем память исходного изображения
+        imagedestroy($sourceImage);
+        
+        Log::info("✅ Successfully trimmed image");
+        
+        return [$croppedImage, $cropWidth, $cropHeight];
+        
+    } catch (\Exception $e) {
+        Log::error("❌ Simple trim error: " . $e->getMessage());
+        return [$sourceImage, $width, $height];
     }
+}
 
   /**
  * Агрессивная обрезка - ищет САМЫЕ КРАЙНИЕ не-белые пиксели
@@ -4066,238 +3797,141 @@ private function analyzeImageDetails($sourcePath)
 /**
  * Ультра-агрессивный скриншот с обрезкой
  */
- // =================================================
-    // МЕТОДЫ ОБРАБОТКИ СКРИНШОТОВ
-    // =================================================
-    
-    /**
-     * Создает скриншот с обрезкой белого фона
-     */
-    private function createUltraScreenshot($sourcePath, $destinationPath, $maxWidth = 800, $maxHeight = 600)
-    {
-        try {
-            Log::info("🎨 Создаем скриншот для: {$sourcePath}");
-            
-            $fullSourcePath = Storage::disk('public')->path($sourcePath);
-            $fullDestPath = Storage::disk('public')->path($destinationPath);
-            
-            if (!file_exists($fullSourcePath)) {
-                Log::error("❌ Файл не найден: {$sourcePath}");
-                return false;
-            }
-            
-            // Создаем директорию если не существует
-            $dir = dirname($fullDestPath);
-            if (!is_dir($dir)) {
-                mkdir($dir, 0755, true);
-            }
-            
-            // Получаем информацию об изображении
-            $imageInfo = @getimagesize($fullSourcePath);
-            if (!$imageInfo) {
-                Log::error("❌ Неверный формат изображения: {$sourcePath}");
-                return false;
-            }
-            
-            list($srcWidth, $srcHeight, $type) = $imageInfo;
-            Log::info("📐 Оригинальный размер: {$srcWidth}x{$srcHeight}");
-            
-            // Загружаем изображение
-            $sourceImage = $this->createImageResource($fullSourcePath, $type);
-            if (!$sourceImage) {
-                Log::error("❌ Не удалось загрузить изображение");
-                return false;
-            }
-            
-            // Обрезаем белые поля
-            list($croppedImage, $cropWidth, $cropHeight) = $this->trimWhiteBordersSimple(
-                $sourceImage, $srcWidth, $srcHeight
-            );
-            
-            // Ресайз
-            if ($cropWidth <= $maxWidth && $cropHeight <= $maxHeight) {
-                $newWidth = $cropWidth;
-                $newHeight = $cropHeight;
-            } else {
-                $ratio = min($maxWidth / $cropWidth, $maxHeight / $cropHeight);
-                $newWidth = floor($cropWidth * $ratio);
-                $newHeight = floor($cropHeight * $ratio);
-            }
-            
-            // Создаем финальное изображение
-            $finalImage = imagecreatetruecolor($newWidth, $newHeight);
-            $white = imagecolorallocate($finalImage, 255, 255, 255);
-            imagefill($finalImage, 0, 0, $white);
-            
-            imagecopyresampled(
-                $finalImage, $croppedImage,
-                0, 0, 0, 0,
-                $newWidth, $newHeight, $cropWidth, $cropHeight
-            );
-            
-            // Сохраняем
-            $result = imagejpeg($finalImage, $fullDestPath, 85);
-            
-            if ($result) {
-                $originalSize = filesize($fullSourcePath);
-                $finalSize = filesize($fullDestPath);
-                $savedPercent = round(($originalSize - $finalSize) / $originalSize * 100, 2);
-                
-                Log::info("✅ Скриншот создан успешно!");
-                Log::info("📍 {$destinationPath}");
-                Log::info("📏 {$newWidth}x{$newHeight}");
-                Log::info("💰 Сжатие: {$savedPercent}%");
-            }
-            
-            // Очистка памяти
-            imagedestroy($sourceImage);
-            imagedestroy($croppedImage);
-            imagedestroy($finalImage);
-            
-            return $result;
-            
-        } catch (\Exception $e) {
-            Log::error("❌ Ошибка создания скриншота: " . $e->getMessage());
-            Log::error("📍 File: " . $e->getFile() . ":" . $e->getLine());
+private function createUltraScreenshot($sourcePath, $destinationPath, $maxWidth = 800, $maxHeight = 600)
+{
+    try {
+        $fullSourcePath = Storage::disk('public')->path($sourcePath);
+        $fullDestPath = Storage::disk('public')->path($destinationPath);
+        
+        if (!file_exists($fullSourcePath)) {
+            Log::error("❌ File not found: {$sourcePath}");
             return false;
         }
-    }
-
-    // =================================================
-    // ВСПОМОГАТЕЛЬНЫЕ МЕТОДЫ
-    // =================================================
-    
-    /**
-     * Рассчитывает размер чанка
-     */
-    private function calculateChunkSize($fileSizeMB)
-    {
-        if ($fileSizeMB > 200) return 3;
-        if ($fileSizeMB > 100) return 5;
-        if ($fileSizeMB > 50) return 10;
-        if ($fileSizeMB > 20) return 15;
-        return 20;
-    }
-
-    /**
-     * Получает количество страниц в PDF
-     */
-    private function getPdfPageCount($filePath)
-    {
-        try {
-            $pdf = new Fpdi();
-            return $pdf->setSourceFile($filePath);
-        } catch (\Exception $e) {
-            Log::error("❌ Error getting page count: " . $e->getMessage());
-            
-            // Fallback: пробуем через парсер
-            try {
-                $parser = new Parser();
-                $pdf = $parser->parseFile($filePath);
-                return count($pdf->getPages());
-            } catch (\Exception $e2) {
-                throw new \Exception("Не удалось прочитать PDF: " . $e->getMessage());
-            }
-        }
-    }
-    
-    /**
-     * Создает ресурс изображения
-     */
-    private function createImageResource($path, $type)
-    {
-        switch ($type) {
-            case IMAGETYPE_JPEG:
-                return imagecreatefromjpeg($path);
-            case IMAGETYPE_PNG:
-                $img = imagecreatefrompng($path);
-                if ($img) {
-                    imagealphablending($img, false);
-                    imagesavealpha($img, true);
-                }
-                return $img;
-            case IMAGETYPE_GIF:
-                return imagecreatefromgif($path);
-            default:
-                return @imagecreatefromstring(file_get_contents($path));
-        }
-    }
-    
-    /**
-     * Форматирует HTML контент
-     */
-    private function formatHtmlContent($text)
-    {
-        $lines = explode("\n", $text);
-        $html = '';
         
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if (empty($line)) {
-                $html .= "<br>\n";
+        $imageInfo = @getimagesize($fullSourcePath);
+        if (!$imageInfo) {
+            Log::error("❌ Invalid image: {$sourcePath}");
+            return false;
+        }
+        
+        list($srcWidth, $srcHeight, $type) = $imageInfo;
+        
+        Log::info("🚀 ULTRA processing: {$sourcePath}");
+        Log::info("📐 Original size: {$srcWidth}x{$srcHeight}");
+        
+        // Анализируем изображение
+        $analysis = $this->analyzeImageDetails($sourcePath);
+        
+        if (isset($analysis['error'])) {
+            Log::error("❌ Analysis failed: " . $analysis['error']);
+        } else {
+            Log::info("🔬 Analysis: white borders = " . ($analysis['has_white_borders'] ? 'YES' : 'NO'));
+        }
+        
+        $sourceImage = $this->createImageResource($fullSourcePath, $type);
+        if (!$sourceImage) {
+            Log::error("❌ Failed to load image");
+            return false;
+        }
+        
+        // Определяем стратегию обрезки на основе анализа
+        $shouldTrim = false;
+        $trimMethod = 'none';
+        
+        if (isset($analysis['has_white_borders']) && $analysis['has_white_borders']) {
+            Log::info("⚡ White borders detected, using aggressive trim");
+            $shouldTrim = true;
+            $trimMethod = 'aggressive';
+        } else {
+            Log::info("⚡ No white borders, using fixed percentage trim");
+            $shouldTrim = true;
+            $trimMethod = 'fixed';
+        }
+        
+        // Обрезка
+        if ($shouldTrim) {
+            if ($trimMethod === 'aggressive') {
+                list($croppedImage, $cropWidth, $cropHeight) = $this->trimAggressive(
+                    $sourceImage, $srcWidth, $srcHeight
+                );
             } else {
-                $html .= "<p>" . htmlspecialchars($line) . "</p>\n";
+                // Фиксированная обрезка 10%
+                $trimPercent = 0.10;
+                $top = floor($srcHeight * $trimPercent);
+                $bottom = floor($srcHeight * (1 - $trimPercent));
+                $left = floor($srcWidth * $trimPercent);
+                $right = floor($srcWidth * (1 - $trimPercent));
+                
+                $cropWidth = $right - $left;
+                $cropHeight = $bottom - $top;
+                
+                Log::info("✂️ Fixed 10% crop: {$cropWidth}x{$cropHeight}");
+                
+                $croppedImage = imagecreatetruecolor($cropWidth, $cropHeight);
+                $white = imagecolorallocate($croppedImage, 255, 255, 255);
+                imagefill($croppedImage, 0, 0, $white);
+                
+                imagecopy($croppedImage, $sourceImage, 0, 0, $left, $top, $cropWidth, $cropHeight);
+                
+                imagedestroy($sourceImage);
             }
+        } else {
+            $croppedImage = $sourceImage;
+            $cropWidth = $srcWidth;
+            $cropHeight = $srcHeight;
         }
         
-        return $html;
-    }
-    
-    /**
-     * Извлекает заголовок раздела
-     */
-    private function extractSectionTitle($text)
-    {
-        $lines = explode("\n", $text);
-        foreach ($lines as $line) {
-            $line = trim($line);
-            if (mb_strlen($line) < 100 && !empty($line) && preg_match('/^[А-ЯA-Z]/u', $line)) {
-                return $line;
-            }
-        }
-        return '';
-    }
-    
-    /**
-     * Рассчитывает качество парсинга
-     */
-    
-    
-    /**
-     * Получает сообщение о прогрессе
-     */
-    private function getProgressMessage($document)
-    {
-        $cacheKey = "document_processing_{$document->id}";
-        $cacheData = Cache::get($cacheKey);
+        Log::info("📏 After processing: {$cropWidth}x{$cropHeight}");
         
-        if ($cacheData) {
-            return $cacheData['message'] ?? 'Обработка...';
+        // Ресайз
+        if ($cropWidth <= $maxWidth && $cropHeight <= $maxHeight) {
+            $newWidth = $cropWidth;
+            $newHeight = $cropHeight;
+        } else {
+            $ratio = min($maxWidth / $cropWidth, $maxHeight / $cropHeight);
+            $newWidth = floor($cropWidth * $ratio);
+            $newHeight = floor($cropHeight * $ratio);
         }
         
-        switch ($document->status) {
-            case 'processing':
-                return "Обработка документа... " . number_format($document->parsing_progress ?? 0, 2) . "%";
-            case 'parsed':
-                return "✅ Документ успешно распарсен";
-            case 'preview_created':
-                return "Создан предпросмотр документа";
-            case 'parse_error':
-                return "❌ Ошибка при обработке документа";
-            default:
-                return "Готов к обработке";
+        Log::info("📐 Final size: {$newWidth}x{$newHeight}");
+        
+        // Создаем финальное изображение
+        $finalImage = imagecreatetruecolor($newWidth, $newHeight);
+        $white = imagecolorallocate($finalImage, 255, 255, 255);
+        imagefill($finalImage, 0, 0, $white);
+        
+        imagecopyresampled(
+            $finalImage, $croppedImage,
+            0, 0, 0, 0,
+            $newWidth, $newHeight, $cropWidth, $cropHeight
+        );
+        
+        // Сохраняем
+        $this->createDirectory($fullDestPath);
+        $result = imagejpeg($finalImage, $fullDestPath, 85);
+        
+        if ($result) {
+            $originalSize = filesize($fullSourcePath);
+            $finalSize = filesize($fullDestPath);
+            $savedPercent = round(($originalSize - $finalSize) / $originalSize * 100, 2);
+            
+            Log::info("🎉 ULTRA SUCCESS!");
+            Log::info("   📍 {$destinationPath}");
+            Log::info("   📏 {$newWidth}x{$newHeight}");
+            Log::info("   💰 Saved: {$savedPercent}%");
+            Log::info("   ✂️ Trim: {$srcWidth}x{$srcHeight} -> {$cropWidth}x{$cropHeight}");
+            Log::info("   🛠️ Method: {$trimMethod}");
         }
+        
+        imagedestroy($croppedImage);
+        imagedestroy($finalImage);
+        
+        return $result;
+        
+    } catch (\Exception $e) {
+        Log::error("💥 ULTRA ERROR: " . $e->getMessage());
+        Log::error("💥 Stack trace: " . $e->getTraceAsString());
+        return false;
     }
-    
-    /**
-     * Фоновая обработка больших PDF
-     */
-    private function processLargePdfInBackground(Document $document)
-    {
-        try {
-            $this->processPdfWithChunks($document);
-        } catch (\Exception $e) {
-            Log::error("❌ Background processing error: " . $e->getMessage());
-        }
-    }
+}
 }

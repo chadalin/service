@@ -410,7 +410,7 @@ Route::middleware('auth')->prefix('api')->group(function () {
             ->where('status', 'in_progress')
             ->whereHas('messages', function($query) use ($user) {
                 $query->where('user_id', '!=', $user->id)
-                      ->where('is_read', false);
+                      ->where('read_at', false);
             })
             ->count();
             
@@ -755,3 +755,18 @@ Route::prefix('api/search')->name('api.search.')->group(function () {
 
 // Роут по умолчанию для быстрого доступа
 Route::redirect('/', '/search-test');
+
+// Пошаговая обработка
+Route::post('/documents-processing/{id}/process-step', 
+    [DocumentProcessingController::class, 'processStepByStep'])
+    ->name('admin.documents.processing.step');
+
+
+    // Обработка документов
+Route::prefix('documents/{id}')->group(function () {
+    Route::post('/process-chunks', [DocumentProcessingController::class, 'processPdfInChunks'])
+        ->name('admin.documents.processing.chunks');
+    
+    Route::post('/images/{imageId}/trim', [DocumentProcessingController::class, 'forceTrimImage'])
+        ->name('admin.documents.processing.trim-image');
+});
