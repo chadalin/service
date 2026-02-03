@@ -770,3 +770,10 @@ Route::prefix('documents/{id}')->group(function () {
     Route::post('/images/{imageId}/trim', [DocumentProcessingController::class, 'forceTrimImage'])
         ->name('admin.documents.processing.trim-image');
 });
+
+// В маршруты добавьте:
+Route::get('/{id}/debug-images', [DocumentProcessingController::class, 'debugImages'])
+    ->name('debug-images');
+    
+Route::post('/{id}/recheck-images', [DocumentProcessingController::class, 'recheckImages'])
+    ->name('recheck-images');

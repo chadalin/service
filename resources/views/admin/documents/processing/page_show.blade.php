@@ -323,25 +323,43 @@
     </div>
 
     <!-- Изображения страницы с вкладками -->
-    @if($images->count() > 0)
-    <div class="card mb-4">
-        <div class="card-header bg-warning text-white">
-            <h5 class="mb-0"><i class="bi bi-images"></i> Изображения на странице ({{ $images->count() }})</h5>
-        </div>
-        <div class="card-body">
-            <!-- Вкладки для изображений -->
-            <div class="image-tabs mb-4">
-                <div class="image-tabs-nav">
-                    <button class="image-tab-btn active" onclick="switchImageTab('gallery')">
-                        <i class="bi bi-grid"></i> Галерея
-                    </button>
-                    <button class="image-tab-btn" onclick="switchImageTab('previews')">
-                        <i class="bi bi-layers"></i> Превью и скриншоты
-                    </button>
-                    <button class="image-tab-btn" onclick="switchImageTab('comparison')">
-                        <i class="bi bi-arrows-collapse"></i> Сравнение
-                    </button>
+   @if($images->count() > 0)
+<div class="card mb-4">
+    <div class="card-header bg-success text-white">
+        <h5 class="mb-0"><i class="bi bi-images"></i> Изображения на странице ({{ $images->count() }})</h5>
+    </div>
+    <div class="card-body">
+        @foreach($images as $image)
+        <div class="mb-4">
+            <div class="text-center">
+                @if($image->has_screenshot && $image->screenshot_url)
+                <a href="{{ $image->screenshot_url }}" target="_blank" class="d-block mb-2">
+                    <img src="{{ $image->screenshot_url }}" 
+                         alt="Скриншот" 
+                         class="img-fluid rounded border shadow"
+                         style="max-height: 500px; object-fit: contain;">
+                </a>
+                <div class="small text-muted">
+                    <i class="bi bi-aspect-ratio"></i> {{ $image->width }}×{{ $image->height }}px | 
+                    <i class="bi bi-zoom-in"></i> Кликните для увеличения
                 </div>
+                @elseif($image->url)
+                <a href="{{ $image->url }}" target="_blank" class="d-block mb-2">
+                    <img src="{{ $image->url }}" 
+                         alt="Изображение" 
+                         class="img-fluid rounded border shadow"
+                         style="max-height: 500px; object-fit: contain;">
+                </a>
+                <div class="small text-muted">
+                    <i class="bi bi-aspect-ratio"></i> {{ $image->width }}×{{ $image->height }}px
+                </div>
+                @endif
+            </div>
+        </div>
+        @endforeach
+    </div>
+</div>
+@endif
                 
                 <!-- Вкладка Галерея -->
                 <div id="galleryTab" class="image-tab-content">
@@ -580,6 +598,104 @@
         @endif
     </div>
 @endif
+
+
+@if($images->count() > 0)
+    <!-- Проверка скриншотов -->
+    <div class="alert alert-info">
+        <i class="bi bi-info-circle"></i> 
+        Найдено {{ $images->count() }} изображений на этой странице.
+        @php
+            $hasScreenshots = $images->where('has_screenshot', true)->count();
+        @endphp
+        @if($hasScreenshots > 0)
+            <span class="text-success">
+                <i class="bi bi-check-circle"></i> {{ $hasScreenshots }} со скриншотами
+            </span>
+        @endif
+    </div>
+    
+    <!-- Галерея изображений -->
+    <div class="row">
+        @foreach($images as $image)
+        <div class="col-md-4 mb-3">
+            <div class="card">
+                <div class="card-header py-1 bg-light">
+                    <small>{{ $image->description ?? 'Изображение' }}</small>
+                </div>
+                <div class="card-body p-2">
+                    <!-- Скриншот если есть -->
+                    @if($image->has_screenshot && $image->screenshot_url)
+                        <div class="text-center mb-2">
+                            <h6><i class="bi bi-aspect-ratio"></i> Обрезанный скриншот</h6>
+                            <a href="{{ $image->screenshot_url }}" target="_blank">
+                                <img src="{{ $image->screenshot_url }}" 
+                                     alt="Скриншот" 
+                                     class="img-fluid border rounded"
+                                     style="max-height: 200px;">
+                            </a>
+                            <div class="small text-muted mt-1">
+                                {{ $image->width ?? '?' }}×{{ $image->height ?? '?' }}px
+                                @if($image->screenshot_size)
+                                    ({{ number_format($image->screenshot_size / 1024, 1) }} KB)
+                                @endif
+                            </div>
+                        </div>
+                        
+                        <!-- Оригинал для сравнения -->
+                        <div class="text-center">
+                            <h6><i class="bi bi-image"></i> Оригинал</h6>
+                            <a href="{{ $image->url }}" target="_blank">
+                                <img src="{{ $image->url }}" 
+                                     alt="Оригинал" 
+                                     class="img-fluid border rounded"
+                                     style="max-height: 150px;">
+                            </a>
+                            <div class="small text-muted mt-1">
+                                {{ number_format($image->size / 1024, 1) }} KB
+                            </div>
+                        </div>
+                    @else
+                        <!-- Только оригинал если нет скриншота -->
+                        <div class="text-center">
+                            <a href="{{ $image->url }}" target="_blank">
+                                <img src="{{ $image->url }}" 
+                                     alt="Изображение" 
+                                     class="img-fluid border rounded"
+                                     style="max-height: 250px;">
+                            </a>
+                        </div>
+                        <div class="alert alert-warning mt-2 p-2 small">
+                            <i class="bi bi-exclamation-triangle"></i> 
+                            Скриншот не создан для этого изображения
+                        </div>
+                    @endif
+                </div>
+                <div class="card-footer p-2">
+                    <div class="btn-group btn-group-sm w-100" role="group">
+                        <a href="{{ $image->url }}" 
+                           target="_blank" 
+                           class="btn btn-outline-primary">
+                            <i class="bi bi-eye"></i> Оригинал
+                        </a>
+                        @if($image->has_screenshot && $image->screenshot_url)
+                        <a href="{{ $image->screenshot_url }}" 
+                           target="_blank" 
+                           class="btn btn-outline-info">
+                            <i class="bi bi-aspect-ratio"></i> Скриншот
+                        </a>
+                        @endif
+                    </div>
+                </div>
+            </div>
+        </div>
+        @endforeach
+    </div>
+@else
+    <div class="alert alert-warning">
+        <i class="bi bi-exclamation-triangle"></i> На этой странице не найдено изображений
+    </div>
+@endif
 <!-- Отладочная информация -->
 @if($images->count() > 0)
 <div class="card mb-3">
@@ -755,6 +871,94 @@
         </div>
     </div>
     @endif
+
+<style>
+.page-with-screenshot {
+    background: white;
+    padding: 20px;
+    border-radius: 10px;
+    border: 1px solid #dee2e6;
+}
+
+.screenshot-container {
+    margin-bottom: 30px;
+}
+
+.screenshot-wrapper {
+    position: relative;
+    background: #f8f9fa;
+    padding: 15px;
+    border-radius: 8px;
+    border: 1px solid #e9ecef;
+}
+
+.screenshot-link {
+    display: block;
+    transition: transform 0.3s ease;
+}
+
+.screenshot-link:hover {
+    transform: scale(1.02);
+}
+
+.screenshot-link img {
+    border: 2px solid #dee2e6;
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
+}
+
+.screenshot-info {
+    font-size: 0.9rem;
+}
+
+.page-content {
+    margin-top: 30px;
+    padding-top: 20px;
+    border-top: 1px solid #dee2e6;
+}
+
+.content-text {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    line-height: 1.6;
+    font-size: 15px;
+}
+
+.content-text p {
+    margin-bottom: 1rem;
+}
+</style>
+
+    <!-- Основной контент -->
+<div class="card">
+    <div class="card-header bg-primary text-white">
+        <h5 class="mb-0"><i class="bi bi-file-text"></i> Содержимое страницы {{ $page->page_number }}</h5>
+    </div>
+    <div class="card-body">
+        @if($page->has_images)
+            <div class="alert alert-success">
+                <i class="bi bi-check-circle"></i> На этой странице есть схема/изображение
+            </div>
+        @endif
+        
+        <!-- Здесь будет отображаться скриншот + текст -->
+        <div class="page-content">
+            {!! $page->content ?? '<p class="text-muted">Содержимое отсутствует</p>' !!}
+        </div>
+        
+        <!-- Исходный текст (если нужен) -->
+        @if(!empty($page->content_text))
+        <div class="mt-4">
+            <button class="btn btn-sm btn-outline-secondary" type="button" 
+                    data-bs-toggle="collapse" 
+                    data-bs-target="#rawText{{ $page->id }}">
+                <i class="bi bi-code"></i> Показать исходный текст
+            </button>
+            <div class="collapse mt-2" id="rawText{{ $page->id }}">
+                <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow: auto; font-size: 12px;">{{ $page->content_text }}</pre>
+            </div>
+        </div>
+        @endif
+    </div>
+</div>
 
     <!-- Содержимое страницы -->
     <div class="card">
