@@ -44,31 +44,32 @@ class SearchTestController extends Controller
         return view('search.test', compact('stats', 'recentDocuments', 'indexes'));
     }
 
-    public function search(Request $request)
-    {
-        $query = $request->input('q', '');
-        $filters = array_filter($request->only(['car_model_id', 'category_id', 'file_type']));
-        
-        $results = [];
-        $popularSearches = collect();
-        
-        if (!empty($query)) {
-            $results = $this->searchService->paginatedSearch($query, $filters, 1, 20);
-        }
-        
-        try {
-            $popularSearches = $this->searchService->getPopularSearches(5);
-        } catch (\Exception $e) {
-            // Игнорируем ошибку
-        }
-        
-        return view('search.results', [
-            'query' => $query,
-            'filters' => $filters,
-            'results' => $results,
-            'popularSearches' => $popularSearches
+    // В контроллере
+public function search(Request $request)
+{
+    $query = $request->input('q', '');
+    
+    $documents = collect();
+    $popularSearches = collect();
+    
+    // Простая заглушка для популярных запросов
+    $popularQueries = ['двигатель', 'масло', 'тормоз', 'ремонт', 'диагностика'];
+    foreach ($popularQueries as $popularQuery) {
+        $popularSearches->push((object)[
+            'query' => $popularQuery,
+            'search_count' => rand(5, 50)
         ]);
     }
+    
+    if (!empty($query)) {
+        $documents = Document::where('title', 'LIKE', "%{$query}%")
+            ->orWhere('content_text', 'LIKE', "%{$query}%")
+            ->where('is_parsed', true)
+            ->paginate(20);
+    }
+    
+    return view('search.results_simple', compact('query', 'documents', 'popularSearches'));
+}
 
     public function autocomplete(Request $request)
     {

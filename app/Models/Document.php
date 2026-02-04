@@ -6,13 +6,14 @@ use Illuminate\Database\Eloquent\Model;
 //use Laravel\Scout\Searchable;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Log;
 
 class Document extends Model
 {
     //use Searchable;
     
-      protected $fillable = [
+    protected $fillable = [
         'car_model_id',
         'category_id', 
         'title',
@@ -57,6 +58,235 @@ class Document extends Model
     const STATUS_PROCESSED = 'processed';
     const STATUS_PARSE_ERROR = 'parse_error';
     const STATUS_INDEX_ERROR = 'index_error';
+    
+    // === ДОБАВЛЕННЫЕ МЕТОДЫ ДЛЯ ПОИСКА ===
+    
+    /**
+     * Scope для поиска документов
+     */
+    public function scopeSearch(Builder $query, string $searchTerm, array $filters = [], int $limit = null, int $offset = 0)
+{
+    $searchTerm = $this->prepareSearchTerm($searchTerm);
+    
+    return $query->where(function($q) use ($searchTerm) {
+            // Проверяем наличие FULLTEXT индекса
+            if ($this->hasFulltextIndex()) {
+                // Используем существующие поля из вашей таблицы
+                $q->whereRaw("MATCH(title, content_text, detected_system, detected_component) AGAINST(? IN BOOLEAN MODE)", [$searchTerm]);
+            } else {
+                // Fallback на LIKE поиск по существующим полям
+                $likeTerm = '%' . str_replace(' ', '%', $searchTerm) . '%';
+                $q->where(function($subQ) use ($likeTerm) {
+                    $subQ->where('title', 'LIKE', $likeTerm)
+                         ->orWhere('content_text', 'LIKE', $likeTerm);
+                    
+                    // Только если поля существуют и не NULL
+                    if ($this->detected_system) {
+                        $subQ->orWhere('detected_system', 'LIKE', $likeTerm);
+                    }
+                    
+                    if ($this->detected_component) {
+                        $subQ->orWhere('detected_component', 'LIKE', $likeTerm);
+                    }
+                    
+                    // Поиск по keywords (JSON массиву)
+                    // Преобразуем keywords в текст для поиска
+                    $subQ->orWhere(function($keywordsQuery) use ($likeTerm) {
+                        $keywordsQuery->whereNotNull('keywords')
+                            ->where('keywords', 'LIKE', '%"' . str_replace('%', '', $likeTerm) . '"%');
+                    });
+                });
+            }
+        })
+        ->when(!empty($filters), function($q) use ($filters) {
+            foreach ($filters as $key => $value) {
+                if ($value !== null && $value !== '') {
+                    if (in_array($key, ['car_model_id', 'category_id', 'file_type', 'detected_system', 'detected_component'])) {
+                        $q->where($key, $value);
+                    }
+                }
+            }
+        })
+        ->where('is_parsed', true)
+        ->where('status', self::STATUS_PROCESSED)
+        ->orderBy('average_relevance', 'desc')
+        ->orderBy('search_count', 'desc')
+        ->orderBy('created_at', 'desc')
+        ->when($limit, function($q) use ($limit, $offset) {
+            $q->skip($offset)->take($limit);
+        });
+}
+
+
+/**
+ * Получить keywords как текст (accessor)
+ */
+public function getKeywordsTextAttribute(): string
+{
+    if (empty($this->keywords)) {
+        return '';
+    }
+    
+    if (is_array($this->keywords)) {
+        return implode(', ', $this->keywords);
+    }
+    
+    if (is_string($this->keywords)) {
+        $keywords = json_decode($this->keywords, true);
+        if (is_array($keywords)) {
+            return implode(', ', $keywords);
+        }
+        return $this->keywords;
+    }
+    
+    return '';
+}
+
+
+/**
+ * Преобразование keywords для поиска
+ */
+private function keywordsToSearchText($keywords): string
+{
+    if (empty($keywords)) {
+        return '';
+    }
+    
+    if (is_array($keywords)) {
+        return implode(' ', $keywords);
+    }
+    
+    if (is_string($keywords)) {
+        $keywordsArray = json_decode($keywords, true);
+        if (json_last_error() === JSON_ERROR_NONE && is_array($keywordsArray)) {
+            return implode(' ', $keywordsArray);
+        }
+        return $keywords;
+    }
+    
+    return '';
+}
+    
+    /**
+     * Метод для автодополнения
+     */
+    public function scopeAutocomplete(Builder $query, string $searchTerm): array
+    {
+        if (strlen($searchTerm) < 2) {
+            return [];
+        }
+        
+        $likeTerm = '%' . $searchTerm . '%';
+        
+        // Поиск по заголовкам
+        $titles = $query->where('title', 'LIKE', $likeTerm)
+            ->where('is_parsed', true)
+            ->where('status', self::STATUS_PROCESSED)
+            ->orderBy('search_count', 'desc')
+            ->limit(5)
+            ->pluck('title')
+            ->toArray();
+        
+        // Поиск по системам
+        $systems = $query->where('detected_system', 'LIKE', $likeTerm)
+            ->where('detected_system', '!=', '')
+            ->where('is_parsed', true)
+            ->where('status', self::STATUS_PROCESSED)
+            ->distinct()
+            ->limit(5)
+            ->pluck('detected_system')
+            ->toArray();
+        
+        // Поиск по компонентам
+        $components = $query->where('detected_component', 'LIKE', $likeTerm)
+            ->where('detected_component', '!=', '')
+            ->where('is_parsed', true)
+            ->where('status', self::STATUS_PROCESSED)
+            ->distinct()
+            ->limit(5)
+            ->pluck('detected_component')
+            ->toArray();
+        
+        // Поиск по ключевым словам из keywords_text
+        $keywords = [];
+        if (!empty($this->keywords_text)) {
+            $keywordArray = explode(',', $this->keywords_text);
+            foreach ($keywordArray as $keyword) {
+                if (stripos($keyword, $searchTerm) !== false) {
+                    $keywords[] = trim($keyword);
+                }
+            }
+            $keywords = array_slice(array_unique($keywords), 0, 5);
+        }
+        
+        // Объединяем все результаты
+        $results = array_unique(array_merge($titles, $systems, $components, $keywords));
+        
+        return array_slice($results, 0, 10);
+    }
+    
+    /**
+     * Подготовка поискового термина
+     */
+    private function prepareSearchTerm(string $term): string
+    {
+        $term = mb_strtolower($term);
+        $term = preg_replace('/[^\p{L}\p{N}\s]/u', ' ', $term);
+        $term = preg_replace('/\s+/', ' ', $term);
+        
+        // Для FULLTEXT поиска преобразуем в форму с *
+        if ($this->hasFulltextIndex()) {
+            $words = explode(' ', $term);
+            $words = array_filter($words, function($word) {
+                return mb_strlen($word) > 2;
+            });
+            $words = array_map(function($word) {
+                return '+' . $word . '*';
+            }, $words);
+            
+            return implode(' ', $words);
+        }
+        
+        return trim($term);
+    }
+    
+    /**
+     * Проверка наличия FULLTEXT индекса
+     */
+    private function hasFulltextIndex(): bool
+    {
+        static $hasIndex = null;
+        
+        if ($hasIndex === null) {
+            try {
+                $result = \DB::select("SHOW INDEX FROM documents WHERE Index_type = 'FULLTEXT'");
+                $hasIndex = !empty($result);
+            } catch (\Exception $e) {
+                $hasIndex = false;
+            }
+        }
+        
+        return $hasIndex;
+    }
+    
+    /**
+     * Увеличить счетчик поиска
+     */
+    public function incrementSearchCount()
+    {
+        $this->increment('search_count');
+    }
+    
+    /**
+     * Увеличить счетчик просмотров
+     */
+    public function incrementViewCount()
+    {
+        $this->increment('view_count');
+    }
+    
+    // === КОНЕЦ ДОБАВЛЕННЫХ МЕТОДОВ ===
+    
     /**
      * Get the indexable data array for the model.
      */
@@ -251,13 +481,27 @@ class Document extends Model
     }
 
     public function getContentAttribute($value)
-{
-    // Убедитесь, что возвращаем строку
-    return $value ?? '';
-}
+    {
+        // Убедитесь, что возвращаем строку
+        return $value ?? '';
+    }
 
-public function getContentTextAttribute($value)
-{
-    return $value ?? '';
-}
+    public function getContentTextAttribute($value)
+    {
+        return $value ?? '';
+    }
+    
+    // Accessor для keywords (если его еще нет)
+    public function getKeywordsAttribute($value)
+    {
+        if (is_array($value)) {
+            return $value;
+        }
+        
+        if (is_string($value)) {
+            return json_decode($value, true) ?? [];
+        }
+        
+        return [];
+    }
 }
