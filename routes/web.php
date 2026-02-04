@@ -777,3 +777,20 @@ Route::get('/{id}/debug-images', [DocumentProcessingController::class, 'debugIma
     
 Route::post('/{id}/recheck-images', [DocumentProcessingController::class, 'recheckImages'])
     ->name('recheck-images');
+
+
+    // Маршруты для обработки документов
+Route::prefix('admin/documents')->name('admin.documents.')->group(function () {
+    Route::prefix('processing')->name('processing.')->group(function () {
+        // ... существующие маршруты ...
+        
+        // Добавляем новый маршрут для переобработки конкретной страницы
+        Route::post('{id}/page/{pageId}/reprocess', [DocumentProcessingController::class, 'reprocessPage'])
+            ->name('page.reprocess');
+    });
+});
+
+// Маршрут для просмотра обработанной страницы
+Route::get('/admin/documents/processing/{id}/page/{pageId}/show', 
+    [DocumentProcessingController::class, 'showPageDetails'])
+    ->name('admin.documents.processing.page.detal');

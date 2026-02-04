@@ -10,6 +10,7 @@ use App\Services\SimpleImageExtractionService;
 use App\Services\ScreenshotService;
 use App\Services\ImageProcessingService;
 use App\Services\ImageProcessorService;
+use App\Services\PdfPageProcessorService;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Log;
@@ -22,6 +23,7 @@ class DocumentProcessingController extends Controller
     protected $imageProcessor;
     protected $imageExtractor;
     protected $screenshotService;
+     protected $pageProcessor;
    
     
     public function __construct()
@@ -30,6 +32,7 @@ class DocumentProcessingController extends Controller
         $this->imageExtractor = new SimpleImageExtractionService();
         $this->screenshotService = new ScreenshotService();
         $this->imageProcessor = new ImageProcessorService();
+        $this->pageProcessor = new PdfPageProcessorService();
     }
     
     // =================================================
@@ -116,86 +119,149 @@ class DocumentProcessingController extends Controller
     /**
      * Запуск обработки
      */
-     private function startProcessing(Document $document)
-    {
-        try {
-            $cacheKey = "document_processing_{$document->id}";
-            
-            ini_set('memory_limit', '2048M');
-            set_time_limit(3600);
-            
-            $filePath = Storage::disk('local')->path($document->file_path);
-            
-            if (!file_exists($filePath)) {
-                throw new \Exception("PDF файл не найден: {$filePath}");
-            }
-            
-            Log::info("🚀 Начинаем обработку PDF: {$document->title}");
-            
-            // 1. ПАРСИНГ ТЕКСТА
-            $textResult = $this->parsePdfText($document, $filePath);
-            
-            if (!$textResult['success']) {
-                throw new \Exception($textResult['error']);
-            }
-            
-            $pageCount = $textResult['page_count'];
-            
-            // 2. ИЗВЛЕЧЕНИЕ И ОБРАБОТКА ИЗОБРАЖЕНИЙ
-            Log::info("🖼️ Начинаем обработку изображений...");
-            
-            $imagesResult = $this->processDocumentImages($document->id, $filePath);
-            $imagesCount = $imagesResult['images_count'] ?? 0;
-            
-            // 3. ЗАВЕРШЕНИЕ
-            $document->update([
-                'status' => 'parsed',
-                'is_parsed' => true,
-                'parsing_progress' => 100,
-                'parsing_quality' => 0.9,
-                'word_count' => $textResult['word_count'],
-                'content_text' => $textResult['full_text'],
-                'total_pages' => $pageCount,
-                'parsed_at' => now()
-            ]);
-            
-            Cache::put($cacheKey, [
-                'status' => 'completed',
-                'progress' => 100,
-                'message' => "✅ Обработка завершена! Страниц: {$pageCount}, Изображений: {$imagesCount}"
-            ], now()->addHours(1));
-            
-            Log::info("🎉 Обработка завершена: {$pageCount} страниц, {$imagesCount} изображений");
-            
-            return [
-                'success' => true,
-                'pages' => $pageCount,
-                'words' => $textResult['word_count'],
-                'images' => $imagesCount,
-                'message' => "Обработано {$pageCount} страниц"
-            ];
-            
-        } catch (\Exception $e) {
-            Log::error("❌ Processing error: " . $e->getMessage());
-            
-            Cache::put("document_processing_{$document->id}", [
-                'status' => 'failed',
-                'progress' => 0,
-                'error' => $e->getMessage(),
-                'message' => "❌ Ошибка: " . $e->getMessage()
-            ], now()->addHours(1));
-            
-            $document->update([
-                'status' => 'parse_error',
-                'parsing_progress' => 0
-            ]);
-            
-            return [
-                'success' => false,
-                'error' => $e->getMessage()
-            ];
+      /**
+ * Полная обработка документа с прогрессом
+ */
+private function startProcessing(Document $document)
+{
+    try {
+        $cacheKey = "document_processing_{$document->id}";
+        
+        // Увеличиваем лимиты
+        ini_set('memory_limit', '2048M');
+        set_time_limit(0); // Без ограничения времени
+        
+        $filePath = Storage::disk('local')->path($document->file_path);
+        
+        if (!file_exists($filePath)) {
+            throw new \Exception("PDF файл не найден: {$filePath}");
         }
+        
+        Log::info("🚀 Начинаем обработку PDF: {$document->title}");
+        
+        // Обновляем кэш
+        Cache::put($cacheKey, [
+            'status' => 'processing',
+            'progress' => 5,
+            'message' => 'Начинаем парсинг текста...',
+            'processed_pages' => 0,
+            'total_pages' => 0,
+            'images_count' => 0
+        ], now()->addHours(3));
+        
+        // 1. ПАРСИНГ ТЕКСТА
+        $textResult = $this->parsePdfText($document, $filePath);
+        
+        if (!$textResult['success']) {
+            throw new \Exception($textResult['error']);
+        }
+        
+        $pageCount = $textResult['page_count'];
+        $totalWords = $textResult['word_count'];
+        
+        Cache::put($cacheKey, [
+            'status' => 'processing',
+            'progress' => 50,
+            'message' => "Текст распарсен ({$pageCount} страниц). Начинаем создание скриншотов...",
+            'processed_pages' => 0,
+            'total_pages' => $pageCount,
+            'images_count' => 0
+        ], now()->addHours(3));
+        
+        // 2. СОЗДАНИЕ СКРИНШОТОВ ВСЕХ СТРАНИЦ
+        Log::info("🖼️ Начинаем создание скриншотов всех страниц...");
+        
+        // Используем PdfPageProcessorService
+        $pageProcessor = new PdfPageProcessorService();
+        
+        // Обрабатываем страницы пачками по 10 с обновлением прогресса
+        $screenshotsCount = 0;
+        $batchSize = 10;
+        
+        for ($batchStart = 1; $batchStart <= $pageCount; $batchStart += $batchSize) {
+            $batchEnd = min($batchStart + $batchSize - 1, $pageCount);
+            
+            Log::info("📦 Обрабатываем пачку страниц: {$batchStart}-{$batchEnd} из {$pageCount}");
+            
+            // Обновляем прогресс
+            $progress = 50 + (($batchStart / $pageCount) * 50);
+            Cache::put($cacheKey, [
+                'status' => 'processing',
+                'progress' => min(99, (int)$progress),
+                'message' => "Создание скриншотов: {$batchStart}-{$batchEnd} из {$pageCount}",
+                'processed_pages' => $batchEnd,
+                'total_pages' => $pageCount,
+                'images_count' => $screenshotsCount
+            ], now()->addHours(3));
+            
+            // Обрабатываем пачку страниц
+            for ($pageNumber = $batchStart; $pageNumber <= $batchEnd; $pageNumber++) {
+                try {
+                    // Создаем скриншот страницы
+                    $result = $pageProcessor->createPageScreenshotDirectly($filePath, $document->id, $pageNumber);
+                    
+                    if ($result) {
+                        $screenshotsCount++;
+                    }
+                    
+                } catch (\Exception $e) {
+                    Log::error("❌ Ошибка создания скриншота страницы {$pageNumber}: " . $e->getMessage());
+                }
+            }
+        }
+        
+        // 3. ЗАВЕРШЕНИЕ
+        Cache::put($cacheKey, [
+            'status' => 'completed',
+            'progress' => 100,
+            'message' => "✅ Обработка завершена! Страниц: {$pageCount}, Скриншотов: {$screenshotsCount}",
+            'processed_pages' => $pageCount,
+            'total_pages' => $pageCount,
+            'images_count' => $screenshotsCount
+        ], now()->addHours(1));
+        
+        $document->update([
+            'status' => 'parsed',
+            'is_parsed' => true,
+            'parsing_progress' => 100,
+            'parsing_quality' => 0.9,
+            'word_count' => $totalWords,
+            'content_text' => $textResult['full_text'],
+            'total_pages' => $pageCount,
+            'parsed_at' => now()
+        ]);
+        
+        Log::info("🎉 PDF обработка завершена: {$pageCount} страниц, {$screenshotsCount} скриншотов");
+        
+        return [
+            'success' => true,
+            'pages' => $pageCount,
+            'words' => $totalWords,
+            'images' => $screenshotsCount,
+            'message' => "Обработано {$pageCount} страниц, создано {$screenshotsCount} скриншотов"
+        ];
+        
+    } catch (\Exception $e) {
+        Log::error("❌ Processing error: " . $e->getMessage());
+        
+        Cache::put("document_processing_{$document->id}", [
+            'status' => 'failed',
+            'progress' => 0,
+            'error' => $e->getMessage(),
+            'message' => "❌ Ошибка: " . $e->getMessage()
+        ], now()->addHours(1));
+        
+        $document->update([
+            'status' => 'parse_error',
+            'parsing_progress' => 0
+        ]);
+        
+        return [
+            'success' => false,
+            'error' => $e->getMessage()
+        ];
     }
+}
 
 
      /**
@@ -390,19 +456,20 @@ HTML;
     /**
      * Форматирует HTML контент
      */
+     /**
+     * Форматирует HTML контент
+     */
     private function formatHtmlContent($text)
     {
-        if (empty(trim($text))) {
-            return '<p class="text-muted"><em>Текст отсутствует</em></p>';
-        }
-        
         $lines = explode("\n", $text);
         $html = '';
         
         foreach ($lines as $line) {
             $line = trim($line);
-            if (!empty($line)) {
-                $html .= '<p>' . htmlspecialchars($line) . '</p>';
+            if (empty($line)) {
+                $html .= "<br>\n";
+            } else {
+                $html .= "<p>" . htmlspecialchars($line) . "</p>\n";
             }
         }
         
@@ -430,7 +497,10 @@ HTML;
    
     
 
-private function parsePdfText(Document $document, $filePath)
+/**
+     * Парсинг текста PDF с прогрессом
+     */
+    private function parsePdfText(Document $document, $filePath)
     {
         try {
             $parser = new Parser();
@@ -452,9 +522,9 @@ private function parsePdfText(Document $document, $filePath)
             foreach ($pages as $index => $page) {
                 $pageNumber = $index + 1;
                 
-                // Обновляем прогресс
-                if ($pageNumber % 5 === 0 || $pageNumber === $pageCount) {
-                    $progress = 10 + round(($pageNumber / $pageCount) * 50);
+                // Обновляем прогресс каждые 10 страниц
+                if ($pageNumber % 10 === 0 || $pageNumber === $pageCount) {
+                    $progress = 10 + round(($pageNumber / $pageCount) * 50); // 10-60%
                     Cache::put("document_processing_{$document->id}", [
                         'status' => 'processing',
                         'progress' => $progress,
@@ -470,7 +540,7 @@ private function parsePdfText(Document $document, $filePath)
                 $text = $page->getText();
                 $wordCount = str_word_count($text);
                 
-                // Сохраняем страницу
+                // Используем updateOrCreate
                 DocumentPage::updateOrCreate(
                     [
                         'document_id' => $document->id,
@@ -491,7 +561,9 @@ private function parsePdfText(Document $document, $filePath)
                 $totalWords += $wordCount;
                 $fullText .= $text . "\n\n";
                 
-                Log::debug("📄 Страница {$pageNumber} обработана: {$wordCount} слов");
+                if ($pageNumber % 50 === 0) {
+                    Log::debug("📄 Обработано {$pageNumber}/{$pageCount} страниц");
+                }
             }
             
             return [
@@ -1487,43 +1559,56 @@ private function createRegularScreenshot($sourcePath, $destinationPath, $maxWidt
     /**
      * Получает прогресс обработки (JSON для AJAX)
      */
+   /**
+     * Получает прогресс обработки
+     */
     public function getProcessingProgress(Request $request, $id)
+{
+    try {
+        $cacheKey = "document_processing_{$id}";
+        $progressData = Cache::get($cacheKey, [
+            'status' => 'not_started',
+            'progress' => 0,
+            'message' => 'Обработка не начата',
+            'processed_pages' => 0,
+            'total_pages' => 0,
+            'images_count' => 0
+        ]);
+        
+        return response()->json([
+            'success' => true,
+            'status' => $progressData['status'] ?? 'not_started',
+            'progress' => $progressData['progress'] ?? 0,
+            'message' => $progressData['message'] ?? '',
+            'processed_pages' => $progressData['processed_pages'] ?? 0,
+            'total_pages' => $progressData['total_pages'] ?? 0,
+            'images_count' => $progressData['images_count'] ?? 0,
+            'timestamp' => now()->toDateTimeString()
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Get progress error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]);
+    }
+}
+
+
+     /**
+     * Просмотр сырого текста страницы
+     */
+    public function showPageRaw(Request $request, $id, $pageId)
     {
-        try {
-            $cacheKey = "document_processing_{$id}";
-            $progressData = Cache::get($cacheKey, [
-                'status' => 'not_started',
-                'progress' => 0,
-                'message' => 'Обработка не начата'
-            ]);
-            
-            // Если нет данных в кэше, проверяем статус документа
-            if ($progressData['status'] === 'not_started') {
-                $document = Document::find($id);
-                if ($document) {
-                    $progressData = [
-                        'status' => $document->status,
-                        'progress' => $document->parsing_progress ?? 0,
-                        'message' => $this->getProgressMessage($document)
-                    ];
-                }
-            }
-            
-            return response()->json([
-                'success' => true,
-                'status' => $progressData['status'],
-                'progress' => $progressData['progress'],
-                'message' => $progressData['message'] ?? '',
-                'timestamp' => now()->toDateTimeString()
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Get progress error: ' . $e->getMessage());
-            return response()->json([
-                'success' => false,
-                'error' => $e->getMessage()
-            ]);
-        }
+        $document = Document::findOrFail($id);
+        
+        $page = DocumentPage::where('document_id', $id)
+            ->where('id', $pageId)
+            ->firstOrFail();
+        
+        return response($page->content_text ?? '')
+            ->header('Content-Type', 'text/plain; charset=utf-8');
     }
     
     /**
@@ -1987,5 +2072,375 @@ public function recheckImages(Request $request, $id)
     
     return redirect()->back()
         ->with('success', "Проверено {$checked} изображений. Отсутствует оригиналов: {$missingOriginal}, скриншотов: {$missingScreenshot}");
+}
+
+
+/**
+ * Переобработка конкретной страницы
+ */
+public function reprocessPage(Request $request, $id, $pageId)
+{
+    try {
+        $document = Document::findOrFail($id);
+        $page = DocumentPage::where('document_id', $id)
+            ->where('id', $pageId)
+            ->firstOrFail();
+        
+        $filePath = Storage::disk('local')->path($document->file_path);
+        
+        if (!file_exists($filePath)) {
+            return response()->json([
+                'success' => false,
+                'error' => 'PDF файл не найден'
+            ]);
+        }
+        
+        // Удаляем старые изображения для этой страницы
+        DocumentImage::where('document_id', $id)
+            ->where('page_number', $page->page_number)
+            ->delete();
+        
+        // Используем новый сервис для поиска картинок
+        $imageExtractor = new AdvancedImageExtractionService();
+        $foundImages = $imageExtractor->findAndExtractImages($filePath, $page->page_number, $id);
+        
+        if (!empty($foundImages)) {
+            // Сохраняем найденные изображения в БД
+            foreach ($foundImages as $imageData) {
+                DocumentImage::create([
+                    'document_id' => $id,
+                    'page_number' => $page->page_number,
+                    'filename' => $imageData['filename'],
+                    'path' => $imageData['path'],
+                    'url' => $imageData['url'],
+                    'screenshot_path' => $imageData['path'],
+                    'screenshot_url' => $imageData['url'],
+                    'width' => $imageData['width'],
+                    'height' => $imageData['height'],
+                    'size' => $imageData['size'],
+                    'format' => 'jpg',
+                    'has_screenshot' => true,
+                    'description' => $imageData['description'],
+                    'status' => 'active',
+                    'created_at' => now(),
+                    'updated_at' => now(),
+                ]);
+            }
+            
+            // Обновляем статус страницы
+            $page->update([
+                'has_images' => true,
+                'updated_at' => now()
+            ]);
+            
+            Log::info("✅ Страница {$page->page_number} переобработана, найдено изображений: " . count($foundImages));
+            
+            return response()->json([
+                'success' => true,
+                'message' => 'Страница успешно переобработана. Найдено изображений: ' . count($foundImages),
+                'images_count' => count($foundImages)
+            ]);
+        } else {
+            return response()->json([
+                'success' => false,
+                'error' => 'На странице не обнаружено изображений'
+            ]);
+        }
+        
+    } catch (\Exception $e) {
+        Log::error('Reprocess page error: ' . $e->getMessage());
+        return response()->json([
+            'success' => false,
+            'error' => $e->getMessage()
+        ]);
+    }
+}
+
+ /**
+     * Сбросить статус обработки
+     */
+    public function resetStatus(Request $request, $id)
+    {
+        try {
+            $document = Document::findOrFail($id);
+            
+            if ($document->status === 'processing') {
+                return redirect()->route('admin.documents.processing.advanced', $id)
+                    ->with('error', 'Документ в обработке. Дождитесь завершения.');
+            }
+            
+            // Удаляем все связанные данные
+            $pagesDeleted = DocumentPage::where('document_id', $id)->delete();
+            $imagesDeleted = DocumentImage::where('document_id', $id)->delete();
+            
+            // Обновляем документ
+            $document->update([
+                'status' => 'uploaded',
+                'is_parsed' => false,
+                'parsing_quality' => 0.0,
+                'parsing_progress' => 0,
+                'word_count' => 0,
+                'total_pages' => null,
+                'content_text' => null,
+                'parsed_at' => null,
+                'processing_started_at' => null,
+                'updated_at' => now()
+            ]);
+            
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('success', "Статус сброшен ($pagesDeleted страниц, $imagesDeleted изображений удалено)");
+                
+        } catch (\Exception $e) {
+            Log::error('Reset status error: ' . $e->getMessage());
+            return redirect()->route('admin.documents.processing.advanced', $id)
+                ->with('error', "Ошибка: " . $e->getMessage());
+        }
+    }
+
+     /**
+ * Просмотр детализированной страницы документа
+ */
+public function showPageDetails($id, $pageId)
+{
+    try {
+        $document = Document::with(['carModel.brand', 'category'])
+            ->findOrFail($id);
+        
+        $page = DocumentPage::where('document_id', $id)
+            ->where('id', $pageId)
+            ->with('images')
+            ->firstOrFail();
+        
+        // Получаем скриншоты из content (HTML)
+        $screenshots = $this->extractScreenshotsFromContent($page->content);
+        
+        // Получаем дополнительные изображения из таблицы DocumentImage
+        $additionalImages = $page->images ?? collect();
+        
+        // Разбиваем текст на абзацы по 5 строк
+        $textContent = $page->content_text ?? '';
+        $paragraphs = $this->splitTextIntoParagraphs($textContent, 5);
+        
+        // Извлекаем мета-информацию
+        $metaInfo = $this->extractMetaInformation($textContent);
+        
+        return view('admin.documents.processing.page_details', compact(
+            'document', 
+            'page', 
+            'screenshots',
+            'additionalImages',
+            'paragraphs',
+            'metaInfo'
+        ));
+        
+    } catch (\Exception $e) {
+        Log::error('Page details error: ' . $e->getMessage());
+        return redirect()->route('admin.documents.processing.advanced', $id)
+            ->with('error', 'Страница не найдена: ' . $e->getMessage());
+    }
+}
+
+/**
+ * Извлекает скриншоты из HTML контента
+ */
+private function extractScreenshotsFromContent($htmlContent)
+{
+    if (empty($htmlContent)) {
+        return [];
+    }
+    
+    $screenshots = [];
+    
+    // Ищем все изображения в HTML
+    $dom = new \DOMDocument();
+    @$dom->loadHTML($htmlContent);
+    $images = $dom->getElementsByTagName('img');
+    
+    foreach ($images as $index => $img) {
+        $src = $img->getAttribute('src');
+        $alt = $img->getAttribute('alt') ?: "Скриншот " . ($index + 1);
+        $class = $img->getAttribute('class');
+        $title = $img->getAttribute('title');
+        
+        // Пропускаем иконки, маленькие изображения
+        if (str_contains($class, 'icon') || str_contains($src, 'icon')) {
+            continue;
+        }
+        
+        // Проверяем, что это скриншот страницы
+        if (str_contains($src, 'document_pages_screenshots') || 
+            str_contains($src, 'screenshot') ||
+            str_contains($alt, 'скриншот') ||
+            str_contains($alt, 'страница') ||
+            str_contains($class, 'screenshot')) {
+            
+            // Проверяем существование файла
+            $storagePath = $this->convertUrlToStoragePath($src);
+            if ($storagePath && Storage::disk('public')->exists($storagePath)) {
+                $fullPath = Storage::disk('public')->path($storagePath);
+                $imageInfo = @getimagesize($fullPath);
+                
+                $screenshots[] = [
+                    'url' => $src,
+                    'storage_path' => $storagePath,
+                    'alt' => $alt,
+                    'title' => $title,
+                    'width' => $imageInfo[0] ?? null,
+                    'height' => $imageInfo[1] ?? null,
+                    'type' => 'page_screenshot',
+                    'description' => $this->generateScreenshotDescription($alt, $title, $index),
+                    'file_size' => file_exists($fullPath) ? filesize($fullPath) : null,
+                    'is_main' => $index === 0 // Первый скриншот - главный
+                ];
+            }
+        }
+    }
+    
+    return $screenshots;
+}
+
+
+/**
+ * Конвертирует URL в путь в Storage
+ */
+private function convertUrlToStoragePath($url)
+{
+    // Удаляем базовый URL
+    $baseUrl = url('/storage/');
+    if (str_starts_with($url, $baseUrl)) {
+        return str_replace($baseUrl . '/', '', $url);
+    }
+    
+    // Удаляем просто /storage/
+    if (str_starts_with($url, '/storage/')) {
+        return str_replace('/storage/', '', $url);
+    }
+    
+    return null;
+}
+
+/**
+ * Генерирует описание для скриншота
+ */
+private function generateScreenshotDescription($alt, $title, $index)
+{
+    if (!empty($title)) {
+        return $title;
+    }
+    
+    if (!empty($alt)) {
+        return $alt;
+    }
+    
+    $descriptions = [
+        'Полный вид страницы документа',
+        'Фрагмент страницы с техническими данными',
+        'Схематическое представление информации',
+        'Таблица или диаграмма со страницы',
+        'Техническая документация',
+        'Инструкция по эксплуатации',
+        'Диагностическая таблица',
+        'График или чертеж'
+    ];
+    
+    return $descriptions[$index % count($descriptions)] ?? 'Скриншот страницы документа';
+}
+
+/**
+ * Разбивает текст на абзацы по N строк
+ */
+private function splitTextIntoParagraphs($text, $linesPerParagraph = 5)
+{
+    if (empty($text)) {
+        return [];
+    }
+    
+    $lines = explode("\n", trim($text));
+    $paragraphs = [];
+    $currentParagraph = [];
+    
+    foreach ($lines as $line) {
+        $trimmedLine = trim($line);
+        
+        if (!empty($trimmedLine)) {
+            $currentParagraph[] = $trimmedLine;
+        }
+        
+        if (count($currentParagraph) >= $linesPerParagraph || empty($trimmedLine)) {
+            if (!empty($currentParagraph)) {
+                $paragraphs[] = implode("\n", $currentParagraph);
+                $currentParagraph = [];
+            }
+        }
+    }
+    
+    // Добавляем оставшийся текст
+    if (!empty($currentParagraph)) {
+        $paragraphs[] = implode("\n", $currentParagraph);
+    }
+    
+    return $paragraphs;
+}
+
+
+/**
+ * Разбивает текст на абзацы по N строк
+ */
+
+/**
+ * Извлекает мета-информацию из текста
+ */
+private function extractMetaInformation($text)
+{
+    $meta = [
+        'title' => '',
+        'keywords' => [],
+        'description' => '',
+        'instructions' => []
+    ];
+    
+    if (empty($text)) {
+        return $meta;
+    }
+    
+    // Извлекаем потенциальный заголовок (первая строка)
+    $lines = explode("\n", trim($text));
+    if (count($lines) > 0) {
+        $firstLine = trim($lines[0]);
+        if (mb_strlen($firstLine) < 100 && !empty($firstLine)) {
+            $meta['title'] = $firstLine;
+        }
+    }
+    
+    // Извлекаем описание (первые 3 строки)
+    $descriptionLines = array_slice($lines, 0, 3);
+    $meta['description'] = implode(' ', array_map('trim', $descriptionLines));
+    
+    // Извлекаем ключевые слова (часто встречающиеся слова)
+    $words = preg_split('/\s+/', strtolower($text));
+    $wordCount = array_count_values($words);
+    arsort($wordCount);
+    
+    // Исключаем стоп-слова
+    $stopWords = ['и', 'в', 'на', 'с', 'по', 'для', 'из', 'от', 'до', 'при', 'через', 'о', 'у', 'без', 'за', 'под'];
+    $keywords = array_slice(array_filter(array_keys($wordCount), function($word) use ($stopWords) {
+        return mb_strlen($word) > 2 && !in_array($word, $stopWords);
+    }), 0, 10);
+    
+    $meta['keywords'] = array_unique($keywords);
+    
+    // Ищем инструкции по ремонту (строки с ключевыми словами)
+    $instructionKeywords = ['инструкция', 'порядок', 'процедура', 'снятие', 'установка', 'замена', 'ремонт', 'регулировка'];
+    foreach ($lines as $line) {
+        $lowerLine = mb_strtolower($line);
+        foreach ($instructionKeywords as $keyword) {
+            if (str_contains($lowerLine, $keyword)) {
+                $meta['instructions'][] = trim($line);
+                break;
+            }
+        }
+    }
+    
+    return $meta;
 }
 }

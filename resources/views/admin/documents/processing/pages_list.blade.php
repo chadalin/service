@@ -211,6 +211,11 @@
                                            class="btn btn-primary" title="Просмотр страницы">
                                             <i class="bi bi-eye"></i>
                                         </a>
+                                         <a href="{{ route('admin.documents.processing.page.detal', ['id' => $document->id, 'pageId' => $page->id]) }}" 
+                                           class="btn btn-primary" title="Просмотр страницы">
+                                            <i class="bi bi-eye"></i>
+                                        </a>
+
                                         <a href="{{ route('admin.documents.processing.page.raw', ['id' => $document->id, 'pageId' => $page->id]) }}" 
                                            target="_blank" class="btn btn-info" title="Исходный текст">
                                             <i class="bi bi-code"></i>

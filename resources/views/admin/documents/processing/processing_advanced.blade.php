@@ -104,10 +104,6 @@
             margin-bottom: 5px;
         }
         
-        .nav-tabs .nav-link {
-            border-radius: 8px 8px 0 0;
-        }
-        
         .badge {
             padding: 6px 12px;
             border-radius: 20px;
@@ -119,16 +115,24 @@
             100% { transform: rotate(360deg); }
         }
         
-        .spinning {
+        .spinner {
             animation: spin 1s linear infinite;
         }
         
-        .processing-status {
-            background: #fff3cd;
-            border: 1px solid #ffeaa7;
-            border-radius: 8px;
-            padding: 15px;
-            margin-bottom: 20px;
+        .progress-details {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .progress-info {
+            font-size: 0.9rem;
+            color: #6c757d;
+        }
+        
+        .progress-message {
+            font-size: 0.95rem;
+            margin-top: 10px;
         }
     </style>
 </head>
@@ -168,6 +172,61 @@
                 <i class="bi bi-exclamation-triangle"></i> {{ session('error') }}
                 <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
             </div>
+        @endif
+
+        <!-- Прогресс обработки (показывается ТОЛЬКО когда status=processing) -->
+        @if($document->status === 'processing')
+        <div class="card mb-4" id="processingCard">
+            <div class="card-header bg-warning text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0"><i class="bi bi-arrow-repeat spinner"></i> Идет обработка...</h5>
+                <span id="currentProgress">{{ $document->parsing_progress ?? 0 }}%</span>
+            </div>
+            <div class="card-body">
+                <!-- Основной прогресс-бар -->
+                <div class="progress mb-3" style="height: 25px;">
+                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" 
+                         style="width: {{ $document->parsing_progress ?? 0 }}%">
+                        {{ $document->parsing_progress ?? 0 }}%
+                    </div>
+                </div>
+                
+                <!-- Детали прогресса -->
+                <div class="row text-center mb-3">
+                    <div class="col-md-3">
+                        <div class="progress-info">Статус</div>
+                        <div id="progressStatus" class="fw-bold text-warning">Обработка</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="progress-info">Прогресс</div>
+                        <div id="progressPercent" class="fw-bold">{{ $document->parsing_progress ?? 0 }}%</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="progress-info">Страницы</div>
+                        <div id="progressPages" class="fw-bold">-/-</div>
+                    </div>
+                    <div class="col-md-3">
+                        <div class="progress-info">Изображения</div>
+                        <div id="progressImages" class="fw-bold">-</div>
+                    </div>
+                </div>
+                
+                <!-- Сообщение -->
+                <div id="progressMessage" class="alert alert-warning mb-0">
+                    <i class="bi bi-info-circle"></i>
+                    <span id="progressMessageText">Начинаем обработку документа...</span>
+                </div>
+                
+                <!-- Кнопки управления -->
+                <div class="text-center mt-3">
+                    <button id="refreshProgressBtn" class="btn btn-outline-info btn-sm me-2">
+                        <i class="bi bi-arrow-clockwise"></i> Обновить статус
+                    </button>
+                    <button id="autoRefreshToggle" class="btn btn-outline-success btn-sm">
+                        <i class="bi bi-play-circle"></i> Автообновление (вкл)
+                    </button>
+                </div>
+            </div>
+        </div>
         @endif
 
         <!-- Информация о документе -->
@@ -228,7 +287,7 @@
                                 <td>
                                     <div class="d-flex align-items-center">
                                         <div class="progress flex-grow-1 me-2">
-                                            <div id="mainProgressBar" class="progress-bar {{ $document->parsing_progress >= 100 ? 'bg-success' : 'bg-primary' }}" 
+                                            <div class="progress-bar {{ $document->parsing_progress >= 100 ? 'bg-success' : 'bg-primary' }}" 
                                                  style="width: {{ $document->parsing_progress ?? 0 }}%">
                                                 {{ $document->parsing_progress ?? 0 }}%
                                             </div>
@@ -270,6 +329,14 @@
                 <div class="stat-card">
                     <h2 class="text-warning">{{ $stats['images_count'] ?? 0 }}</h2>
                     <small class="text-muted">Изображений</small>
+                    @if($stats['images_count'] ?? 0)
+                        <div class="mt-2">
+                            <a href="{{ route('admin.documents.processing.view-images', $document->id) }}" 
+                               class="btn btn-sm btn-outline-warning">
+                                <i class="bi bi-images"></i> Просмотр
+                            </a>
+                        </div>
+                    @endif
                 </div>
             </div>
             <div class="col-md-3 col-sm-6">
@@ -280,68 +347,40 @@
             </div>
         </div>
 
-
-        <!-- В разделе статистики добавьте: -->
-<div class="col-md-3 col-sm-6 text-center mb-3">
-    <div class="stat-card">
-        <h2 class="text-warning">{{ $stats['images_count'] ?? 0 }}</h2>
-        <small>Изображений</small>
-        @if($stats['images_count'] ?? 0)
-            <div class="mt-2">
-                <a href="{{ route('admin.documents.processing.view-images', $document->id) }}" 
-                   class="btn btn-sm btn-outline-warning">
-                    <i class="bi bi-images"></i> Просмотр
-                </a>
-            </div>
-        @endif
-    </div>
-</div>
-
-<!-- В дополнительных действиях добавьте: -->
-<div class="col-md-3 mb-2">
-    <a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" 
-       class="btn btn-outline-secondary w-100">
-        <i class="bi bi-file-text"></i> Все страницы
-    </a>
-</div>
-
-        <!-- Прогресс обработки -->
-        <div id="processingProgress" class="card {{ $document->status === 'processing' ? '' : 'd-none' }}">
-            <div class="card-header bg-warning">
-                <h5 class="mb-0"><i class="bi bi-arrow-repeat spinning"></i> Идет обработка...</h5>
-            </div>
-            <div class="card-body">
-                <div class="text-center mb-3">
-                    <h4 id="progressStatus">Обработка документа...</h4>
-                    <h2 id="progressPercent">{{ $document->parsing_progress ?? 0 }}%</h2>
-                </div>
-                <div class="progress mb-3">
-                    <div id="progressBar" class="progress-bar progress-bar-striped progress-bar-animated bg-warning" 
-                         style="width: {{ $document->parsing_progress ?? 0 }}%">
-                    </div>
-                </div>
-                <div id="progressMessage" class="text-center text-muted">
-                    Пожалуйста, подождите...
-                </div>
-            </div>
-        </div>
-
         <!-- Основные действия -->
         <div class="card">
             <div class="card-header bg-dark text-white">
                 <h5 class="mb-0"><i class="bi bi-sliders"></i> Управление обработкой</h5>
             </div>
             <div class="card-body">
-                <div class="alert alert-info">
-                    <i class="bi bi-info-circle"></i> Выберите действие для обработки документа
-                </div>
+                <!-- Простой статус без лишней логики -->
+                @if($document->status === 'processing')
+                    <div class="alert alert-warning">
+                        <i class="bi bi-exclamation-triangle"></i> 
+                        <strong>Документ в обработке!</strong> Дождитесь завершения.
+                    </div>
+                @elseif($document->status === 'preview_created')
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> 
+                        <strong>Создан предпросмотр</strong> ({{ $previewPages->count() }} страниц). Можете запустить полную обработку.
+                    </div>
+                @elseif($document->status === 'parsed')
+                    <div class="alert alert-success">
+                        <i class="bi bi-check-circle"></i> 
+                        <strong>Документ обработан!</strong> {{ $stats['pages_count'] ?? 0 }} страниц, {{ $stats['images_count'] ?? 0 }} изображений.
+                    </div>
+                @else
+                    <div class="alert alert-info">
+                        <i class="bi bi-info-circle"></i> Выберите действие для обработки документа
+                    </div>
+                @endif
                 
                 <div class="row">
                     <!-- Создать предпросмотр -->
                     <div class="col-md-3 col-sm-6">
-                        <form action="{{ route('admin.documents.processing.create-preview', $document->id) }}" method="POST" id="createPreviewForm">
+                        <form action="{{ route('admin.documents.processing.create-preview', $document->id) }}" method="POST">
                             @csrf
-                            <button type="submit" class="btn btn-primary btn-action w-100 {{ $document->status === 'processing' ? 'disabled' : '' }}" 
+                            <button type="submit" class="btn btn-primary btn-action w-100" 
                                     id="createPreviewBtn"
                                     {{ $document->status === 'processing' ? 'disabled' : '' }}>
                                 <i class="bi bi-eye"></i>
@@ -353,9 +392,9 @@
                     
                     <!-- Полный парсинг -->
                     <div class="col-md-3 col-sm-6">
-                        <form action="{{ route('admin.documents.processing.parse-full', $document->id) }}" method="POST" id="parseFullForm">
+                        <form action="{{ route('admin.documents.processing.parse-full', $document->id) }}" method="POST">
                             @csrf
-                            <button type="submit" class="btn btn-success btn-action w-100 {{ $document->status === 'processing' ? 'disabled' : '' }}"
+                            <button type="submit" class="btn btn-success btn-action w-100"
                                     id="parseFullBtn"
                                     {{ $document->status === 'processing' ? 'disabled' : '' }}>
                                 <i class="bi bi-gear"></i>
@@ -367,9 +406,9 @@
                     
                     <!-- Извлечь изображения -->
                     <div class="col-md-3 col-sm-6">
-                        <form action="{{ route('admin.documents.processing.parse-images-only', $document->id) }}" method="POST" id="parseImagesForm">
+                        <form action="{{ route('admin.documents.processing.parse-images-only', $document->id) }}" method="POST">
                             @csrf
-                            <button type="submit" class="btn btn-warning btn-action w-100 {{ $document->status === 'processing' ? 'disabled' : '' }}"
+                            <button type="submit" class="btn btn-warning btn-action w-100"
                                     id="parseImagesBtn"
                                     {{ $document->status === 'processing' ? 'disabled' : '' }}>
                                 <i class="bi bi-images"></i>
@@ -381,11 +420,10 @@
                     
                     <!-- Сбросить статус -->
                     <div class="col-md-3 col-sm-6">
-                        <form action="{{ route('admin.documents.processing.reset-status', $document->id) }}" method="POST" id="resetStatusForm">
+                        <form action="{{ route('admin.documents.processing.reset-status', $document->id) }}" method="POST">
                             @csrf
-                            <button type="submit" class="btn btn-danger btn-action w-100 {{ $document->status === 'processing' ? 'disabled' : '' }}"
-                                    id="resetStatusBtn"
-                                    {{ $document->status === 'processing' ? 'disabled' : '' }}>
+                            <button type="submit" class="btn btn-danger btn-action w-100"
+                                    id="resetStatusBtn">
                                 <i class="bi bi-arrow-counterclockwise"></i>
                                 <span>Сбросить статус</span>
                                 <small>(начать заново)</small>
@@ -396,29 +434,36 @@
                 
                 <!-- Дополнительные действия -->
                 <div class="row mt-4">
-                    <div class="col-md-4">
+                    <div class="col-md-3">
+                        <a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" 
+                           class="btn btn-outline-secondary w-100" id="allPagesBtn">
+                            <i class="bi bi-file-text"></i> Все страницы
+                        </a>
+                    </div>
+                    <div class="col-md-3">
                         <form action="{{ route('admin.documents.processing.test-images', $document->id) }}" method="POST">
                             @csrf
-                            <button type="submit" class="btn btn-outline-primary w-100 {{ $document->status === 'processing' ? 'disabled' : '' }}"
+                            <button type="submit" class="btn btn-outline-primary w-100" id="testImagesBtn"
                                     {{ $document->status === 'processing' ? 'disabled' : '' }}>
                                 <i class="bi bi-vr"></i> Тест изображений
                             </button>
                         </form>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         @if($previewPages->count() > 0)
                         <form action="{{ route('admin.documents.processing.delete-preview', $document->id) }}" method="POST">
                             @csrf
                             @method('DELETE')
-                            <button type="submit" class="btn btn-outline-danger w-100 {{ $document->status === 'processing' ? 'disabled' : '' }}"
+                            <button type="submit" class="btn btn-outline-danger w-100" id="deletePreviewBtn"
                                     {{ $document->status === 'processing' ? 'disabled' : '' }}>
                                 <i class="bi bi-trash"></i> Удалить предпросмотр
                             </button>
                         </form>
                         @endif
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-md-3">
                         <button type="button" class="btn btn-outline-success w-100" data-bs-toggle="modal" data-bs-target="#parsePageModal"
+                                id="parsePageBtn"
                                 {{ $document->status === 'processing' ? 'disabled' : '' }}>
                             <i class="bi bi-file-earmark"></i> Парсить страницу
                         </button>
@@ -426,14 +471,6 @@
                 </div>
             </div>
         </div>
-
-        <!-- В разделе "Дополнительные действия" добавьте: -->
-<div class="col-md-3 mb-2">
-    <a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" 
-       class="btn btn-outline-secondary w-100">
-        <i class="bi bi-file-text"></i> Все страницы
-    </a>
-</div>
 
         <!-- Предпросмотр документа -->
         <div class="card">
@@ -521,153 +558,236 @@
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
-   <script>
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('Document processing page loaded');
-    
-    // Если документ в обработке, начинаем отслеживание прогресса
-    @if($document->status === 'processing')
-        startProgressTracking();
-    @endif
-    
-    // Обработка отправки форм
-    document.querySelectorAll('form').forEach(form => {
-        form.addEventListener('submit', function(e) {
-            const button = this.querySelector('button[type="submit"]');
-            const action = this.getAttribute('action');
+    <script>
+    document.addEventListener('DOMContentLoaded', function() {
+        console.log('Document processing page loaded - status: {{ $document->status }}');
+        
+        // Если статус processing, запускаем отслеживание прогресса
+        @if($document->status === 'processing')
+            startProgressTracking();
+        @endif
+        
+        // Функция отслеживания прогресса
+        function startProgressTracking() {
+            console.log('Starting progress tracking...');
             
-            // Проверяем, не обрабатывается ли уже документ
-            @if($document->status === 'processing')
-                e.preventDefault();
-                alert('Документ уже в обработке. Дождитесь завершения.');
-                return false;
-            @endif
+            let autoRefresh = true;
+            let refreshInterval = null;
             
-            // Подтверждение для опасных действий
-            if (action.includes('reset-status') || action.includes('delete-preview')) {
-                if (!confirm('Вы уверены? Это действие нельзя отменить.')) {
-                    e.preventDefault();
-                    return false;
-                }
-            }
+            // Элементы прогресса
+            const progressBar = document.getElementById('progressBar');
+            const currentProgress = document.getElementById('currentProgress');
+            const progressPercent = document.getElementById('progressPercent');
+            const progressStatus = document.getElementById('progressStatus');
+            const progressPages = document.getElementById('progressPages');
+            const progressImages = document.getElementById('progressImages');
+            const progressMessageText = document.getElementById('progressMessageText');
+            const refreshProgressBtn = document.getElementById('refreshProgressBtn');
+            const autoRefreshToggle = document.getElementById('autoRefreshToggle');
             
-            // Показываем индикатор загрузки
-            if (button) {
-                const originalHTML = button.innerHTML;
-                button.innerHTML = '<span class="spinner-border spinner-border-sm" role="status"></span> Обработка...';
-                button.disabled = true;
+            // Функция обновления прогресса
+            function updateProgress() {
+                console.log('Fetching progress update...');
                 
-                // Восстанавливаем кнопку через 30 секунд на всякий случай
-                setTimeout(() => {
-                    if (button.disabled) {
-                        button.innerHTML = originalHTML;
-                        button.disabled = false;
-                    }
-                }, 30000);
-            }
-            
-            return true;
-        });
-    });
-    
-    // Функция отслеживания прогресса
-    function startProgressTracking() {
-        console.log('Starting progress tracking for document: {{ $document->id }}');
-        
-        const progressBar = document.getElementById('progressBar');
-        const mainProgressBar = document.getElementById('mainProgressBar');
-        const progressPercent = document.getElementById('progressPercent');
-        const progressStatus = document.getElementById('progressStatus');
-        const progressMessage = document.getElementById('progressMessage');
-        const processingProgress = document.getElementById('processingProgress');
-        
-        // Показываем блок прогресса
-        if (processingProgress) {
-            processingProgress.classList.remove('d-none');
-        }
-        
-        // Функция обновления прогресса
-        function updateProgress() {
-            console.log('Fetching progress update...');
-            
-            fetch('{{ route("admin.documents.processing.progress", $document->id) }}')
-                .then(response => {
-                    if (!response.ok) {
-                        throw new Error('Network response was not ok');
-                    }
-                    return response.json();
-                })
-                .then(data => {
-                    console.log('Progress update received:', data);
-                    
-                    if (data.success) {
-                        // Обновляем прогресс-бары
-                        if (progressBar) {
-                            progressBar.style.width = data.progress + '%';
-                            progressBar.setAttribute('aria-valuenow', parseFloat(data.progress));
+                fetch('{{ route("admin.documents.processing.progress", $document->id) }}')
+                    .then(response => {
+                        if (!response.ok) {
+                            throw new Error('Network response was not ok');
                         }
-                        if (mainProgressBar) {
-                            mainProgressBar.style.width = data.progress + '%';
-                            mainProgressBar.textContent = data.progress + '%';
-                        }
-                        if (progressPercent) {
-                            progressPercent.textContent = data.progress + '%';
-                        }
-                        if (progressStatus) {
-                            progressStatus.textContent = data.message || 'Обработка...';
-                        }
+                        return response.json();
+                    })
+                    .then(data => {
+                        console.log('Progress update received:', data);
                         
-                        // Обновляем статус кнопок
-                        updateButtonsStatus(data.status);
-                        
-                        // Если обработка завершена
-                        if (parseFloat(data.progress) >= 100 || data.status !== 'processing') {
-                            if (progressMessage) {
-                                progressMessage.innerHTML = '<i class="bi bi-check-circle text-success"></i> Обработка завершена! Страница перезагрузится через 2 секунды...';
+                        if (data.success) {
+                            // Обновляем прогресс
+                            const progress = parseFloat(data.progress) || 0;
+                            const status = data.status || 'unknown';
+                            const message = data.message || '';
+                            
+                            // Обновляем UI
+                            if (progressBar) {
+                                progressBar.style.width = progress + '%';
+                                progressBar.setAttribute('aria-valuenow', progress);
+                                progressBar.textContent = progress + '%';
                             }
                             
-                            // Перезагружаем страницу через 2 секунды
-                            setTimeout(() => {
-                                window.location.reload();
-                            }, 2000);
+                            if (currentProgress) {
+                                currentProgress.textContent = progress + '%';
+                            }
+                            
+                            if (progressPercent) {
+                                progressPercent.textContent = progress + '%';
+                            }
+                            
+                            if (progressStatus) {
+                                let statusText = '';
+                                let statusClass = '';
+                                
+                                switch(status) {
+                                    case 'processing':
+                                        statusText = 'В обработке';
+                                        statusClass = 'text-warning';
+                                        break;
+                                    case 'completed':
+                                        statusText = 'Завершено';
+                                        statusClass = 'text-success';
+                                        break;
+                                    case 'failed':
+                                        statusText = 'Ошибка';
+                                        statusClass = 'text-danger';
+                                        break;
+                                    default:
+                                        statusText = status;
+                                        statusClass = 'text-secondary';
+                                }
+                                
+                                progressStatus.textContent = statusText;
+                                progressStatus.className = 'fw-bold ' + statusClass;
+                            }
+                            
+                            if (progressPages) {
+                                const processed = data.processed_pages || 0;
+                                const total = data.total_pages || 0;
+                                progressPages.textContent = total > 0 ? `${processed}/${total}` : '-/-';
+                            }
+                            
+                            if (progressImages) {
+                                progressImages.textContent = data.images_count || 0;
+                            }
+                            
+                            if (progressMessageText) {
+                                progressMessageText.textContent = message;
+                            }
+                            
+                            // Обновляем стиль прогресс-бара
+                            if (progressBar) {
+                                if (status === 'processing') {
+                                    progressBar.className = 'progress-bar progress-bar-striped progress-bar-animated bg-warning';
+                                } else if (status === 'completed') {
+                                    progressBar.className = 'progress-bar bg-success';
+                                    progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+                                } else if (status === 'failed') {
+                                    progressBar.className = 'progress-bar bg-danger';
+                                    progressBar.classList.remove('progress-bar-animated', 'progress-bar-striped');
+                                }
+                            }
+                            
+                            // Если обработка завершена или провалена
+                            if (status !== 'processing') {
+                                // Останавливаем интервал
+                                if (refreshInterval) {
+                                    clearInterval(refreshInterval);
+                                    refreshInterval = null;
+                                }
+                                
+                                // Обновляем кнопку
+                                if (autoRefreshToggle) {
+                                    autoRefreshToggle.innerHTML = '<i class="bi bi-check-circle"></i> Обработка завершена';
+                                    autoRefreshToggle.disabled = true;
+                                    autoRefreshToggle.classList.remove('btn-outline-success');
+                                    autoRefreshToggle.classList.add('btn-success');
+                                }
+                                
+                                // Если завершено успешно, обновляем страницу через 3 секунды
+                                if (status === 'completed') {
+                                    setTimeout(() => {
+                                        window.location.reload();
+                                    }, 3000);
+                                }
+                            } else {
+                                // Если автообновление включено, продолжаем
+                                if (autoRefresh && !refreshInterval) {
+                                    refreshInterval = setInterval(updateProgress, 2000);
+                                }
+                            }
                         } else {
-                            // Продолжаем проверять каждые 3 секунды
-                            setTimeout(updateProgress, 3000);
+                            console.error('Progress update failed:', data.error);
+                            if (progressMessageText) {
+                                progressMessageText.textContent = 'Ошибка получения данных: ' + (data.error || 'Неизвестная ошибка');
+                            }
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Error updating progress:', error);
+                        if (progressMessageText) {
+                            progressMessageText.textContent = 'Ошибка сети при получении прогресса';
+                        }
+                    });
+            }
+            
+            // Кнопка ручного обновления
+            if (refreshProgressBtn) {
+                refreshProgressBtn.addEventListener('click', function() {
+                    updateProgress();
+                });
+            }
+            
+            // Кнопка переключения автообновления
+            if (autoRefreshToggle) {
+                autoRefreshToggle.addEventListener('click', function() {
+                    autoRefresh = !autoRefresh;
+                    
+                    if (autoRefresh) {
+                        this.innerHTML = '<i class="bi bi-pause-circle"></i> Автообновление (вкл)';
+                        this.classList.remove('btn-outline-warning');
+                        this.classList.add('btn-outline-success');
+                        
+                        // Запускаем интервал
+                        if (!refreshInterval) {
+                            refreshInterval = setInterval(updateProgress, 2000);
                         }
                     } else {
-                        console.error('Progress update failed:', data.error);
-                        // Пробуем снова через 5 секунд
-                        setTimeout(updateProgress, 5000);
+                        this.innerHTML = '<i class="bi bi-play-circle"></i> Автообновление (выкл)';
+                        this.classList.remove('btn-outline-success');
+                        this.classList.add('btn-outline-warning');
+                        
+                        // Останавливаем интервал
+                        if (refreshInterval) {
+                            clearInterval(refreshInterval);
+                            refreshInterval = null;
+                        }
                     }
-                })
-                .catch(error => {
-                    console.error('Error updating progress:', error);
-                    // Пробуем снова через 5 секунд
-                    setTimeout(updateProgress, 5000);
                 });
+            }
+            
+            // Начинаем обновление
+            updateProgress();
         }
         
-        // Начинаем обновление
-        updateProgress();
-    }
-    
-    // Функция обновления статуса кнопок
-    function updateButtonsStatus(status) {
-        const buttons = document.querySelectorAll('button[type="submit"], button[data-bs-toggle="modal"]');
-        buttons.forEach(button => {
-            if (status === 'processing') {
-                button.disabled = true;
-                button.classList.add('disabled');
-            } else {
-                button.disabled = false;
-                button.classList.remove('disabled');
-            }
+        // Простая обработка отправки форм
+        document.querySelectorAll('form').forEach(form => {
+            form.addEventListener('submit', function(e) {
+                const button = this.querySelector('button[type="submit"]');
+                
+                // Простая проверка - если документ уже в обработке, не отправляем
+                @if($document->status === 'processing')
+                    if (!button.disabled) {
+                        e.preventDefault();
+                        alert('Документ уже в обработке. Дождитесь завершения.');
+                        return false;
+                    }
+                @endif
+                
+                // Если кнопка не заблокирована, показываем спиннер
+                if (button && !button.disabled) {
+                    const originalText = button.innerHTML;
+                    button.innerHTML = '<span class="spinner-border spinner-border-sm"></span> Обработка...';
+                    button.disabled = true;
+                    
+                    // Восстанавливаем кнопку через 10 секунд
+                    setTimeout(() => {
+                        if (button.disabled) {
+                            button.innerHTML = originalText;
+                            button.disabled = false;
+                        }
+                    }, 10000);
+                }
+                
+                return true;
+            });
         });
-    }
-    
-    // Обновляем статус кнопок при загрузке
-    updateButtonsStatus('{{ $document->status }}');
-});
-</script>
+    });
+    </script>
 </body>
 </html>

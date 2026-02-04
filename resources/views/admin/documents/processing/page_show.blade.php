@@ -12,163 +12,124 @@
 
 @push('styles')
 <style>
-.document-image-container {
-    margin: 20px 0;
+.header {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 10px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+}
+
+.stat-card {
+    background: white;
     padding: 15px;
-    background: #f8f9fa;
     border-radius: 8px;
-    border-left: 4px solid #007bff;
-}
-
-.document-image {
     text-align: center;
-}
-
-.image-link {
-    display: inline-block;
-    transition: transform 0.3s ease;
-}
-
-.image-link:hover {
-    transform: scale(1.02);
-}
-
-.image-caption {
-    margin-top: 10px;
-    text-align: center;
-    font-style: italic;
-    color: #6c757d;
-}
-
-.img-fluid {
-    max-width: 100%;
-    height: auto;
-    box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-}
-
-/* Стили для галереи изображений */
-.image-gallery {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-    gap: 15px;
-    margin: 20px 0;
-}
-
-.gallery-item {
-    position: relative;
-    overflow: hidden;
-    border-radius: 8px;
-    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+    border: 1px solid #e9ecef;
     transition: all 0.3s ease;
 }
 
-.gallery-item:hover {
+.stat-card:hover {
     transform: translateY(-5px);
-    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
 }
 
-.gallery-item img {
-    width: 100%;
-    height: 150px;
-    object-fit: cover;
-    transition: transform 0.3s ease;
+.stat-card h2 {
+    margin: 0;
+    font-weight: bold;
+    font-size: 2rem;
 }
 
-.gallery-item:hover img {
-    transform: scale(1.05);
+.stat-card small {
+    color: #6c757d;
+    font-size: 0.85rem;
 }
 
-.gallery-caption {
-    padding: 10px;
-    background: white;
-    text-align: center;
-}
-
-.gallery-badges {
-    position: absolute;
-    top: 10px;
-    right: 10px;
-    display: flex;
-    gap: 5px;
-}
-
-.gallery-badge {
-    background: rgba(0,0,0,0.7);
-    color: white;
-    padding: 2px 6px;
-    border-radius: 10px;
-    font-size: 0.7rem;
-}
-
-/* Стили для вкладок изображений */
-.image-tabs {
+.image-comparison {
     border: 1px solid #dee2e6;
     border-radius: 8px;
     overflow: hidden;
+    margin-bottom: 20px;
 }
 
-.image-tabs-nav {
-    display: flex;
+.image-comparison-header {
     background: #f8f9fa;
-    border-bottom: 1px solid #dee2e6;
-}
-
-.image-tab-btn {
-    flex: 1;
     padding: 10px 15px;
-    border: none;
-    background: none;
-    cursor: pointer;
-    transition: all 0.3s ease;
+    border-bottom: 1px solid #dee2e6;
     font-weight: 500;
 }
 
-.image-tab-btn:hover {
-    background: #e9ecef;
-}
-
-.image-tab-btn.active {
-    background: white;
-    border-bottom: 2px solid #007bff;
-    color: #007bff;
-}
-
-.image-tab-content {
+.image-comparison-body {
     padding: 15px;
-    background: white;
 }
 
-.image-preview-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 20px;
+.original-image {
+    position: relative;
+    border-right: 2px dashed #dee2e6;
 }
 
-.image-preview-item {
-    text-align: center;
-}
-
-.image-preview-item img {
-    max-width: 100%;
-    max-height: 300px;
-    object-fit: contain;
-    border: 1px solid #dee2e6;
+.original-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 5px 10px;
     border-radius: 4px;
-    padding: 5px;
-    background: white;
+    font-size: 0.8rem;
 }
 
-.image-info {
-    margin-top: 10px;
-    padding: 10px;
+.processed-badge {
+    position: absolute;
+    top: 10px;
+    left: 10px;
+    background: rgba(40,167,69,0.9);
+    color: white;
+    padding: 5px 10px;
+    border-radius: 4px;
+    font-size: 0.8rem;
+}
+
+.image-container {
+    position: relative;
     background: #f8f9fa;
-    border-radius: 4px;
+    border-radius: 8px;
+    padding: 15px;
+    text-align: center;
+    min-height: 300px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.image-container img {
+    max-width: 100%;
+    max-height: 400px;
+    object-fit: contain;
+}
+
+.image-actions {
+    margin-top: 15px;
+}
+
+.image-info-panel {
+    background: white;
+    border-radius: 8px;
+    padding: 15px;
+    border: 1px solid #e9ecef;
 }
 
 .image-info-item {
     display: flex;
     justify-content: space-between;
-    margin-bottom: 5px;
+    padding: 8px 0;
+    border-bottom: 1px solid #f8f9fa;
+}
+
+.image-info-item:last-child {
+    border-bottom: none;
 }
 
 .image-info-label {
@@ -180,37 +141,261 @@
     color: #6c757d;
 }
 
-/* Стили для сравнения изображений */
-.image-comparison-container {
-    position: relative;
-    width: 100%;
-    max-width: 600px;
-    margin: 0 auto;
+.progress-container {
+    margin-top: 20px;
 }
 
-.comparison-slider {
+.processing-indicator {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 10px;
+}
+
+.spinner-border {
+    width: 1.5rem;
+    height: 1.5rem;
+}
+
+.image-quality-badge {
+    font-size: 0.75rem;
+    padding: 3px 8px;
+}
+
+.image-gallery {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 15px;
+    margin: 20px 0;
+}
+
+.gallery-item {
+    position: relative;
+    overflow: hidden;
+    border-radius: 8px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.1);
+    transition: all 0.3s ease;
+    background: white;
+    border: 1px solid #e9ecef;
+}
+
+.gallery-item:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+}
+
+.gallery-item img {
+    width: 100%;
+    height: 180px;
+    object-fit: contain;
+    background: #f8f9fa;
+    padding: 10px;
+    transition: transform 0.3s ease;
+}
+
+.gallery-item:hover img {
+    transform: scale(1.05);
+}
+
+.gallery-caption {
+    padding: 10px;
+    border-top: 1px solid #e9ecef;
+}
+
+.gallery-badges {
+    position: absolute;
+    top: 10px;
+    right: 10px;
+    display: flex;
+    gap: 5px;
+    flex-direction: column;
+    align-items: flex-end;
+}
+
+.gallery-badge {
+    background: rgba(0,0,0,0.7);
+    color: white;
+    padding: 3px 8px;
+    border-radius: 12px;
+    font-size: 0.7rem;
+    backdrop-filter: blur(4px);
+}
+
+.gallery-badge.bg-success {
+    background: rgba(40,167,69,0.9);
+}
+
+.gallery-badge.bg-info {
+    background: rgba(23,162,184,0.9);
+}
+
+.gallery-badge.bg-warning {
+    background: rgba(255,193,7,0.9);
+}
+
+.page-content-card {
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.page-content-header {
+    background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+    padding: 15px;
+    border-bottom: 1px solid #dee2e6;
+}
+
+.page-content-body {
+    padding: 20px;
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+.content-section {
+    margin-bottom: 30px;
+}
+
+.content-section:last-child {
+    margin-bottom: 0;
+}
+
+.section-title {
+    color: #495057;
+    border-bottom: 2px solid #dee2e6;
+    padding-bottom: 8px;
+    margin-bottom: 15px;
+    font-weight: 600;
+}
+
+.text-content {
+    line-height: 1.6;
+    font-size: 15px;
+}
+
+.text-content p {
+    margin-bottom: 1rem;
+}
+
+.highlight-box {
+    background: #fff3cd;
+    border-left: 4px solid #ffc107;
+    padding: 15px;
+    margin: 15px 0;
+    border-radius: 0 4px 4px 0;
+}
+
+.no-image-message {
+    text-align: center;
+    padding: 40px 20px;
+    color: #6c757d;
+}
+
+.no-image-message i {
+    font-size: 3rem;
+    margin-bottom: 15px;
+    display: block;
+}
+
+.loading-overlay {
     position: absolute;
     top: 0;
-    left: 50%;
-    width: 3px;
-    height: 100%;
-    background: #007bff;
-    cursor: col-resize;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(255,255,255,0.9);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    border-radius: 8px;
+}
+
+.loading-spinner {
+    width: 50px;
+    height: 50px;
+}
+
+.compact-image-view {
+    max-height: 200px;
+    overflow: hidden;
+    position: relative;
+}
+
+.compact-image-view::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 30px;
+    background: linear-gradient(to bottom, transparent, rgba(255,255,255,0.9));
+}
+
+.expand-image-btn {
+    position: absolute;
+    bottom: 10px;
+    right: 10px;
     z-index: 10;
 }
 
-.comparison-slider::after {
-    content: '';
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
-    width: 30px;
-    height: 30px;
-    background: #007bff;
-    border-radius: 50%;
-    border: 2px solid white;
-    box-shadow: 0 0 5px rgba(0,0,0,0.3);
+.tab-content {
+    padding: 20px 0;
+}
+
+.nav-tabs .nav-link {
+    border: 1px solid transparent;
+    border-bottom: none;
+    border-radius: 4px 4px 0 0;
+    padding: 10px 20px;
+    color: #6c757d;
+    font-weight: 500;
+    transition: all 0.3s ease;
+}
+
+.nav-tabs .nav-link:hover {
+    border-color: #e9ecef #e9ecef #dee2e6;
+    color: #495057;
+}
+
+.nav-tabs .nav-link.active {
+    color: #495057;
+    background-color: white;
+    border-color: #dee2e6 #dee2e6 white;
+}
+
+.image-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.stat-box {
+    background: white;
+    padding: 15px;
+    border-radius: 8px;
+    text-align: center;
+    border: 1px solid #e9ecef;
+}
+
+.stat-value {
+    font-size: 1.5rem;
+    font-weight: bold;
+    margin-bottom: 5px;
+}
+
+.stat-label {
+    font-size: 0.85rem;
+    color: #6c757d;
+}
+
+.comparison-slider-container {
+    position: relative;
+    width: 100%;
+    height: 400px;
+    background: #f8f9fa;
+    border-radius: 8px;
+    overflow: hidden;
 }
 
 .comparison-image {
@@ -227,45 +412,57 @@
     object-fit: contain;
 }
 
-/* Стили для слайдера сравнения */
-.comparison-slider-container {
-    width: 100%;
-    height: 400px;
-    position: relative;
-    margin: 20px 0;
+.comparison-slider {
+    position: absolute;
+    top: 0;
+    left: 50%;
+    width: 4px;
+    height: 100%;
+    background: #007bff;
+    cursor: col-resize;
+    z-index: 10;
 }
 
-.comparison-label {
+.comparison-slider::after {
+    content: '';
     position: absolute;
-    top: 10px;
-    padding: 5px 10px;
-    background: rgba(0,0,0,0.7);
-    color: white;
-    border-radius: 4px;
-    font-size: 0.9rem;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    width: 40px;
+    height: 40px;
+    background: #007bff;
+    border-radius: 50%;
+    border: 3px solid white;
+    box-shadow: 0 0 10px rgba(0,0,0,0.3);
 }
 </style>
 @endpush
 
 @section('content')
-<div class="container">
-    <!-- Заголовок -->
+<div class="container-fluid">
+    <!-- Заголовок страницы -->
     <div class="header">
         <div class="d-flex justify-content-between align-items-center">
             <div>
-                <h1 class="h3 mb-2"><i class="bi bi-file-text"></i> Страница {{ $page->page_number }}</h1>
+                <h1 class="h3 mb-2">
+                    <i class="bi bi-file-text me-2"></i>
+                    Страница {{ $page->page_number }} 
+                    <span class="badge bg-light text-dark ms-2">{{ $document->title }}</span>
+                </h1>
                 <nav aria-label="breadcrumb">
-                    <ol class="breadcrumb">
-                        <li class="breadcrumb-item"><a href="{{ route('admin.documents.processing.advanced', $document->id) }}" class="text-white">{{ Str::limit($document->title, 15) }}</a></li>
-                        <li class="breadcrumb-item"><a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" class="text-white">Страницы</a></li>
-                        <li class="breadcrumb-item active text-white">{{ $page->page_number }}</li>
+                    <ol class="breadcrumb mb-0">
+                        <li class="breadcrumb-item"><a href="{{ route('admin.documents.processing.advanced', $document->id) }}" class="text-white opacity-75">{{ Str::limit($document->title, 20) }}</a></li>
+                        <li class="breadcrumb-item"><a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" class="text-white opacity-75">Страницы</a></li>
+                        <li class="breadcrumb-item active text-white">Страница {{ $page->page_number }}</li>
                     </ol>
                 </nav>
             </div>
             <div class="btn-group">
-                <a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" class="btn btn-outline-light">
-                    <i class="bi bi-arrow-left"></i> Назад
+                <a href="{{ route('admin.documents.processing.pages.list', $document->id) }}" class="btn btn-light">
+                    <i class="bi bi-arrow-left me-1"></i> Назад к списку
                 </a>
+                
                 @if($page->page_number > 1)
                     @php
                         $prevPage = \App\Models\DocumentPage::where('document_id', $document->id)
@@ -279,6 +476,7 @@
                         </a>
                     @endif
                 @endif
+                
                 @php
                     $nextPage = \App\Models\DocumentPage::where('document_id', $document->id)
                         ->where('page_number', $page->page_number + 1)
@@ -293,8 +491,14 @@
             </div>
         </div>
     </div>
-
-    <!-- Информация о странице -->
+ <!-- В шапке страницы, рядом с кнопками навигации -->
+<div class="btn-group ms-2">
+    <button type="button" class="btn btn-warning" onclick="reprocessPageImages()" 
+            title="Перезапустить поиск изображений на этой странице">
+        <i class="bi bi-arrow-clockwise me-1"></i> Переобработать изображения
+    </button>
+</div>
+    <!-- Статистика страницы -->
     <div class="row mb-4">
         <div class="col-md-3">
             <div class="stat-card">
@@ -322,724 +526,526 @@
         </div>
     </div>
 
-    <!-- Изображения страницы с вкладками -->
-   @if($images->count() > 0)
-<div class="card mb-4">
-    <div class="card-header bg-success text-white">
-        <h5 class="mb-0"><i class="bi bi-images"></i> Изображения на странице ({{ $images->count() }})</h5>
-    </div>
-    <div class="card-body">
-        @foreach($images as $image)
-        <div class="mb-4">
-            <div class="text-center">
-                @if($image->has_screenshot && $image->screenshot_url)
-                <a href="{{ $image->screenshot_url }}" target="_blank" class="d-block mb-2">
-                    <img src="{{ $image->screenshot_url }}" 
-                         alt="Скриншот" 
-                         class="img-fluid rounded border shadow"
-                         style="max-height: 500px; object-fit: contain;">
-                </a>
-                <div class="small text-muted">
-                    <i class="bi bi-aspect-ratio"></i> {{ $image->width }}×{{ $image->height }}px | 
-                    <i class="bi bi-zoom-in"></i> Кликните для увеличения
-                </div>
-                @elseif($image->url)
-                <a href="{{ $image->url }}" target="_blank" class="d-block mb-2">
-                    <img src="{{ $image->url }}" 
-                         alt="Изображение" 
-                         class="img-fluid rounded border shadow"
-                         style="max-height: 500px; object-fit: contain;">
-                </a>
-                <div class="small text-muted">
-                    <i class="bi bi-aspect-ratio"></i> {{ $image->width }}×{{ $image->height }}px
-                </div>
+    <!-- Вкладки -->
+    <ul class="nav nav-tabs mb-4" id="pageTabs" role="tablist">
+        <li class="nav-item" role="presentation">
+            <button class="nav-link active" id="images-tab" data-bs-toggle="tab" data-bs-target="#images-tab-pane" type="button" role="tab">
+                <i class="bi bi-images me-1"></i> Изображения 
+                @if($images->count() > 0)
+                <span class="badge bg-success ms-1">{{ $images->count() }}</span>
                 @endif
-            </div>
-        </div>
-        @endforeach
-    </div>
-</div>
-@endif
-                
-                <!-- Вкладка Галерея -->
-                <div id="galleryTab" class="image-tab-content">
-                    <div class="row row-cols-1 row-cols-md-3 row-cols-lg-4 g-4">
-                        @foreach($images as $image)
-                        <div class="col">
-                            <div class="card h-100">
-                                <div class="card-img-top position-relative" style="height: 200px; overflow: hidden;">
-                                    <a href="{{ Storage::url($image->path) }}" target="_blank" class="text-decoration-none">
-                                        <img src="{{ Storage::url($image->path) }}" 
-                                             alt="{{ $image->description }}"
-                                             class="w-100 h-100"
-                                             style="object-fit: contain; background: #f8f9fa;"
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="content-tab" data-bs-toggle="tab" data-bs-target="#content-tab-pane" type="button" role="tab">
+                <i class="bi bi-text-left me-1"></i> Содержимое
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="raw-tab" data-bs-toggle="tab" data-bs-target="#raw-tab-pane" type="button" role="tab">
+                <i class="bi bi-code me-1"></i> Исходный текст
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
+            <button class="nav-link" id="stats-tab" data-bs-toggle="tab" data-bs-target="#stats-tab-pane" type="button" role="tab">
+                <i class="bi bi-bar-chart me-1"></i> Статистика
+            </button>
+        </li>
+    </ul>
+
+    <!-- Контент вкладок -->
+    <div class="tab-content" id="pageTabsContent">
+        
+        <!-- Вкладка: Изображения -->
+        <div class="tab-pane fade show active" id="images-tab-pane" role="tabpanel" tabindex="0">
+            
+            @if($images->count() > 0)
+                <!-- Статистика изображений -->
+                <div class="image-stats-grid mb-4">
+                    <div class="stat-box">
+                        <div class="stat-value text-primary">{{ $images->count() }}</div>
+                        <div class="stat-label">Всего изображений</div>
+                    </div>
+                    <div class="stat-box">
+                        @php
+                            $withScreenshots = $images->where('has_screenshot', true)->count();
+                        @endphp
+                        <div class="stat-value text-success">{{ $withScreenshots }}</div>
+                        <div class="stat-label">Со скриншотами</div>
+                    </div>
+                    <div class="stat-box">
+                        @php
+                            $totalSize = $images->sum('size');
+                        @endphp
+                        <div class="stat-value text-info">{{ number_format($totalSize / 1024, 1) }} KB</div>
+                        <div class="stat-label">Общий размер</div>
+                    </div>
+                    <div class="stat-box">
+                        @php
+                            $avgQuality = $images->avg('quality') ?? 0;
+                        @endphp
+                        <div class="stat-value text-warning">{{ round($avgQuality * 100) }}%</div>
+                        <div class="stat-label">Среднее качество</div>
+                    </div>
+                </div>
+
+                <!-- Список изображений -->
+                <div class="row">
+                    @foreach($images as $image)
+                    <div class="col-md-6 col-lg-4 mb-4">
+                        <div class="gallery-item">
+                            <div class="position-relative">
+                                @if($image->has_screenshot && $image->screenshot_url)
+                                    <a href="{{ $image->screenshot_url }}" target="_blank" class="d-block">
+                                        <img src="{{ $image->screenshot_url }}" 
+                                             alt="Обрезанная схема" 
+                                             class="img-fluid"
                                              onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Изображение</text></svg>';">
                                     </a>
-                                    @if($image->screenshot_path || $image->thumbnail_path)
-                                    <div class="position-absolute bottom-0 end-0 m-2">
-                                        <span class="badge bg-success">
-                                            <i class="bi bi-check-circle"></i> Есть превью
-                                        </span>
-                                    </div>
-                                    @endif
-                                </div>
-                                <div class="card-body">
-                                    <h6 class="card-title text-truncate" title="{{ $image->filename }}">
-                                        {{ $image->filename }}
-                                    </h6>
-                                    <div class="small text-muted">
-                                        <div><i class="bi bi-file-earmark"></i> {{ strtoupper($image->extension) }}</div>
-                                        <div><i class="bi bi-hdd"></i> {{ number_format($image->size / 1024, 2) }} KB</div>
+                                    
+                                    <div class="gallery-badges">
+                                        @if($image->has_screenshot)
+                                            <span class="gallery-badge bg-success">
+                                                <i class="bi bi-scissors"></i> Обрезано
+                                            </span>
+                                        @endif
                                         @if($image->width && $image->height)
-                                        <div><i class="bi bi-aspect-ratio"></i> {{ $image->width }}×{{ $image->height }}</div>
+                                            <span class="gallery-badge bg-info">
+                                                {{ $image->width }}×{{ $image->height }}
+                                            </span>
+                                        @endif
+                                        @if($image->size)
+                                            <span class="gallery-badge bg-dark">
+                                                {{ number_format($image->size / 1024, 1) }} KB
+                                            </span>
                                         @endif
                                     </div>
-                                </div>
-                                <div class="card-footer bg-transparent">
-                                    <div class="btn-group btn-group-sm w-100" role="group">
-                                        <a href="{{ Storage::url($image->path) }}" 
-                                           target="_blank" 
-                                           class="btn btn-outline-primary">
-                                            <i class="bi bi-eye"></i> Оригинал
-                                        </a>
-                                        @if($image->screenshot_path)
-                                        <a href="{{ Storage::url($image->screenshot_path) }}" 
-                                           target="_blank" 
-                                           class="btn btn-outline-info">
-                                            <i class="bi bi-aspect-ratio"></i> Скриншот
-                                        </a>
-                                        @endif
-                                        @if($image->thumbnail_path)
-                                        <a href="{{ Storage::url($image->thumbnail_path) }}" 
-                                           target="_blank" 
-                                           class="btn btn-outline-success">
-                                            <i class="bi bi-image"></i> Миниатюра
-                                        </a>
+                                @elseif($image->url)
+                                    <a href="{{ $image->url }}" target="_blank" class="d-block">
+                                        <img src="{{ $image->url }}" 
+                                             alt="Оригинал" 
+                                             class="img-fluid"
+                                             onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Изображение</text></svg>';">
+                                    </a>
+                                    
+                                    <div class="gallery-badges">
+                                        <span class="gallery-badge bg-warning">
+                                            <i class="bi bi-exclamation-triangle"></i> Без скриншота
+                                        </span>
+                                        @if($image->width && $image->height)
+                                            <span class="gallery-badge bg-info">
+                                                {{ $image->width }}×{{ $image->height }}
+                                            </span>
                                         @endif
                                     </div>
-                                </div>
-                            </div>
-                        </div>
-                        @endforeach
-                    </div>
-                </div>
-                
-                <!-- Вкладка Превью и скриншоты -->
-                <div id="previewsTab" class="image-tab-content" style="display: none;">
-                    @foreach($images as $image)
-                    <div class="card mb-3">
-                        <div class="card-header bg-light">
-                            <h6 class="mb-0">{{ $image->description }}</h6>
-                            <small class="text-muted">{{ $image->filename }}</small>
-                        </div>
-                        <div class="card-body">
-                            <div class="row">
-                                <!-- Оригинальное изображение -->
-                                <div class="col-md-4">
-                                    <div class="image-preview-item">
-                                        <h6 class="mb-2"><i class="bi bi-image"></i> Оригинал</h6>
-                                        <a href="{{ Storage::url($image->path) }}" target="_blank">
-                                            <img src="{{ Storage::url($image->path) }}" 
-                                                 alt="Оригинал"
-                                                 onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Оригинал</text></svg>';">
-                                        </a>
-                                        <div class="image-info mt-2">
-                                            <div class="image-info-item">
-                                                <span class="image-info-label">Размер:</span>
-                                                <span class="image-info-value">{{ number_format($image->size / 1024, 2) }} KB</span>
-                                            </div>
-                                            <div class="image-info-item">
-                                                <span class="image-info-label">Разрешение:</span>
-                                                <span class="image-info-value">{{ $image->width }}×{{ $image->height }}</span>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-            <!-- Скриншот -->
-<!-- Скриншот -->
-<div class="col-md-4">
-    <div class="image-preview-item">
-        <h6 class="mb-2"><i class="bi bi-aspect-ratio"></i> Скриншот</h6>
-        @if($image->screenshot_path && $image->has_screenshot)
-            @php
-                // Получаем размеры файлов для сравнения
-                $screenshotSize = $image->screenshot_size ?? 0;
-                $originalSize = $image->size ?? 0;
-                $isDifferent = $screenshotSize > 0 && $originalSize > 0 && $screenshotSize != $originalSize;
-                $savedPercent = $isDifferent ? round((1 - $screenshotSize / $originalSize) * 100, 2) : 0;
-            @endphp
-            
-            <a href="{{ $image->screenshot_url }}" target="_blank" class="d-block mb-2">
-                <img src="{{ $image->screenshot_url }}" 
-                     alt="Скриншот"
-                     class="img-fluid border rounded"
-                     onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Скриншот</text></svg>';">
-            </a>
-            
-            <div class="image-info mt-2">
-                <div class="image-info-item">
-                    <span class="image-info-label">Размер:</span>
-                    <span class="image-info-value">{{ number_format($screenshotSize / 1024, 2) }} KB</span>
-                </div>
-                <div class="image-info-item">
-                    <span class="image-info-label">Сжатие:</span>
-                    <span class="image-info-value {{ $isDifferent ? 'text-success' : 'text-warning' }}">
-                        @if($isDifferent)
-                            <i class="bi bi-check-circle"></i> {{ $savedPercent }}% меньше
-                        @else
-                            <i class="bi bi-exclamation-triangle"></i> Не сжато
-                        @endif
-                    </span>
-                </div>
-                <div class="image-info-item">
-                    <span class="image-info-label">Формат:</span>
-                    <span class="image-info-value">800×600px</span>
-                </div>
-            </div>
-            
-            <!-- Кнопки действий -->
-            <div class="mt-2">
-                <div class="btn-group btn-group-sm w-100" role="group">
-                    <a href="{{ $image->screenshot_url }}" 
-                       target="_blank" 
-                       class="btn btn-outline-primary">
-                        <i class="bi bi-eye"></i> Просмотр
-                    </a>
-                    <a href="{{ $image->screenshot_url }}" 
-                       download="screenshot_{{ $image->filename }}"
-                       class="btn btn-outline-success">
-                        <i class="bi bi-download"></i> Скачать
-                    </a>
-                </div>
-            </div>
-            
-        @elseif($image->screenshot_path)
-            <div class="alert alert-danger">
-                <i class="bi bi-x-circle"></i> Файл скриншота не найден
-                <div class="small mt-1">
-                    Путь: {{ $image->screenshot_path }}<br>
-                    <a href="{{ Storage::url($image->path) }}" target="_blank" class="btn btn-sm btn-outline-primary mt-1">
-                        <i class="bi bi-eye"></i> Показать оригинал
-                    </a>
-                </div>
-            </div>
-        @else
-            <div class="alert alert-warning">
-                <i class="bi bi-exclamation-triangle"></i> Скриншот не создан
-                <div class="small mt-1">
-                    Для этого изображения не был создан скриншот.
-                </div>
-            </div>
-        @endif
-    </div>
-</div>
-
-<!-- В шаблоне page_show.blade.php -->
-@if($image->screenshot_path)
-    <div class="mb-3">
-        <h6>Скриншот (прямая проверка):</h6>
-        @php
-            // Прямая проверка существования файла
-            $screenshotExists = Storage::disk('public')->exists($image->screenshot_path);
-            $screenshotUrl = $screenshotExists ? Storage::url($image->screenshot_path) : null;
-            
-            // Также проверяем оригинал для сравнения
-            $originalExists = Storage::disk('public')->exists($image->path);
-            $originalUrl = $originalExists ? Storage::url($image->path) : null;
-            
-            // Сравниваем размеры
-            if ($screenshotExists && $originalExists) {
-                $screenshotSize = Storage::disk('public')->size($image->screenshot_path);
-                $originalSize = Storage::disk('public')->size($image->path);
-                $isDifferent = $screenshotSize != $originalSize;
-            }
-        @endphp
-        
-        @if($screenshotExists)
-            <div class="row">
-                <div class="col-md-6">
-                    <h6>Оригинал:</h6>
-                    <img src="{{ $originalUrl }}" alt="Оригинал" class="img-fluid border">
-                    <div class="small text-muted mt-1">
-                        {{ $image->width }}×{{ $image->height }}px, 
-                        {{ number_format($originalSize / 1024, 2) }} KB
-                    </div>
-                </div>
-                <div class="col-md-6">
-                    <h6>Скриншот:</h6>
-                    <img src="{{ $screenshotUrl }}" alt="Скриншот" class="img-fluid border">
-                    <div class="small text-muted mt-1">
-                        @if(isset($screenshotSize))
-                            {{ number_format($screenshotSize / 1024, 2) }} KB
-                            @if(isset($isDifferent))
-                                <span class="{{ $isDifferent ? 'text-success' : 'text-warning' }}">
-                                    ({{ $isDifferent ? 'отличается' : 'такой же' }})
-                                </span>
-                            @endif
-                        @endif
-                    </div>
-                </div>
-            </div>
-            
-            @if(isset($isDifferent) && $isDifferent)
-                <div class="alert alert-success mt-2">
-                    <i class="bi bi-check-circle"></i> Скриншот успешно создан и отличается от оригинала!
-                </div>
-            @elseif(isset($isDifferent) && !$isDifferent)
-                <div class="alert alert-warning mt-2">
-                    <i class="bi bi-exclamation-triangle"></i> Скриншот идентичен оригиналу (обрезка не сработала)
-                </div>
-            @endif
-        @else
-            <div class="alert alert-danger">
-                <i class="bi bi-x-circle"></i> Файл скриншота не найден по пути: {{ $image->screenshot_path }}
-            </div>
-        @endif
-    </div>
-@endif
-
-
-@if($images->count() > 0)
-    <!-- Проверка скриншотов -->
-    <div class="alert alert-info">
-        <i class="bi bi-info-circle"></i> 
-        Найдено {{ $images->count() }} изображений на этой странице.
-        @php
-            $hasScreenshots = $images->where('has_screenshot', true)->count();
-        @endphp
-        @if($hasScreenshots > 0)
-            <span class="text-success">
-                <i class="bi bi-check-circle"></i> {{ $hasScreenshots }} со скриншотами
-            </span>
-        @endif
-    </div>
-    
-    <!-- Галерея изображений -->
-    <div class="row">
-        @foreach($images as $image)
-        <div class="col-md-4 mb-3">
-            <div class="card">
-                <div class="card-header py-1 bg-light">
-                    <small>{{ $image->description ?? 'Изображение' }}</small>
-                </div>
-                <div class="card-body p-2">
-                    <!-- Скриншот если есть -->
-                    @if($image->has_screenshot && $image->screenshot_url)
-                        <div class="text-center mb-2">
-                            <h6><i class="bi bi-aspect-ratio"></i> Обрезанный скриншот</h6>
-                            <a href="{{ $image->screenshot_url }}" target="_blank">
-                                <img src="{{ $image->screenshot_url }}" 
-                                     alt="Скриншот" 
-                                     class="img-fluid border rounded"
-                                     style="max-height: 200px;">
-                            </a>
-                            <div class="small text-muted mt-1">
-                                {{ $image->width ?? '?' }}×{{ $image->height ?? '?' }}px
-                                @if($image->screenshot_size)
-                                    ({{ number_format($image->screenshot_size / 1024, 1) }} KB)
                                 @endif
                             </div>
-                        </div>
-                        
-                        <!-- Оригинал для сравнения -->
-                        <div class="text-center">
-                            <h6><i class="bi bi-image"></i> Оригинал</h6>
-                            <a href="{{ $image->url }}" target="_blank">
-                                <img src="{{ $image->url }}" 
-                                     alt="Оригинал" 
-                                     class="img-fluid border rounded"
-                                     style="max-height: 150px;">
-                            </a>
-                            <div class="small text-muted mt-1">
-                                {{ number_format($image->size / 1024, 1) }} KB
-                            </div>
-                        </div>
-                    @else
-                        <!-- Только оригинал если нет скриншота -->
-                        <div class="text-center">
-                            <a href="{{ $image->url }}" target="_blank">
-                                <img src="{{ $image->url }}" 
-                                     alt="Изображение" 
-                                     class="img-fluid border rounded"
-                                     style="max-height: 250px;">
-                            </a>
-                        </div>
-                        <div class="alert alert-warning mt-2 p-2 small">
-                            <i class="bi bi-exclamation-triangle"></i> 
-                            Скриншот не создан для этого изображения
-                        </div>
-                    @endif
-                </div>
-                <div class="card-footer p-2">
-                    <div class="btn-group btn-group-sm w-100" role="group">
-                        <a href="{{ $image->url }}" 
-                           target="_blank" 
-                           class="btn btn-outline-primary">
-                            <i class="bi bi-eye"></i> Оригинал
-                        </a>
-                        @if($image->has_screenshot && $image->screenshot_url)
-                        <a href="{{ $image->screenshot_url }}" 
-                           target="_blank" 
-                           class="btn btn-outline-info">
-                            <i class="bi bi-aspect-ratio"></i> Скриншот
-                        </a>
-                        @endif
-                    </div>
-                </div>
-            </div>
-        </div>
-        @endforeach
-    </div>
-@else
-    <div class="alert alert-warning">
-        <i class="bi bi-exclamation-triangle"></i> На этой странице не найдено изображений
-    </div>
-@endif
-<!-- Отладочная информация -->
-@if($images->count() > 0)
-<div class="card mb-3">
-    <div class="card-header bg-info text-white">
-        <h6 class="mb-0"><i class="bi bi-bug"></i> Отладка изображений</h6>
-    </div>
-    <div class="card-body">
-        @foreach($images as $image)
-        <div class="mb-2">
-            <strong>{{ $image->filename }}</strong><br>
-            <small class="text-muted">
-                Путь: {{ $image->path }}<br>
-                Скриншот: {{ $image->screenshot_path ?: 'Нет' }}<br>
-                @if($image->screenshot_path)
-                    @php
-                        $screenshotExists = Storage::disk('public')->exists($image->screenshot_path);
-                        $originalExists = Storage::disk('public')->exists($image->path);
-                    @endphp
-                    Существует: {{ $screenshotExists ? 'Да' : 'Нет' }}<br>
-                    URL: {{ Storage::url($image->screenshot_path) }}<br>
-                    Размер: {{ $image->screenshot_size ? number_format($image->screenshot_size / 1024, 2) : 'N/A' }} KB<br>
-                    Оригинал: {{ $image->size ? number_format($image->size / 1024, 2) : 'N/A' }} KB
-                @endif
-            </small>
-        </div>
-        @endforeach
-    </div>
-</div>
-@endif
-                                
-                                <!-- Миниатюра -->
-                                <div class="col-md-4">
-                                    <div class="image-preview-item">
-                                        <h6 class="mb-2"><i class="bi bi-card-image"></i> Миниатюра</h6>
-                                        @if($image->thumbnail_path && Storage::disk('public')->exists($image->thumbnail_path))
-                                        <a href="{{ Storage::url($image->thumbnail_path) }}" target="_blank">
-                                            <img src="{{ Storage::url($image->thumbnail_path) }}" 
-                                                 alt="Миниатюра"
-                                                 onerror="this.onerror=null; this.src='data:image/svg+xml,<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 300 200\"><rect width=\"100%\" height=\"100%\" fill=\"%23f8f9fa\"/><text x=\"50%\" y=\"50%\" text-anchor=\"middle\" dy=\".3em\" fill=\"%236c757d\">Миниатюра</text></svg>';">
-                                        </a>
-                                        <div class="image-info mt-2">
-                                            <div class="image-info-item">
-                                                <span class="image-info-label">Размер:</span>
-                                                <span class="image-info-value">{{ $image->thumbnail_size ? number_format($image->thumbnail_size / 1024, 2) : 'N/A' }} KB</span>
-                                            </div>
-                                            <div class="image-info-item">
-                                                <span class="image-info-label">Размер:</span>
-                                                <span class="image-info-value">300×200px</span>
-                                            </div>
-                                        </div>
-                                        @else
-                                        <div class="alert alert-warning">
-                                            <i class="bi bi-exclamation-triangle"></i> Миниатюра не найдена
-                                        </div>
-                                        @endif
+                            
+                            <div class="gallery-caption">
+                                <h6 class="mb-1 text-truncate" title="{{ $image->description ?? 'Изображение' }}">
+                                    {{ $image->description ?? 'Изображение' }}
+                                </h6>
+                                <div class="small text-muted">
+                                    <div class="d-flex justify-content-between">
+                                        <span>Формат: {{ strtoupper($image->format ?? 'JPG') }}</span>
+                                        <span class="badge {{ $image->has_screenshot ? 'bg-success' : 'bg-warning' }}">
+                                            {{ $image->has_screenshot ? '✓ Скриншот' : 'Нет скриншота' }}
+                                        </span>
                                     </div>
                                 </div>
-                            </div>
-                            
-                            <!-- Кнопки действий -->
-                            <div class="mt-3">
-                                <div class="btn-group" role="group">
-                                    <a href="{{ Storage::url($image->path) }}" 
-                                       target="_blank" 
-                                       class="btn btn-primary">
-                                        <i class="bi bi-eye"></i> Открыть оригинал
-                                    </a>
-                                    <a href="{{ Storage::url($image->path) }}" 
-                                       download="{{ $image->filename }}"
-                                       class="btn btn-success">
-                                        <i class="bi bi-download"></i> Скачать оригинал
-                                    </a>
-                                    @if($image->screenshot_path && Storage::disk('public')->exists($image->screenshot_path))
-                                    <a href="{{ Storage::url($image->screenshot_path) }}" 
-                                       download="screenshot_{{ $image->filename }}"
-                                       class="btn btn-info">
-                                        <i class="bi bi-download"></i> Скачать скриншот
-                                    </a>
-                                    @endif
-                                    <button type="button" 
-                                            class="btn btn-secondary"
-                                            onclick="copyImageInfo('{{ $image->id }}')">
-                                        <i class="bi bi-clipboard"></i> Копировать информацию
-                                    </button>
+                                
+                                <div class="mt-2">
+                                    <div class="btn-group btn-group-sm w-100" role="group">
+                                        @if($image->has_screenshot && $image->screenshot_url)
+                                            <a href="{{ $image->screenshot_url }}" 
+                                               target="_blank" 
+                                               class="btn btn-outline-primary">
+                                                <i class="bi bi-eye"></i> Просмотр
+                                            </a>
+                                            <a href="{{ $image->screenshot_url }}" 
+                                               download="схема_страница{{ $page->page_number }}.jpg"
+                                               class="btn btn-outline-success">
+                                                <i class="bi bi-download"></i> Скачать
+                                            </a>
+                                        @elseif($image->url)
+                                            <a href="{{ $image->url }}" 
+                                               target="_blank" 
+                                               class="btn btn-outline-primary">
+                                                <i class="bi bi-eye"></i> Оригинал
+                                            </a>
+                                        @endif
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     @endforeach
                 </div>
-                
-                <!-- Вкладка Сравнение -->
-                <div id="comparisonTab" class="image-tab-content" style="display: none;">
-                    @if($images->count() > 0)
-                    <div class="mb-4">
-                        <div class="form-group">
-                            <label for="imageSelect">Выберите изображение для сравнения:</label>
-                            <select id="imageSelect" class="form-control" onchange="loadComparison(this.value)">
-                                <option value="">-- Выберите изображение --</option>
-                                @foreach($images as $image)
-                                <option value="{{ $image->id }}">{{ $image->filename }}</option>
-                                @endforeach
-                            </select>
+
+                <!-- Детальное сравнение -->
+                @if($images->where('has_screenshot', true)->count() > 0)
+                <div class="card mt-4">
+                    <div class="card-header bg-info text-white">
+                        <h5 class="mb-0"><i class="bi bi-arrow-left-right me-2"></i> Сравнение обрезанных схем</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="row">
+                            @foreach($images->where('has_screenshot', true)->take(3) as $image)
+                            <div class="col-md-4 mb-3">
+                                <div class="image-comparison">
+                                    <div class="image-comparison-header">
+                                        <small>{{ $image->description ?? 'Сравнение' }}</small>
+                                    </div>
+                                    <div class="image-comparison-body">
+                                        <div class="row g-2">
+                                            <div class="col-6">
+                                                <div class="text-center">
+                                                    <small class="text-muted">Оригинал</small>
+                                                    @if($image->url)
+                                                        <div class="image-container compact-image-view mt-2">
+                                                            <a href="{{ $image->url }}" target="_blank">
+                                                                <img src="{{ $image->url }}" 
+                                                                     alt="Оригинал"
+                                                                     class="img-fluid">
+                                                            </a>
+                                                        </div>
+                                                    @endif
+                                                </div>
+                                            </div>
+                                            <div class="col-6">
+                                                <div class="text-center">
+                                                    <small class="text-muted">Обрезанная схема</small>
+                                                    <div class="image-container compact-image-view mt-2">
+                                                        <a href="{{ $image->screenshot_url }}" target="_blank">
+                                                            <img src="{{ $image->screenshot_url }}" 
+                                                                 alt="Схема"
+                                                                 class="img-fluid">
+                                                        </a>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                        
+                                        <div class="image-info-panel mt-3">
+                                            <div class="image-info-item">
+                                                <span class="image-info-label">Качество обрезки:</span>
+                                                <span class="image-info-value">
+                                                    @if($image->width && $image->height)
+                                                        @php
+                                                            $originalRatio = $image->width / max(1, $image->height);
+                                                            $screenshotRatio = 1000 / 800; // Стандартный размер скриншота
+                                                            $qualityScore = 1 - min(1, abs($originalRatio - $screenshotRatio) / 2);
+                                                        @endphp
+                                                        <span class="badge {{ $qualityScore > 0.7 ? 'bg-success' : ($qualityScore > 0.4 ? 'bg-warning' : 'bg-danger') }}">
+                                                            {{ round($qualityScore * 100) }}%
+                                                        </span>
+                                                    @else
+                                                        <span class="badge bg-secondary">N/A</span>
+                                                    @endif
+                                                </span>
+                                            </div>
+                                            <div class="image-info-item">
+                                                <span class="image-info-label">Размер оригинала:</span>
+                                                <span class="image-info-value">{{ $image->width ?? '?' }}×{{ $image->height ?? '?' }}</span>
+                                            </div>
+                                            <div class="image-info-item">
+                                                <span class="image-info-label">Размер скриншота:</span>
+                                                <span class="image-info-value">1000×800</span>
+                                            </div>
+                                            <div class="image-info-item">
+                                                <span class="image-info-label">Формат:</span>
+                                                <span class="image-info-value">{{ strtoupper($image->format ?? 'JPG') }}</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            @endforeach
+                        </div>
+                    </div>
+                </div>
+                @endif
+
+            @else
+                <!-- Нет изображений -->
+                <div class="no-image-message">
+                    <i class="bi bi-image text-muted"></i>
+                    <h4 class="text-muted mb-3">Изображения не обнаружены</h4>
+                    <p class="text-muted mb-3">
+                        На этой странице не найдено схем, диаграмм или изображений.<br>
+                        Возможно, страница содержит только текст.
+                    </p>
+                    <div class="highlight-box">
+                        <p class="mb-2"><strong>Рекомендации:</strong></p>
+                        <ul class="mb-0 ps-3">
+                            <li>Проверьте, содержит ли страница визуальные элементы</li>
+                            <li>Убедитесь, что PDF файл содержит изображения</li>
+                            <li>Попробуйте перезапустить обработку документа</li>
+                        </ul>
+                    </div>
+                </div>
+            @endif
+        </div>
+
+        <!-- Вкладка: Содержимое -->
+        <div class="tab-pane fade" id="content-tab-pane" role="tabpanel" tabindex="0">
+            <div class="page-content-card">
+                <div class="page-content-header">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-text-left me-2"></i> Содержимое страницы {{ $page->page_number }}</h5>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="copyPageContent()">
+                                <i class="bi bi-clipboard me-1"></i> Копировать
+                            </button>
+                            <a href="{{ route('admin.documents.processing.page.raw', ['id' => $document->id, 'pageId' => $page->id]) }}" 
+                               target="_blank" class="btn btn-sm btn-outline-secondary">
+                                <i class="bi bi-code me-1"></i> Исходный текст
+                            </a>
+                        </div>
+                    </div>
+                </div>
+                <div class="page-content-body">
+                    @if($page->has_images)
+                        <div class="alert alert-success mb-3">
+                            <i class="bi bi-check-circle me-2"></i>
+                            <strong>На этой странице обнаружены схемы/изображения</strong>
+                            <span class="badge bg-primary ms-2">{{ $images->count() }} изображений</span>
+                        </div>
+                    @endif
+                    
+                    @if($page->section_title)
+                        <div class="alert alert-info mb-3">
+                            <i class="bi bi-tag me-2"></i>
+                            <strong>Раздел:</strong> {{ $page->section_title }}
+                        </div>
+                    @endif
+                    
+                    <div class="content-section">
+                        <h6 class="section-title">Текстовое содержание</h6>
+                        <div class="text-content">
+                            {!! $page->content ?? '<p class="text-muted">Содержимое отсутствует</p>' !!}
                         </div>
                     </div>
                     
-                    <div id="comparisonContainer" style="display: none;">
-                        <h5 class="mb-3">Сравнение версий изображения</h5>
-                        <div class="comparison-slider-container" id="comparisonSlider">
-                            <!-- Сюда будет загружено сравнение -->
+                    @if($page->parsing_quality < 0.5)
+                        <div class="alert alert-warning mt-3">
+                            <i class="bi bi-exclamation-triangle me-2"></i>
+                            <strong>Внимание:</strong> Низкое качество парсинга текста ({{ round($page->parsing_quality * 100) }}%).
+                            Возможны ошибки в распознавании.
                         </div>
-                        <div class="row mt-3">
-                            <div class="col-md-6">
-                                <div class="alert alert-info">
-                                    <h6><i class="bi bi-image"></i> Оригинал</h6>
-                                    <p>Исходное изображение из PDF документа с оригинальным разрешением.</p>
-                                </div>
-                            </div>
-                            <div class="col-md-6">
-                                <div class="alert alert-success">
-                                    <h6><i class="bi bi-aspect-ratio"></i> Скриншот</h6>
-                                    <p>Оптимизированная версия для отображения на экране (800×600px).</p>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                    @else
-                    <div class="alert alert-warning">
-                        <i class="bi bi-exclamation-triangle"></i> Нет изображений для сравнения
-                    </div>
                     @endif
                 </div>
             </div>
+        </div>
+
+        <!-- Вкладка: Исходный текст -->
+        <div class="tab-pane fade" id="raw-tab-pane" role="tabpanel" tabindex="0">
+            <div class="card">
+                <div class="card-header bg-dark text-white">
+                    <div class="d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0"><i class="bi bi-code me-2"></i> Исходный текст страницы</h5>
+                        <div class="btn-group">
+                            <button type="button" class="btn btn-sm btn-light" onclick="copyRawText()">
+                                <i class="bi bi-clipboard me-1"></i> Копировать
+                            </button>
+                            <button type="button" class="btn btn-sm btn-light" onclick="downloadRawText()">
+                                <i class="bi bi-download me-1"></i> Скачать
+                            </button>
+                        </div>
+                    </div>
+                </div>
+                <div class="card-body p-0">
+                    <pre id="rawTextContent" class="bg-light p-3 mb-0" style="max-height: 600px; overflow: auto; font-size: 13px; line-height: 1.4; margin: 0;">{{ htmlspecialchars($page->content_text ?? 'Текст отсутствует') }}</pre>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладка: Статистика -->
+        <div class="tab-pane fade" id="stats-tab-pane" role="tabpanel" tabindex="0">
+            <div class="row">
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i> Общая информация</h5>
+                        </div>
+                        <div class="card-body">
+                            <div class="image-info-panel">
+                                <div class="image-info-item">
+                                    <span class="image-info-label">Номер страницы:</span>
+                                    <span class="image-info-value">{{ $page->page_number }}</span>
+                                </div>
+                                <div class="image-info-item">
+                                    <span class="image-info-label">Количество слов:</span>
+                                    <span class="image-info-value">{{ number_format($page->word_count) }}</span>
+                                </div>
+                                <div class="image-info-item">
+                                    <span class="image-info-label">Количество символов:</span>
+                                    <span class="image-info-value">{{ number_format($page->character_count) }}</span>
+                                </div>
+                                <div class="image-info-item">
+                                    <span class="image-info-label">Качество парсинга:</span>
+                                    <span class="image-info-value">
+                                        <span class="badge {{ $page->parsing_quality > 0.7 ? 'bg-success' : ($page->parsing_quality > 0.4 ? 'bg-warning' : 'bg-danger') }}">
+                                            {{ round($page->parsing_quality * 100) }}%
+                                        </span>
+                                    </span>
+                                </div>
+                                <div class="image-info-item">
+                                    <span class="image-info-label">Изображений на странице:</span>
+                                    <span class="image-info-value">{{ $images->count() }}</span>
+                                </div>
+                                <div class="image-info-item">
+                                    <span class="image-info-label">Дата обработки:</span>
+                                    <span class="image-info-value">{{ $page->updated_at->format('d.m.Y H:i') }}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="col-md-6">
+                    <div class="card mb-4">
+                        <div class="card-header bg-success text-white">
+                            <h5 class="mb-0"><i class="bi bi-image me-2"></i> Статистика изображений</h5>
+                        </div>
+                        <div class="card-body">
+                            @if($images->count() > 0)
+                                <div class="image-info-panel">
+                                    @php
+                                        $withScreenshots = $images->where('has_screenshot', true)->count();
+                                        $withoutScreenshots = $images->where('has_screenshot', false)->count();
+                                        $totalSize = $images->sum('size');
+                                        $avgWidth = $images->avg('width') ?? 0;
+                                        $avgHeight = $images->avg('height') ?? 0;
+                                    @endphp
+                                    
+                                    <div class="image-info-item">
+                                        <span class="image-info-label">Всего изображений:</span>
+                                        <span class="image-info-value">{{ $images->count() }}</span>
+                                    </div>
+                                    <div class="image-info-item">
+                                        <span class="image-info-label">Со скриншотами:</span>
+                                        <span class="image-info-value">
+                                            <span class="badge bg-success">{{ $withScreenshots }}</span>
+                                        </span>
+                                    </div>
+                                    <div class="image-info-item">
+                                        <span class="image-info-label">Без скриншотов:</span>
+                                        <span class="image-info-value">
+                                            <span class="badge bg-warning">{{ $withoutScreenshots }}</span>
+                                        </span>
+                                    </div>
+                                    <div class="image-info-item">
+                                        <span class="image-info-label">Общий размер:</span>
+                                        <span class="image-info-value">{{ number_format($totalSize / 1024, 1) }} KB</span>
+                                    </div>
+                                    <div class="image-info-item">
+                                        <span class="image-info-label">Средний размер:</span>
+                                        <span class="image-info-value">
+                                            @if($images->count() > 0)
+                                                {{ number_format($totalSize / $images->count() / 1024, 1) }} KB
+                                            @else
+                                                0 KB
+                                            @endif
+                                        </span>
+                                    </div>
+                                    <div class="image-info-item">
+                                        <span class="image-info-label">Среднее разрешение:</span>
+                                        <span class="image-info-value">
+                                            @if($avgWidth > 0 && $avgHeight > 0)
+                                                {{ round($avgWidth) }}×{{ round($avgHeight) }}
+                                            @else
+                                                N/A
+                                            @endif
+                                        </span>
+                                    </div>
+                                </div>
+                            @else
+                                <div class="text-center py-4">
+                                    <i class="bi bi-image text-muted" style="font-size: 3rem;"></i>
+                                    <p class="text-muted mt-2 mb-0">Нет данных об изображениях</p>
+                                </div>
+                            @endif
+                        </div>
+                    </div>
+                </div>
+            </div>
             
-            <!-- Сводная статистика по изображениям -->
-            <div class="card mt-3">
-                <div class="card-header bg-light">
-                    <h6 class="mb-0"><i class="bi bi-bar-chart"></i> Статистика изображений</h6>
+            <!-- Качество обработки -->
+            <div class="card">
+                <div class="card-header bg-info text-white">
+                    <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i> Качество обработки</h5>
                 </div>
                 <div class="card-body">
                     <div class="row">
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                <h3 class="text-primary">{{ $images->count() }}</h3>
-                                <small>Всего изображений</small>
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <div class="mb-2">
+                                    <div class="progress" style="height: 20px;">
+                                        <div class="progress-bar bg-success" 
+                                             role="progressbar" 
+                                             style="width: {{ round($page->parsing_quality * 100) }}%"
+                                             aria-valuenow="{{ round($page->parsing_quality * 100) }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <strong>Качество парсинга текста</strong><br>
+                                    <small class="text-muted">Точность распознавания текста</small>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                <h3 class="text-success">{{ $images->where('thumbnail_path', '!=', null)->count() }}</h3>
-                                <small>С миниатюрами</small>
+                        
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <div class="mb-2">
+                                    <div class="progress" style="height: 20px;">
+                                        @php
+                                            $imageQuality = $images->count() > 0 ? $withScreenshots / $images->count() : 0;
+                                        @endphp
+                                        <div class="progress-bar bg-info" 
+                                             role="progressbar" 
+                                             style="width: {{ round($imageQuality * 100) }}%"
+                                             aria-valuenow="{{ round($imageQuality * 100) }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <strong>Качество обработки изображений</strong><br>
+                                    <small class="text-muted">Доля изображений со скриншотами</small>
+                                </div>
                             </div>
                         </div>
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                <h3 class="text-info">{{ $images->where('screenshot_path', '!=', null)->count() }}</h3>
-                                <small>Со скриншотами</small>
-                            </div>
-                        </div>
-                        <div class="col-md-3">
-                            <div class="text-center">
-                                @php
-                                    $totalSize = $images->sum('size');
-                                    $totalSizeMB = $totalSize / (1024 * 1024);
-                                @endphp
-                                <h3 class="text-warning">{{ number_format($totalSizeMB, 2) }} MB</h3>
-                                <small>Общий размер</small>
+                        
+                        <div class="col-md-4">
+                            <div class="text-center p-3">
+                                <div class="mb-2">
+                                    @php
+                                        $overallQuality = ($page->parsing_quality + $imageQuality) / 2;
+                                    @endphp
+                                    <div class="progress" style="height: 20px;">
+                                        <div class="progress-bar bg-warning" 
+                                             role="progressbar" 
+                                             style="width: {{ round($overallQuality * 100) }}%"
+                                             aria-valuenow="{{ round($overallQuality * 100) }}" 
+                                             aria-valuemin="0" 
+                                             aria-valuemax="100">
+                                        </div>
+                                    </div>
+                                </div>
+                                <div>
+                                    <strong>Общее качество</strong><br>
+                                    <small class="text-muted">Средняя оценка обработки страницы</small>
+                                </div>
                             </div>
                         </div>
                     </div>
                 </div>
             </div>
-        </div>
-    </div>
-    @endif
-
-<style>
-.page-with-screenshot {
-    background: white;
-    padding: 20px;
-    border-radius: 10px;
-    border: 1px solid #dee2e6;
-}
-
-.screenshot-container {
-    margin-bottom: 30px;
-}
-
-.screenshot-wrapper {
-    position: relative;
-    background: #f8f9fa;
-    padding: 15px;
-    border-radius: 8px;
-    border: 1px solid #e9ecef;
-}
-
-.screenshot-link {
-    display: block;
-    transition: transform 0.3s ease;
-}
-
-.screenshot-link:hover {
-    transform: scale(1.02);
-}
-
-.screenshot-link img {
-    border: 2px solid #dee2e6;
-    box-shadow: 0 4px 8px rgba(0,0,0,0.1);
-}
-
-.screenshot-info {
-    font-size: 0.9rem;
-}
-
-.page-content {
-    margin-top: 30px;
-    padding-top: 20px;
-    border-top: 1px solid #dee2e6;
-}
-
-.content-text {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-    line-height: 1.6;
-    font-size: 15px;
-}
-
-.content-text p {
-    margin-bottom: 1rem;
-}
-</style>
-
-    <!-- Основной контент -->
-<div class="card">
-    <div class="card-header bg-primary text-white">
-        <h5 class="mb-0"><i class="bi bi-file-text"></i> Содержимое страницы {{ $page->page_number }}</h5>
-    </div>
-    <div class="card-body">
-        @if($page->has_images)
-            <div class="alert alert-success">
-                <i class="bi bi-check-circle"></i> На этой странице есть схема/изображение
-            </div>
-        @endif
-        
-        <!-- Здесь будет отображаться скриншот + текст -->
-        <div class="page-content">
-            {!! $page->content ?? '<p class="text-muted">Содержимое отсутствует</p>' !!}
-        </div>
-        
-        <!-- Исходный текст (если нужен) -->
-        @if(!empty($page->content_text))
-        <div class="mt-4">
-            <button class="btn btn-sm btn-outline-secondary" type="button" 
-                    data-bs-toggle="collapse" 
-                    data-bs-target="#rawText{{ $page->id }}">
-                <i class="bi bi-code"></i> Показать исходный текст
-            </button>
-            <div class="collapse mt-2" id="rawText{{ $page->id }}">
-                <pre class="bg-light p-3 rounded" style="max-height: 300px; overflow: auto; font-size: 12px;">{{ $page->content_text }}</pre>
-            </div>
-        </div>
-        @endif
-    </div>
-</div>
-
-    <!-- Содержимое страницы -->
-    <div class="card">
-        <div class="card-header bg-primary text-white">
-            <div class="d-flex justify-content-between align-items-center">
-                <h5 class="mb-0"><i class="bi bi-text-left"></i> Содержимое страницы</h5>
-                <div class="btn-group">
-                    <a href="{{ route('admin.documents.processing.page.raw', ['id' => $document->id, 'pageId' => $page->id]) }}" 
-                       target="_blank" class="btn btn-light btn-sm">
-                        <i class="bi bi-code"></i> Исходный текст
-                    </a>
-                    <button type="button" class="btn btn-light btn-sm" onclick="copyPageText()">
-                        <i class="bi bi-clipboard"></i> Копировать текст
-                    </button>
-                    @if($page->has_images)
-                    <button type="button" class="btn btn-light btn-sm" onclick="toggleImageGallery()">
-                        <i class="bi bi-grid"></i> Галерея
-                    </button>
-                    @endif
-                </div>
-            </div>
-        </div>
-        <div class="card-body">
-            @if($page->section_title)
-            <div class="alert alert-info mb-3">
-                <i class="bi bi-tag"></i> <strong>Заголовок раздела:</strong> {{ $page->section_title }}
-            </div>
-            @endif
-            
-            <!-- Галерея изображений в контенте -->
-            @if($images->count() > 0)
-            <div id="imageGallery" class="image-gallery mb-4" style="display: none;">
-                @foreach($images as $image)
-                <div class="gallery-item">
-                    <a href="{{ Storage::url($image->path) }}" target="_blank">
-                        @if($image->screenshot_path)
-                        <img src="{{ Storage::url($image->screenshot_path) }}" 
-                             alt="{{ $image->description }}">
-                        @elseif($image->thumbnail_path)
-                        <img src="{{ Storage::url($image->thumbnail_path) }}" 
-                             alt="{{ $image->description }}">
-                        @else
-                        <img src="{{ Storage::url($image->path) }}" 
-                             alt="{{ $image->description }}">
-                        @endif
-                    </a>
-                    <div class="gallery-badges">
-                        @if($image->width && $image->height)
-                        <span class="gallery-badge">{{ $image->width }}×{{ $image->height }}</span>
-                        @endif
-                        <span class="gallery-badge">{{ strtoupper($image->extension) }}</span>
-                        @if($image->screenshot_path)
-                        <span class="gallery-badge bg-info">Скриншот</span>
-                        @endif
-                        @if($image->thumbnail_path)
-                        <span class="gallery-badge bg-success">Миниатюра</span>
-                        @endif
-                    </div>
-                    <div class="gallery-caption">
-                        <small>{{ $image->description }}</small>
-                    </div>
-                </div>
-                @endforeach
-            </div>
-            @endif
-            
-            <!-- Основной контент с изображениями -->
-            <div class="document-content border p-3" style="max-height: 600px; overflow-y: auto;">
-                {!! $page->content ?? '<p class="text-muted">Содержимое отсутствует</p>' !!}
-            </div>
-            
-            <!-- Кнопка показа/скрытия галереи -->
-            @if($images->count() > 0)
-            <div class="text-center mt-3">
-                <button type="button" class="btn btn-outline-secondary btn-sm" onclick="toggleImageGallery()">
-                    <i class="bi bi-grid"></i> 
-                    <span id="galleryToggleText">Показать галерею изображений</span>
-                    ({{ $images->count() }})
-                </button>
-            </div>
-            @endif
         </div>
     </div>
 </div>
@@ -1047,357 +1053,284 @@
 
 @push('scripts')
 <script>
-// Переключение вкладок изображений
-function switchImageTab(tabName) {
-    // Скрыть все вкладки
-    document.getElementById('galleryTab').style.display = 'none';
-    document.getElementById('previewsTab').style.display = 'none';
-    document.getElementById('comparisonTab').style.display = 'none';
-    
-    // Убрать активный класс со всех кнопок
-    document.querySelectorAll('.image-tab-btn').forEach(btn => {
-        btn.classList.remove('active');
-    });
-    
-    // Показать выбранную вкладку
-    document.getElementById(tabName + 'Tab').style.display = 'block';
-    
-    // Добавить активный класс к выбранной кнопке
-    event.target.classList.add('active');
-}
-
-// Переключение галереи изображений в контенте
-function toggleImageGallery() {
-    const gallery = document.getElementById('imageGallery');
-    const toggleText = document.getElementById('galleryToggleText');
-    
-    if (gallery.style.display === 'none') {
-        gallery.style.display = 'grid';
-        toggleText.textContent = 'Скрыть галерею изображений';
-    } else {
-        gallery.style.display = 'none';
-        toggleText.textContent = 'Показать галерею изображений';
-    }
-}
-
-// Загрузка сравнения изображений
-function loadComparison(imageId) {
-    const container = document.getElementById('comparisonContainer');
-    const slider = document.getElementById('comparisonSlider');
-    
-    if (!imageId) {
-        container.style.display = 'none';
-        return;
-    }
-    
-    // Здесь можно загрузить данные изображения через AJAX
-    // Для примера покажем статическое содержимое
-    const image = @json($images->first());
-    
-    if (image) {
-        slider.innerHTML = `
-            <div class="comparison-slider-container">
-                <div class="comparison-label" style="left: 10px;">Оригинал</div>
-                <div class="comparison-label" style="right: 10px;">Скриншот</div>
-                <div class="comparison-image" style="left: 0;">
-                    <img src="{{ Storage::url('${image.path}') }}" alt="Оригинал">
-                </div>
-                <div class="comparison-image" style="right: 0;">
-                    <img src="{{ Storage::url('${image.screenshot_path || image.thumbnail_path || image.path}') }}" alt="Скриншот">
-                </div>
-                <div class="comparison-slider" 
-                     onmousedown="startDragging(event)"
-                     ontouchstart="startDragging(event)">
-                </div>
-            </div>
-        `;
-        container.style.display = 'block';
-    }
-}
-
-// Функции для драг-н-дроп сравнения
-let isDragging = false;
-
-function startDragging(e) {
-    isDragging = true;
-    document.addEventListener('mousemove', drag);
-    document.addEventListener('touchmove', drag);
-    document.addEventListener('mouseup', stopDragging);
-    document.addEventListener('touchend', stopDragging);
-    e.preventDefault();
-}
-
-function drag(e) {
-    if (!isDragging) return;
-    
-    const container = document.querySelector('.comparison-slider-container');
-    const slider = document.querySelector('.comparison-slider');
-    const leftImage = document.querySelector('.comparison-image:first-child');
-    
-    if (!container || !slider || !leftImage) return;
-    
-    const containerRect = container.getBoundingClientRect();
-    const x = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
-    const relativeX = x - containerRect.left;
-    const percentage = (relativeX / containerRect.width) * 100;
-    
-    const clampedPercentage = Math.max(0, Math.min(100, percentage));
-    
-    slider.style.left = clampedPercentage + '%';
-    leftImage.style.width = clampedPercentage + '%';
-}
-
-function stopDragging() {
-    isDragging = false;
-    document.removeEventListener('mousemove', drag);
-    document.removeEventListener('touchmove', drag);
-    document.removeEventListener('mouseup', stopDragging);
-    document.removeEventListener('touchend', stopDragging);
-}
-
-// Копирование информации об изображении
-function copyImageInfo(imageId) {
-    // Здесь можно реализовать копирование информации об изображении
-    const image = @json($images->first()); // В реальности нужно найти по ID
-    
-    const info = `
-Название: ${image.filename}
-Описание: ${image.description}
-Размер: ${image.width}×${image.height}
-Формат: ${image.extension}
-Размер файла: ${(image.size / 1024).toFixed(2)} KB
-URL оригинала: {{ Storage::url('${image.path}') }}
-${image.screenshot_path ? `URL скриншота: {{ Storage::url('${image.screenshot_path}') }}` : ''}
-${image.thumbnail_path ? `URL миниатюры: {{ Storage::url('${image.thumbnail_path}') }}` : ''}
-    `.trim();
-    
-    navigator.clipboard.writeText(info).then(function() {
-        alert('Информация об изображении скопирована в буфер обмена');
-    });
-}
-
-// Копирование текста страницы
-function copyPageText() {
-    const text = `{{ addslashes($page->content_text) }}`;
-    navigator.clipboard.writeText(text).then(function() {
-        alert('Текст страницы скопирован в буфер обмена');
+// Копирование содержимого страницы
+function copyPageContent() {
+    const content = `{{ addslashes($page->content_text ?? '') }}`;
+    navigator.clipboard.writeText(content).then(function() {
+        showToast('success', 'Текст скопирован в буфер обмена');
     }, function(err) {
         console.error('Ошибка копирования: ', err);
+        showToast('error', 'Не удалось скопировать текст');
     });
 }
 
-// Навигация по страницам клавишами
+// Копирование исходного текста
+function copyRawText() {
+    const rawText = document.getElementById('rawTextContent').textContent;
+    navigator.clipboard.writeText(rawText).then(function() {
+        showToast('success', 'Исходный текст скопирован');
+    }, function(err) {
+        console.error('Ошибка копирования: ', err);
+        showToast('error', 'Не удалось скопировать текст');
+    });
+}
+
+// Скачивание исходного текста
+function downloadRawText() {
+    const text = document.getElementById('rawTextContent').textContent;
+    const blob = new Blob([text], { type: 'text/plain' });
+    const url = window.URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `страница_${ {!! $page->page_number !!} }_исходный_текст.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    window.URL.revokeObjectURL(url);
+    showToast('success', 'Текст загружается...');
+}
+
+// Функция для показа уведомлений
+function showToast(type, message) {
+    // Создаем элемент уведомления
+    const toast = document.createElement('div');
+    toast.className = `toast align-items-center text-white bg-${type} border-0`;
+    toast.setAttribute('role', 'alert');
+    toast.setAttribute('aria-live', 'assertive');
+    toast.setAttribute('aria-atomic', 'true');
+    
+    toast.innerHTML = `
+        <div class="d-flex">
+            <div class="toast-body">
+                ${message}
+            </div>
+            <button type="button" class="btn-close btn-close-white me-2 m-auto" data-bs-dismiss="toast"></button>
+        </div>
+    `;
+    
+    // Добавляем в контейнер
+    const toastContainer = document.getElementById('toastContainer');
+    if (!toastContainer) {
+        const container = document.createElement('div');
+        container.id = 'toastContainer';
+        container.className = 'toast-container position-fixed bottom-0 end-0 p-3';
+        document.body.appendChild(container);
+    }
+    
+    document.getElementById('toastContainer').appendChild(toast);
+    
+    // Инициализируем и показываем
+    const bsToast = new bootstrap.Toast(toast);
+    bsToast.show();
+    
+    // Удаляем после скрытия
+    toast.addEventListener('hidden.bs.toast', function() {
+        toast.remove();
+    });
+}
+
+// Навигация по страницам с клавиатуры
 document.addEventListener('keydown', function(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
         return;
     }
     
-    @if($prevPage)
-        if (e.key === 'ArrowLeft') {
+    // Стрелка влево - предыдущая страница
+    if (e.key === 'ArrowLeft') {
+        @if(isset($prevPage) && $prevPage)
             window.location.href = '{{ route("admin.documents.processing.page.show", ["id" => $document->id, "pageId" => $prevPage->id]) }}';
-        }
-    @endif
+        @endif
+    }
     
-    @if($nextPage)
-        if (e.key === 'ArrowRight') {
+    // Стрелка вправо - следующая страница
+    if (e.key === 'ArrowRight') {
+        @if(isset($nextPage) && $nextPage)
             window.location.href = '{{ route("admin.documents.processing.page.show", ["id" => $document->id, "pageId" => $nextPage->id]) }}';
+        @endif
+    }
+    
+    // Ctrl + C - копировать текст текущей вкладки
+    if (e.ctrlKey && e.key === 'c') {
+        const activeTab = document.querySelector('.nav-tabs .nav-link.active');
+        if (activeTab) {
+            const tabId = activeTab.id;
+            if (tabId === 'content-tab') {
+                copyPageContent();
+                e.preventDefault();
+            } else if (tabId === 'raw-tab') {
+                copyRawText();
+                e.preventDefault();
+            }
         }
-    @endif
+    }
 });
 
 // Лайтбокс для изображений
 document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.document-image img, .gallery-item img, .image-preview-item img').forEach(img => {
+    // Добавляем обработчики кликов на все изображения
+    document.querySelectorAll('.gallery-item img, .image-container img').forEach(img => {
         img.addEventListener('click', function(e) {
+            e.preventDefault();
             e.stopPropagation();
             
-            const lightbox = document.createElement('div');
-            lightbox.style.position = 'fixed';
-            lightbox.style.top = '0';
-            lightbox.style.left = '0';
-            lightbox.style.width = '100%';
-            lightbox.style.height = '100%';
-            lightbox.style.backgroundColor = 'rgba(0,0,0,0.9)';
-            lightbox.style.display = 'flex';
-            lightbox.style.alignItems = 'center';
-            lightbox.style.justifyContent = 'center';
-            lightbox.style.zIndex = '9999';
-            lightbox.style.cursor = 'pointer';
-            lightbox.id = 'imageLightbox';
-            
-            const fullImg = document.createElement('img');
-            fullImg.src = this.src;
-            fullImg.style.maxWidth = '90%';
-            fullImg.style.maxHeight = '90%';
-            fullImg.style.objectFit = 'contain';
-            fullImg.style.boxShadow = '0 0 20px rgba(255,255,255,0.1)';
-            
-            lightbox.appendChild(fullImg);
-            document.body.appendChild(lightbox);
-            
-            // Закрытие по клику
-            lightbox.addEventListener('click', function() {
-                document.body.removeChild(lightbox);
-            });
-            
-            // Закрытие по ESC
-            document.addEventListener('keydown', function closeOnEsc(e) {
-                if (e.key === 'Escape') {
-                    const lb = document.getElementById('imageLightbox');
-                    if (lb) document.body.removeChild(lb);
-                    document.removeEventListener('keydown', closeOnEsc);
-                }
-            });
+            showLightbox(this.src, this.alt);
         });
     });
     
-    // Подсветка изображений при наведении
-    document.querySelectorAll('.document-image-container').forEach(container => {
-        container.addEventListener('mouseenter', function() {
-            this.style.boxShadow = '0 4px 12px rgba(0,123,255,0.2)';
+    // Функция показа лайтбокса
+    function showLightbox(src, alt) {
+        // Создаем overlay
+        const overlay = document.createElement('div');
+        overlay.className = 'lightbox-overlay';
+        overlay.style.cssText = `
+            position: fixed;
+            top: 0;
+            left: 0;
+            right: 0;
+            bottom: 0;
+            background: rgba(0,0,0,0.9);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 9999;
+            cursor: pointer;
+        `;
+        
+        // Создаем контейнер изображения
+        const container = document.createElement('div');
+        container.className = 'lightbox-container';
+        container.style.cssText = `
+            position: relative;
+            max-width: 90%;
+            max-height: 90%;
+            cursor: default;
+        `;
+        
+        // Создаем изображение
+        const lightboxImg = document.createElement('img');
+        lightboxImg.src = src;
+        lightboxImg.alt = alt;
+        lightboxImg.style.cssText = `
+            max-width: 100%;
+            max-height: 80vh;
+            object-fit: contain;
+            border-radius: 4px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+        `;
+        
+        // Создаем кнопку закрытия
+        const closeBtn = document.createElement('button');
+        closeBtn.className = 'lightbox-close';
+        closeBtn.innerHTML = '<i class="bi bi-x"></i>';
+        closeBtn.style.cssText = `
+            position: absolute;
+            top: -40px;
+            right: 0;
+            background: none;
+            border: none;
+            color: white;
+            font-size: 2rem;
+            cursor: pointer;
+            padding: 0;
+            width: 40px;
+            height: 40px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        `;
+        
+        // Создаем подпись
+        const caption = document.createElement('div');
+        caption.className = 'lightbox-caption';
+        caption.textContent = alt;
+        caption.style.cssText = `
+            color: white;
+            text-align: center;
+            margin-top: 15px;
+            font-size: 0.9rem;
+            opacity: 0.8;
+        `;
+        
+        // Собираем всё вместе
+        container.appendChild(lightboxImg);
+        container.appendChild(closeBtn);
+        container.appendChild(caption);
+        overlay.appendChild(container);
+        document.body.appendChild(overlay);
+        document.body.style.overflow = 'hidden'; // Отключаем скролл страницы
+        
+        // Обработчики закрытия
+        closeBtn.addEventListener('click', closeLightbox);
+        overlay.addEventListener('click', function(e) {
+            if (e.target === overlay) {
+                closeLightbox();
+            }
         });
         
-        container.addEventListener('mouseleave', function() {
-            this.style.boxShadow = 'none';
+        // Закрытие по ESC
+        document.addEventListener('keydown', function escHandler(e) {
+            if (e.key === 'Escape') {
+                closeLightbox();
+                document.removeEventListener('keydown', escHandler);
+            }
         });
-    });
+        
+        function closeLightbox() {
+            document.body.removeChild(overlay);
+            document.body.style.overflow = '';
+        }
+    }
 });
-</script>
-<script>
-// Отслеживание прогресса обработки
-function startProgressTracking(documentId) {
-    const progressBar = document.getElementById('processingProgress');
-    const progressText = document.getElementById('progressText');
-    const statusBadge = document.getElementById('processingStatus');
-    
-    // Показываем прогресс бар
-    document.getElementById('progressContainer').style.display = 'block';
-    
-    // Запускаем интервал проверки
-    const progressInterval = setInterval(() => {
-        fetch(`/admin/documents/${documentId}/progress`)
-            .then(response => response.json())
-            .then(data => {
-                if (data.success) {
-                    // Обновляем прогресс
-                    progressBar.style.width = data.progress + '%';
-                    progressBar.setAttribute('aria-valuenow', data.progress);
-                    progressText.textContent = data.progress + '%';
-                    
-                    // Обновляем статус
-                    statusBadge.textContent = data.message;
-                    
-                    // Меняем цвет в зависимости от статуса
-                    if (data.status === 'processing') {
-                        progressBar.classList.remove('bg-success', 'bg-danger');
-                        progressBar.classList.add('bg-info', 'progress-bar-animated', 'progress-bar-striped');
-                        statusBadge.classList.remove('bg-success', 'bg-danger');
-                        statusBadge.classList.add('bg-info');
-                    } else if (data.status === 'completed') {
-                        progressBar.classList.remove('bg-info', 'progress-bar-animated', 'progress-bar-striped');
-                        progressBar.classList.add('bg-success');
-                        statusBadge.classList.remove('bg-info');
-                        statusBadge.classList.add('bg-success');
-                        clearInterval(progressInterval);
-                        
-                        // Обновляем страницу через 3 секунды
-                        setTimeout(() => {
-                            location.reload();
-                        }, 3000);
-                    } else if (data.status === 'failed') {
-                        progressBar.classList.remove('bg-info', 'progress-bar-animated', 'progress-bar-striped');
-                        progressBar.classList.add('bg-danger');
-                        statusBadge.classList.remove('bg-info');
-                        statusBadge.classList.add('bg-danger');
-                        clearInterval(progressInterval);
-                    }
-                    
-                    // Обновляем статистику
-                    if (data.processed_pages && data.total_pages) {
-                        document.getElementById('pagesProcessed').textContent = 
-                            `${data.processed_pages}/${data.total_pages}`;
-                    }
-                    if (data.images_count) {
-                        document.getElementById('imagesFound').textContent = data.images_count;
-                    }
-                }
-            })
-            .catch(error => {
-                console.error('Ошибка получения прогресса:', error);
-            });
-    }, 2000); // Проверяем каждые 2 секунды
-    
-    // Возвращаем ID интервала для отмены
-    return progressInterval;
-}
 
-// Запуск обработки
-function startProcessing(documentId) {
-    if (!confirm('Запустить полную обработку документа? Это может занять несколько минут.')) {
+// Автоматическое обновление прогресса если страница в обработке
+@if($document->status === 'processing')
+setInterval(function() {
+    fetch('{{ route("admin.documents.processing.progress", $document->id) }}')
+        .then(response => response.json())
+        .then(data => {
+            if (data.success && data.status === 'completed') {
+                location.reload();
+            }
+        })
+        .catch(error => console.error('Ошибка проверки прогресса:', error));
+}, 5000); // Проверяем каждые 5 секунд
+@endif
+
+// Функция для перезапуска обработки изображений для этой страницы
+function reprocessPageImages() {
+    if (!confirm('Перезапустить обработку изображений для этой страницы?')) {
         return;
     }
     
-    // Блокируем кнопки
-    document.querySelectorAll('.processing-btn').forEach(btn => {
-        btn.disabled = true;
-    });
+    const button = event.target;
+    const originalText = button.innerHTML;
+    button.disabled = true;
+    button.innerHTML = '<i class="bi bi-arrow-clockwise spinner-border spinner-border-sm me-2"></i> Обработка...';
     
-    // Показываем уведомление
-    const notification = document.createElement('div');
-    notification.className = 'alert alert-info alert-dismissible fade show';
-    notification.innerHTML = `
-        <i class="bi bi-info-circle"></i> Обработка запущена. Прогресс отображается ниже.
-        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
-    `;
-    document.querySelector('.container').prepend(notification);
-    
-    // Запускаем обработку
-    fetch(`/admin/documents/${documentId}/parse-full`, {
+    fetch('{{ route("admin.documents.processing.page.reprocess", ["id" => $document->id, "pageId" => $page->id]) }}', {
         method: 'POST',
         headers: {
             'X-CSRF-TOKEN': '{{ csrf_token() }}',
-            'Content-Type': 'application/json',
-            'Accept': 'application/json'
+            'Content-Type': 'application/json'
         }
     })
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Запускаем отслеживание прогресса
-            startProgressTracking(documentId);
+            showToast('success', data.message);
+            setTimeout(() => location.reload(), 2000);
         } else {
-            alert('Ошибка запуска: ' + (data.error || 'Неизвестная ошибка'));
-            location.reload();
+            showToast('error', data.error || 'Ошибка обработки');
+            button.disabled = false;
+            button.innerHTML = originalText;
         }
     })
     .catch(error => {
         console.error('Ошибка:', error);
-        alert('Ошибка сети. Попробуйте снова.');
-        location.reload();
+        showToast('error', 'Ошибка сети');
+        button.disabled = false;
+        button.innerHTML = originalText;
     });
 }
-
-// Автоматическое отслеживание если документ в обработке
-document.addEventListener('DOMContentLoaded', function() {
-    const documentId = {{ $document->id }};
-    const documentStatus = '{{ $document->status }}';
-    
-    if (documentStatus === 'processing') {
-        // Если документ уже в обработке, запускаем отслеживание
-        startProgressTracking(documentId);
-    }
-    
-    // Кнопка принудительной проверки
-    document.getElementById('checkProgressBtn')?.addEventListener('click', function() {
-        fetch(`/admin/documents/${documentId}/progress`)
-            .then(response => response.json())
-            .then(data => {
-                alert(`Статус: ${data.status}\nПрогресс: ${data.progress}%\n${data.message}`);
-                if (data.status === 'processing') {
-                    startProgressTracking(documentId);
-                }
-            });
-    });
-});
 </script>
 @endpush
