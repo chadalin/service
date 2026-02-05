@@ -501,9 +501,18 @@ function initEventListeners() {
 
 function updateModelSelect(brandId) {
     const modelSelect = document.getElementById('model_id');
-    const models = allModels[brandId] || [];
     
+    // Очищаем и добавляем опцию по умолчанию
     modelSelect.innerHTML = '<option value="">Все модели</option>';
+    
+    // Если бренд не выбран, отключаем select
+    if (!brandId) {
+        modelSelect.disabled = true;
+        return;
+    }
+    
+    // Получаем модели для выбранного бренда
+    const models = window.allModels[brandId] || [];
     
     if (models.length > 0) {
         models.forEach(model => {
@@ -518,7 +527,10 @@ function updateModelSelect(brandId) {
                 yearInfo += ')';
             }
             
-            modelSelect.innerHTML += `<option value="${model.id}">${displayName}${yearInfo}</option>`;
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = `${displayName}${yearInfo}`;
+            modelSelect.appendChild(option);
         });
         modelSelect.disabled = false;
     } else {
@@ -548,32 +560,60 @@ async function performEnhancedSearch() {
     // Показываем состояние загрузки
     showLoadingState();
     
-    // Собираем данные формы
-    const formData = new FormData(form);
-    const searchData = {
-        query: formData.get('query'),
-        brand_id: formData.get('brand_id') || null,
-        model_id: document.getElementById('model_id').disabled ? null : formData.get('model_id'),
-        search_type: formData.get('search_type'),
-        _token: '{{ csrf_token() }}'
-    };
-    
     try {
+        // Используем FormData для корректной отправки данных
+        const formData = new FormData(form);
+        
+        // Создаем объект с данными
+        const searchData = {
+            query: formData.get('query'),
+            brand_id: formData.get('brand_id') || null,
+            model_id: document.getElementById('model_id').disabled ? null : formData.get('model_id'),
+            search_type: formData.get('search_type'),
+        };
+        
+        // Преобразуем пустые строки в null
+        if (searchData.brand_id === '') searchData.brand_id = null;
+        if (searchData.model_id === '') searchData.model_id = null;
+        
+        console.log('Sending search data:', searchData);
+        
+        // Отправляем запрос с правильными заголовками
         const response = await fetch('{{ route("diagnostic.ai.enhanced.search") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'Accept': 'application/json',
-                'X-CSRF-TOKEN': searchData._token
+                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                'X-Requested-With': 'XMLHttpRequest'
             },
             body: JSON.stringify(searchData)
         });
         
-        const data = await response.json();
-        
+        // Проверяем статус ответа
         if (!response.ok) {
-            throw new Error(data.message || 'Ошибка сервера');
+            // Если ошибка валидации (422)
+            if (response.status === 422) {
+                const errorData = await response.json();
+                console.error('Validation error:', errorData);
+                
+                // Формируем сообщение об ошибке
+                let errorMessage = 'Ошибка валидации: ';
+                if (errorData.errors) {
+                    Object.values(errorData.errors).forEach(errors => {
+                        errorMessage += errors.join(', ') + ' ';
+                    });
+                } else {
+                    errorMessage += errorData.message || 'Неизвестная ошибка';
+                }
+                
+                throw new Error(errorMessage.trim());
+            } else {
+                throw new Error(`HTTP error ${response.status}`);
+            }
         }
+        
+        const data = await response.json();
         
         if (!data.success) {
             throw new Error(data.message || 'Ошибка поиска');
@@ -588,8 +628,18 @@ async function performEnhancedSearch() {
         
     } catch (error) {
         console.error('Search error:', error);
-        showErrorState(error.message);
-        showToast('Ошибка поиска: ' + error.message, 'danger');
+        
+        // Проверяем если это CSRF ошибка
+        if (error.message.includes('419') || error.message.includes('CSRF')) {
+            showErrorState('Ошибка безопасности. Пожалуйста, обновите страницу и попробуйте снова.');
+            showToast('Ошибка безопасности. Обновите страницу.', 'danger');
+        } else if (error.message.includes('Ошибка валидации')) {
+            showErrorState(error.message);
+            showToast(error.message, 'danger');
+        } else {
+            showErrorState(error.message || 'Ошибка поиска');
+            showToast('Ошибка поиска: ' + error.message, 'danger');
+        }
     } finally {
         isLoading = false;
         searchBtn.disabled = false;
@@ -929,9 +979,10 @@ function createDocumentCardHTML(doc, index) {
     const icon = doc.icon || 'bi-file-earmark';
     const fileType = doc.file_type || 'документ';
     const pages = doc.total_pages ? `(${doc.total_pages} стр.)` : '';
+    const pagesFound = doc.pages_found ? `, найдено: ${doc.pages_found} стр.` : '';
     
     return `
-        <a href="/documents/${doc.id}" target="_blank" class="document-item fade-in-up" 
+        <a href="${doc.source_url || '/documents/' + doc.id}" target="_blank" class="document-item fade-in-up" 
            style="animation-delay: ${index * 0.1}s">
             <div class="document-icon">
                 <i class="bi ${icon}"></i>
@@ -939,8 +990,12 @@ function createDocumentCardHTML(doc, index) {
             <div class="document-info">
                 <div class="document-title">${doc.title}</div>
                 <div class="document-meta">
-                    <span><i class="bi bi-file-earmark"></i> ${fileType} ${pages}</span>
+                    <span><i class="bi bi-file-earmark"></i> ${fileType} ${pages}${pagesFound}</span>
+                    ${doc.detected_system ? `<br><small><i class="bi bi-gear"></i> Система: ${doc.detected_system}</small>` : ''}
+                    ${doc.detected_component ? `<br><small><i class="bi bi-cpu"></i> Компонент: ${doc.detected_component}</small>` : ''}
+                    ${doc.best_page ? `<br><small><i class="bi bi-file-text"></i> Страница: ${doc.best_page}</small>` : ''}
                 </div>
+                ${doc.excerpt ? `<div class="text-muted mt-2 small">${doc.excerpt}</div>` : ''}
             </div>
             <div>
                 <i class="bi bi-arrow-right"></i>
@@ -999,6 +1054,8 @@ function showToast(message, type = 'info') {
         toast.show();
     }
 }
+
+
 </script>
 
 <!-- Добавьте в layout если нет -->

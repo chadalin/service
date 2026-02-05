@@ -10,6 +10,7 @@ use App\Models\Brand;
 use App\Models\CarModel;
 use App\Models\PriceItem;
 use App\Models\Document;
+use App\Models\DocumentPage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
@@ -423,71 +424,200 @@ class EnhancedAISearchController extends Controller
     /**
      * Поиск документов для симптомов
      */
-    private function searchDocumentsForSymptoms($symptoms, $brandId = null, $modelId = null)
-    {
-        if (empty($symptoms) || !Schema::hasTable('documents')) {
-            return [];
+   private function searchDocumentsForSymptoms($symptoms, $brandId = null, $modelId = null)
+{
+    if (empty($symptoms) || !Schema::hasTable('document_pages') || !Schema::hasTable('documents')) {
+        return [];
+    }
+    
+    $searchTerms = [];
+    foreach ($symptoms as $symptom) {
+        if (!empty($symptom['title'])) {
+            $keywords = $this->extractRelevantKeywords($symptom['title']);
+            $searchTerms = array_merge($searchTerms, $keywords);
         }
         
-        $searchTerms = [];
-        foreach ($symptoms as $symptom) {
-            if (!empty($symptom['title'])) {
-                $keywords = $this->extractRelevantKeywords($symptom['title']);
-                $searchTerms = array_merge($searchTerms, $keywords);
-            }
-        }
-        
-        $searchTerms = array_unique(array_filter($searchTerms, function($term) {
-            return mb_strlen($term) > 2;
-        }));
-        
-        if (empty($searchTerms)) {
-            return [];
-        }
-        
-        try {
-            $docsQuery = Document::query()
-                ->where('status', 'active');
-            
-            if ($modelId) {
-                $docsQuery->where('car_model_id', $modelId);
-            } elseif ($brandId) {
-                $docsQuery->whereHas('carModel', function($q) use ($brandId) {
-                    $q->where('brand_id', $brandId);
-                });
-            }
-            
-            $docsQuery->where(function($q) use ($searchTerms) {
-                foreach ($searchTerms as $term) {
-                    $q->orWhere('title', 'like', "%{$term}%")
-                      ->orWhere('content_text', 'like', "%{$term}%");
-                }
-            });
-            
-            $documents = $docsQuery->select([
-                    'id', 'title', 'content_text', 'total_pages', 
-                    'file_type', 'file_path', 'source_url'
-                ])
-                ->orderBy('view_count', 'desc')
-                ->limit(3)
-                ->get();
-            
-            return $documents->map(function($doc) {
-                return [
-                    'id' => $doc->id,
-                    'title' => $this->cleanUtf8String($doc->title ?? ''),
-                    'excerpt' => $this->truncateText($doc->content_text ?? '', 150),
-                    'file_type' => $doc->file_type ?? 'pdf',
-                    'total_pages' => $doc->total_pages ?? 0,
-                    'icon' => $this->getFileIcon($doc->file_type ?? 'pdf'),
-                ];
-            })->toArray();
-                
-        } catch (\Exception $e) {
-            Log::error('Error searching documents: ' . $e->getMessage());
-            return [];
+        // Добавляем поиск по системам если есть
+        if (!empty($symptom['related_systems'])) {
+            $systems = is_array($symptom['related_systems']) 
+                ? $symptom['related_systems'] 
+                : explode(',', $symptom['related_systems']);
+            $searchTerms = array_merge($searchTerms, $systems);
         }
     }
+    
+    $searchTerms = array_unique(array_filter($searchTerms, function($term) {
+        return mb_strlen($term) > 2;
+    }));
+    
+    if (empty($searchTerms)) {
+        return [];
+    }
+    
+    try {
+        // Ищем через JOIN document_pages с documents
+        $pagesQuery = DB::table('document_pages')
+            ->select([
+                'document_pages.id as page_id',
+                'document_pages.document_id',
+                'document_pages.page_number',
+                'document_pages.content_text',
+                'document_pages.section_title',
+                'documents.id as doc_id',
+                'documents.title as document_title',
+                'documents.file_type',
+                'documents.source_url',
+                'documents.view_count',
+                'documents.total_pages',
+                'documents.detected_system',
+                'documents.detected_component',
+                'documents.car_model_id'
+            ])
+            ->join('documents', 'document_pages.document_id', '=', 'documents.id')
+            ->whereNotNull('document_pages.content_text')
+            ->where('document_pages.content_text', '<>', '')
+            ->where('document_pages.status', 'parsed'); // Только обработанные страницы
+        
+        // Поиск по тексту страниц
+        $pagesQuery->where(function($q) use ($searchTerms) {
+            foreach ($searchTerms as $term) {
+                $cleanTerm = $this->cleanUtf8String($term);
+                $q->orWhere('document_pages.content_text', 'like', "%{$cleanTerm}%")
+                  ->orWhere('document_pages.section_title', 'like', "%{$cleanTerm}%");
+            }
+        });
+        
+        // Фильтр по модели
+        if ($modelId) {
+            $pagesQuery->where('documents.car_model_id', $modelId);
+        } elseif ($brandId) {
+            // Фильтр по марке через car_models
+            $pagesQuery->whereExists(function($query) use ($brandId) {
+                $query->select(DB::raw(1))
+                      ->from('car_models')
+                      ->whereColumn('car_models.id', 'documents.car_model_id')
+                      ->where('car_models.brand_id', $brandId);
+            });
+        }
+        
+        $pages = $pagesQuery
+            ->orderBy('documents.view_count', 'desc')
+            ->orderBy('document_pages.page_number')
+            ->limit(15) // Берем больше страниц для группировки
+            ->get();
+        
+        if ($pages->isEmpty()) {
+            return [];
+        }
+        
+        // Группируем по документам (чтобы не показывать один документ несколько раз)
+        $groupedDocuments = [];
+        foreach ($pages as $page) {
+            $docId = $page->doc_id;
+            
+            if (!isset($groupedDocuments[$docId])) {
+                // Находим лучший отрывок для этого документа
+                $bestExcerpt = $this->findBestExcerpt($page->content_text, $searchTerms);
+                
+                $groupedDocuments[$docId] = [
+                    'id' => $docId,
+                    'title' => $this->cleanUtf8String($page->document_title ?? 'Документ'),
+                    'excerpt' => $this->truncateText($bestExcerpt, 150),
+                    'file_type' => $page->file_type ?? 'pdf',
+                    'total_pages' => $page->total_pages ?? 0,
+                    'source_url' => $page->source_url ?? '',
+                    'detected_system' => $this->cleanUtf8String($page->detected_system ?? ''),
+                    'detected_component' => $this->cleanUtf8String($page->detected_component ?? ''),
+                    'view_count' => $page->view_count ?? 0,
+                    'icon' => $this->getFileIcon($page->file_type ?? 'pdf'),
+                    'best_page' => $page->page_number,
+                    'pages_found' => 1
+                ];
+            } else {
+                // Увеличиваем счетчик найденных страниц
+                $groupedDocuments[$docId]['pages_found']++;
+                
+                // Проверяем, не лучше ли эта страница для отрывка
+                $currentExcerpt = $groupedDocuments[$docId]['excerpt'];
+                $newExcerpt = $this->findBestExcerpt($page->content_text, $searchTerms);
+                
+                if (strlen($newExcerpt) > strlen($currentExcerpt)) {
+                    $groupedDocuments[$docId]['excerpt'] = $this->truncateText($newExcerpt, 150);
+                    $groupedDocuments[$docId]['best_page'] = $page->page_number;
+                }
+            }
+        }
+        
+        // Сортируем по количеству найденных страниц и просмотрам
+        usort($groupedDocuments, function($a, $b) {
+            if ($b['pages_found'] != $a['pages_found']) {
+                return $b['pages_found'] <=> $a['pages_found'];
+            }
+            return $b['view_count'] <=> $a['view_count'];
+        });
+        
+        // Возвращаем топ-5 документов
+        return array_slice($groupedDocuments, 0, 5);
+        
+    } catch (\Exception $e) {
+        Log::error('Error searching document pages: ' . $e->getMessage(), [
+            'trace' => $e->getTraceAsString()
+        ]);
+        return [];
+    }
+}
+
+/**
+ * Находит лучший отрывок текста содержащий поисковые термины
+ */
+private function findBestExcerpt($text, $searchTerms, $excerptLength = 200)
+{
+    if (empty($text)) {
+        return '';
+    }
+    
+    $text = $this->cleanUtf8String($text);
+    $textLength = mb_strlen($text);
+    
+    // Если текст короткий, возвращаем его полностью
+    if ($textLength <= $excerptLength) {
+        return $text;
+    }
+    
+    $bestPosition = 0;
+    $bestScore = 0;
+    
+    // Ищем позицию с максимальным количеством совпадений
+    for ($i = 0; $i <= $textLength - $excerptLength; $i += 50) {
+        $chunk = mb_substr($text, $i, $excerptLength);
+        $score = 0;
+        
+        foreach ($searchTerms as $term) {
+            if (mb_stripos($chunk, $term) !== false) {
+                $score++;
+            }
+        }
+        
+        if ($score > $bestScore) {
+            $bestScore = $score;
+            $bestPosition = $i;
+        }
+    }
+    
+    // Вырезаем отрывок с контекстом
+    $start = max(0, $bestPosition - 30);
+    $excerpt = mb_substr($text, $start, $excerptLength + 60);
+    
+    // Добавляем многоточия если текст обрезан
+    if ($start > 0) {
+        $excerpt = '...' . $excerpt;
+    }
+    if ($start + $excerptLength + 60 < $textLength) {
+        $excerpt .= '...';
+    }
+    
+    return $excerpt;
+}
 
     /**
      * Поиск запчастей для возможных причин

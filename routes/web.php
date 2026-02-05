@@ -726,6 +726,9 @@ Route::get('/{id}/page/{pageId}/raw', [DocumentProcessingController::class, 'sho
 });
 
 
+Route::get('/test-document-api', [EnhancedAISearchController::class, 'testDocumentSearchApi']);
+
+
 
 
 
