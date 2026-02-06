@@ -540,91 +540,31 @@ mark.bg-warning {
 @push('scripts')
 <script>
 // Глобальные переменные
-// Глобальные переменные
 let allModels = @json($models);
-let currentSearchData = null;
 let isLoading = false;
-let currentResults = [];
+let currentResults = null;
+let typingInterval = null;
 
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('AI Search page loaded');
-    
-    // Инициализация
-    initBrandModelSelect();
+    initForm();
     initEventListeners();
 });
 
-// Инициализация выбора марки/модели
-function initBrandModelSelect() {
+function initForm() {
     const brandSelect = document.getElementById('brand_id');
     const modelSelect = document.getElementById('model_id');
     
     if (brandSelect) {
         brandSelect.addEventListener('change', function() {
-            const brandId = this.value;
-            console.log('Brand selected:', brandId);
-            
-            if (!brandId) {
-                resetModelSelect();
-                return;
-            }
-            
-            loadModelsForBrand(brandId);
+            updateModelSelect(this.value);
         });
     }
 }
 
-// Загрузка моделей для выбранной марки
-function loadModelsForBrand(brandId) {
-    const modelSelect = document.getElementById('model_id');
-    const models = allModels[brandId] || [];
-    
-    if (!Array.isArray(models) || models.length === 0) {
-        modelSelect.innerHTML = '<option value="">Нет доступных моделей</option>';
-        modelSelect.disabled = true;
-        return;
-    }
-    
-    let options = '<option value="">Все модели</option>';
-    
-    models.forEach(model => {
-        const displayName = model.name || model.name_cyrillic || `Модель ${model.id}`;
-        let yearInfo = '';
-        
-        if (model.year_from) {
-            if (model.year_to && model.year_to !== model.year_from) {
-                yearInfo = ` (${model.year_from}-${model.year_to})`;
-            } else {
-                yearInfo = ` (${model.year_from})`;
-            }
-        }
-        
-        options += `<option value="${model.id}">${displayName}${yearInfo}</option>`;
-    });
-    
-    modelSelect.innerHTML = options;
-    modelSelect.disabled = false;
-    
-    // Анимация
-    modelSelect.style.opacity = '0';
-    setTimeout(() => {
-        modelSelect.style.transition = 'opacity 0.3s';
-        modelSelect.style.opacity = '1';
-    }, 10);
-}
-
-// Сброс выбора модели
-function resetModelSelect() {
-    const modelSelect = document.getElementById('model_id');
-    modelSelect.innerHTML = '<option value="">Сначала выберите марку</option>';
-    modelSelect.disabled = true;
-}
-
-// Инициализация обработчиков событий
 function initEventListeners() {
-    const searchForm = document.getElementById('aiSearchForm');
-    if (searchForm) {
-        searchForm.addEventListener('submit', async function(e) {
+    const form = document.getElementById('aiSearchForm');
+    if (form) {
+        form.addEventListener('submit', async function(e) {
             e.preventDefault();
             await performEnhancedSearch();
         });
@@ -634,9 +574,48 @@ function initEventListeners() {
     document.getElementById('query')?.addEventListener('keydown', function(e) {
         if (e.ctrlKey && e.key === 'Enter') {
             e.preventDefault();
-            document.getElementById('searchBtn').click();
+            performEnhancedSearch();
         }
     });
+}
+
+function updateModelSelect(brandId) {
+    const modelSelect = document.getElementById('model_id');
+    
+    // Очищаем и добавляем опцию по умолчанию
+    modelSelect.innerHTML = '<option value="">Все модели</option>';
+    
+    // Если бренд не выбран, отключаем select
+    if (!brandId) {
+        modelSelect.disabled = true;
+        return;
+    }
+    
+    // Получаем модели для выбранного бренда
+    const models = window.allModels[brandId] || [];
+    
+    if (models.length > 0) {
+        models.forEach(model => {
+            const displayName = model.name || model.name_cyrillic;
+            let yearInfo = '';
+            
+            if (model.year_from) {
+                yearInfo = ` (${model.year_from}`;
+                if (model.year_to && model.year_to !== model.year_from) {
+                    yearInfo += `-${model.year_to}`;
+                }
+                yearInfo += ')';
+            }
+            
+            const option = document.createElement('option');
+            option.value = model.id;
+            option.textContent = `${displayName}${yearInfo}`;
+            modelSelect.appendChild(option);
+        });
+        modelSelect.disabled = false;
+    } else {
+        modelSelect.disabled = true;
+    }
 }
 
 async function performEnhancedSearch() {
@@ -679,9 +658,6 @@ async function performEnhancedSearch() {
         
         console.log('Sending search data:', searchData);
         
-        // Сохраняем текущие параметры
-        currentSearchData = searchData;
-        
         // Отправляем запрос с правильными заголовками
         const response = await fetch('{{ route("diagnostic.ai.enhanced.search") }}', {
             method: 'POST',
@@ -723,11 +699,11 @@ async function performEnhancedSearch() {
             throw new Error(data.message || 'Ошибка поиска');
         }
         
-        currentResults = data.results || [];
+        currentResults = data;
         displayStructuredResults(data);
         
         // Показываем уведомление
-        const totalResults = data.results.length + (data.parts?.length || 0) + (data.documents?.length || 0);
+        const totalResults = data.results.length + data.parts.length + data.documents.length;
         showToast(`Найдено ${totalResults} результатов`, 'success');
         
     } catch (error) {
@@ -791,13 +767,11 @@ function showErrorState(errorMessage) {
 }
 
 function displayStructuredResults(data) {
-    console.log('Displaying results:', data);
-    
     const container = document.getElementById('resultsContainer');
     const counter = document.getElementById('resultsCounter');
     
     // Обновляем счетчик
-    const totalResults = data.results?.length || 0;
+    const totalResults = data.results.length;
     counter.textContent = `Найдено: ${totalResults}`;
     counter.className = totalResults > 0 ? 'badge bg-success' : 'badge bg-secondary';
     
@@ -809,26 +783,20 @@ function displayStructuredResults(data) {
         addAIResponse(data.ai_response, container);
         
         setTimeout(() => {
-            if (data.results && data.results.length > 0) {
+            if (data.results.length > 0) {
                 addSymptomsResults(data.results, container);
                 
                 setTimeout(() => {
-                    if (data.parts && data.parts.length > 0) {
+                    if (data.parts.length > 0) {
                         addPartsResults(data.parts, container);
                     }
                     
                     setTimeout(() => {
-                        console.log('Trying to add documents:', data.documents);
-                        if (data.documents && data.documents.length > 0) {
-                            console.log('Documents exist, calling addDocumentsResults');
+                        if (data.documents.length > 0) {
                             addDocumentsResults(data.documents, container);
-                        } else {
-                            console.log('No documents to display');
                         }
                     }, 300);
                 }, 300);
-            } else {
-                console.log('No symptoms found');
             }
         }, 500);
     }, 300);
@@ -901,13 +869,7 @@ function addPartsResults(parts, container) {
 }
 
 function addDocumentsResults(docs, container) {
-    console.log('addDocumentsResults called with:', docs);
-    
-    if (!docs || !Array.isArray(docs) || docs.length === 0) {
-        console.log('No valid docs array');
-        return;
-    }
-    
+      console.log('Documents to display:', docs);
     const docsDiv = document.createElement('div');
     docsDiv.className = 'main-result-card fade-in-up';
     docsDiv.style.animationDelay = '0.1s';
@@ -923,13 +885,7 @@ function addDocumentsResults(docs, container) {
     `;
     
     docs.forEach((doc, index) => {
-        console.log(`Document ${index}:`, doc);
-        try {
-            docsHTML += createDocumentCardHTML(doc, index);
-        } catch (error) {
-            console.error('Error creating document card:', error, doc);
-            docsHTML += `<div class="alert alert-danger">Ошибка отображения документа</div>`;
-        }
+        docsHTML += createDocumentCardHTML(doc, index);
     });
     
     docsHTML += `</div>`;
@@ -938,7 +894,7 @@ function addDocumentsResults(docs, container) {
 }
 
 function createSymptomCardHTML(result, index) {
-    const relevancePercent = Math.round((result.relevance_score || 0.5) * 100);
+    const relevancePercent = Math.round(result.relevance_score * 100);
     const matchTypeBadge = result.match_type === 'exact' ? 'success' : 
                           result.match_type === 'keyword' ? 'primary' : 'secondary';
     const matchTypeText = result.match_type === 'exact' ? 'Точное совпадение' :
@@ -947,7 +903,7 @@ function createSymptomCardHTML(result, index) {
     let html = `
         <div class="result-header">
             <div class="result-title">
-                <span>${index + 1}. ${escapeHtml(result.title || '')}</span>
+                <span>${index + 1}. ${result.title}</span>
                 <div>
                     <span class="badge bg-${matchTypeBadge} me-2">${matchTypeText}</span>
                     <span class="badge bg-info">${relevancePercent}%</span>
@@ -957,7 +913,7 @@ function createSymptomCardHTML(result, index) {
             <div class="result-meta">
                 ${result.type === 'rule' && result.brand ? `
                     <span class="meta-badge">
-                        <i class="bi bi-car-front me-1"></i>${escapeHtml(result.brand)} ${escapeHtml(result.model || '')}
+                        <i class="bi bi-car-front me-1"></i>${result.brand} ${result.model || ''}
                     </span>
                 ` : ''}
                 
@@ -985,7 +941,7 @@ function createSymptomCardHTML(result, index) {
                 <div class="section-title">
                     <i class="bi bi-card-text"></i>Описание
                 </div>
-                <p>${escapeHtml(result.description)}</p>
+                <p>${result.description}</p>
             </div>
         `;
     }
@@ -1004,7 +960,7 @@ function createSymptomCardHTML(result, index) {
             html += `
                 <li>
                     <div class="step-number">${stepIndex + 1}</div>
-                    <div>${escapeHtml(step)}</div>
+                    <div>${step}</div>
                 </li>
             `;
         });
@@ -1023,7 +979,7 @@ function createSymptomCardHTML(result, index) {
         `;
         
         result.possible_causes.forEach(cause => {
-            html += `<span class="cause-tag">${escapeHtml(cause)}</span>`;
+            html += `<span class="cause-tag">${cause}</span>`;
         });
         
         html += `</div></div>`;
@@ -1042,17 +998,14 @@ function createSymptomCardHTML(result, index) {
             </div>
             <div class="btn-group">
                 ${result.type === 'rule' ? `
-                    <button class="btn btn-sm btn-primary" 
-                            onclick="viewRuleDetails(${result.id})">
-                        <i class="bi bi-eye me-1"></i>Подробнее
+                    <button class="btn btn-sm btn-primary" onclick="viewRuleDetails(${result.id}, ${result.brand_id || 'null'}, ${result.model_id || 'null'})">
+                    <i class="bi bi-eye me-1"></i>Подробнее
                     </button>
-                    <button class="btn btn-sm btn-success" 
-                            onclick="orderConsultation(${result.id})">
+                    <button class="btn btn-sm btn-success" onclick="orderConsultation(${result.id})">
                         <i class="bi bi-chat-dots me-1"></i>Консультация
                     </button>
                 ` : `
-                    <button class="btn btn-sm btn-warning" 
-                            onclick="viewSymptomDetails(${result.symptom_id || result.id})">
+                    <button class="btn btn-sm btn-warning" onclick="viewSymptomDetails(${result.symptom_id || result.id})">
                         <i class="bi bi-info-circle me-1"></i>Подробнее о симптоме
                     </button>
                 `}
@@ -1068,35 +1021,33 @@ function createPartCardHTML(part, index) {
     return `
         <div class="part-card" style="animation-delay: ${index * 0.1}s">
             <div class="part-header">
-                <span class="part-sku">${escapeHtml(part.sku || '')}</span>
-                <div class="part-price">${escapeHtml(part.formatted_price || '0')} ₽</div>
+                <span class="part-sku">${part.sku}</span>
+                <div class="part-price">${part.formatted_price} ₽</div>
             </div>
             
-            <div class="part-name">${escapeHtml(part.name || '')}</div>
+            <div class="part-name">${part.name}</div>
             
             ${part.description ? `
                 <div class="text-muted small mb-2" style="font-size: 0.85rem;">
-                    ${escapeHtml(part.description.substring(0, 80))}${part.description.length > 80 ? '...' : ''}
+                    ${part.description.substring(0, 80)}${part.description.length > 80 ? '...' : ''}
                 </div>
             ` : ''}
             
             <div class="part-footer">
                 <div>
                     ${part.brand ? `
-                        <span class="badge bg-light text-dark me-2">${escapeHtml(part.brand)}</span>
+                        <span class="badge bg-light text-dark me-2">${part.brand}</span>
                     ` : ''}
                     <span class="badge ${part.availability === 'В наличии' ? 'bg-success' : 
                                       part.availability === 'Мало' ? 'bg-warning' : 'bg-danger'}">
-                        ${escapeHtml(part.availability || '')}
+                        ${part.availability}
                     </span>
                 </div>
                 <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-primary" 
-                            onclick="viewPartDetails(${part.id})">
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewPartDetails(${part.id})">
                         <i class="bi bi-eye"></i>
                     </button>
-                    <button class="btn btn-sm btn-success" 
-                            onclick="addToCart(${part.id})">
+                    <button class="btn btn-sm btn-success" onclick="addToCart(${part.id})">
                         <i class="bi bi-cart-plus"></i>
                     </button>
                 </div>
@@ -1105,39 +1056,7 @@ function createPartCardHTML(part, index) {
     `;
 }
 
-function createDocumentCardHTML(doc, index) {
-    const icon = doc.icon || 'bi-file-earmark';
-    const fileType = doc.file_type || 'документ';
-    const pages = doc.total_pages ? `(${doc.total_pages} стр.)` : '';
-    const pagesFound = doc.pages_found ? `, найдено: ${doc.pages_found} стр.` : '';
-    
-    return `
-        <div class="document-item fade-in-up" style="animation-delay: ${index * 0.1}s">
-            <div class="document-icon">
-                <i class="bi ${icon}"></i>
-            </div>
-            <div class="document-info">
-                <a href="${doc.source_url || '/documents/' + doc.id}" 
-                   target="_blank" 
-                   class="document-title">
-                    ${escapeHtml(doc.title || 'Документ')}
-                </a>
-                <div class="document-meta">
-                    <span><i class="bi bi-file-earmark"></i> ${fileType} ${pages}${pagesFound}</span>
-                    ${doc.detected_system ? `<br><small><i class="bi bi-gear"></i> Система: ${escapeHtml(doc.detected_system)}</small>` : ''}
-                    ${doc.detected_component ? `<br><small><i class="bi bi-cpu"></i> Компонент: ${escapeHtml(doc.detected_component)}</small>` : ''}
-                    ${doc.best_page ? `<br><small><i class="bi bi-file-text"></i> Страница: ${doc.best_page}</small>` : ''}
-                </div>
-                ${doc.excerpt ? `<div class="text-muted mt-2 small">${escapeHtml(doc.excerpt)}</div>` : ''}
-            </div>
-            <div>
-                <a href="${doc.source_url || '/documents/' + doc.id}" target="_blank">
-                    <i class="bi bi-arrow-right"></i>
-                </a>
-            </div>
-        </div>
-    `;
-}
+
 
 function formatAIResponse(text) {
     return text
@@ -1158,8 +1077,24 @@ function formatAIResponse(text) {
 }
 
 // Вспомогательные функции
-function viewRuleDetails(ruleId) {
-    window.open(`/admin/diagnostic/rules/${ruleId}`, '_blank');
+function viewRuleDetails(ruleId, brandId, modelId) {
+    // Собираем URL с параметрами
+    let url = '/admin/diagnostic/rules/' + ruleId;
+    const params = [];
+    
+    if (brandId && brandId !== 'null' && brandId !== 'undefined' && brandId !== '') {
+        params.push('brand_id=' + encodeURIComponent(brandId));
+    }
+    if (modelId && modelId !== 'null' && modelId !== 'undefined' && modelId !== '') {
+        params.push('model_id=' + encodeURIComponent(modelId));
+    }
+    
+    if (params.length > 0) {
+        url += '?' + params.join('&');
+    }
+    
+    console.log('Opening rule URL:', url);
+    window.open(url, '_blank');
 }
 
 function viewSymptomDetails(symptomId) {
@@ -1175,25 +1110,8 @@ function viewPartDetails(partId) {
 }
 
 function addToCart(partId) {
+    // Реализация добавления в корзину
     showToast('Запчасть добавлена в корзину', 'success');
-}
-
-function escapeHtml(text) {
-    if (text === null || text === undefined) {
-        return '';
-    }
-    
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    
-    return String(text).replace(/[&<>"']/g, function(m) { 
-        return map[m]; 
-    });
 }
 
 function showToast(message, type = 'info') {
@@ -1206,6 +1124,36 @@ function showToast(message, type = 'info') {
         toast.show();
     }
 }
+
+function createDocumentCardHTML(doc, index) {
+    console.log('Creating card for doc:', doc);
+    
+    // Простейшая версия для тестирования
+    return `
+        <div class="border p-3 mb-2 rounded fade-in-up" style="animation-delay: ${index * 0.1}s">
+            <h6 class="mb-1">
+                <i class="bi bi-file-earmark-text me-1"></i>
+                ${doc.title || 'Документ без названия'}
+            </h6>
+            <p class="small text-muted mb-2">${doc.excerpt || 'Нет описания'}</p>
+            <div class="d-flex justify-content-between align-items-center">
+                <small>
+                    <span class="badge bg-light text-dark me-1">
+                        ${doc.file_type || 'pdf'}
+                    </span>
+                    ${doc.best_page ? `<span class="badge bg-info me-1">Стр. ${doc.best_page}</span>` : ''}
+                    ${doc.pages_found ? `<span class="badge bg-warning">Найдено: ${doc.pages_found}</span>` : ''}
+                </small>
+                ${doc.view_url ? `
+                    <a href="${doc.view_url}" class="btn btn-sm btn-outline-primary" target="_blank">
+                        <i class="bi bi-eye"></i> Открыть
+                    </a>
+                ` : ''}
+            </div>
+        </div>
+    `;
+}
+
 
 </script>
 

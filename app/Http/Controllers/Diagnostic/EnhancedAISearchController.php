@@ -426,6 +426,12 @@ class EnhancedAISearchController extends Controller
      */
    private function searchDocumentsForSymptoms($symptoms, $brandId = null, $modelId = null)
 {
+
+
+Log::debug('=== DOCUMENT SEARCH START ===');
+    Log::debug('Symptoms count:', ['count' => count($symptoms)]);
+    Log::debug('Brand ID:', ['brand_id' => $brandId]);
+    Log::debug('Model ID:', ['model_id' => $modelId]);
     if (empty($symptoms) || !Schema::hasTable('document_pages') || !Schema::hasTable('documents')) {
         return [];
     }
@@ -437,7 +443,6 @@ class EnhancedAISearchController extends Controller
             $searchTerms = array_merge($searchTerms, $keywords);
         }
         
-        // Добавляем поиск по системам если есть
         if (!empty($symptom['related_systems'])) {
             $systems = is_array($symptom['related_systems']) 
                 ? $symptom['related_systems'] 
@@ -455,7 +460,6 @@ class EnhancedAISearchController extends Controller
     }
     
     try {
-        // Ищем через JOIN document_pages с documents
         $pagesQuery = DB::table('document_pages')
             ->select([
                 'document_pages.id as page_id',
@@ -471,14 +475,14 @@ class EnhancedAISearchController extends Controller
                 'documents.total_pages',
                 'documents.detected_system',
                 'documents.detected_component',
-                'documents.car_model_id'
+                'documents.car_model_id',
+                'documents.file_path'
             ])
             ->join('documents', 'document_pages.document_id', '=', 'documents.id')
             ->whereNotNull('document_pages.content_text')
             ->where('document_pages.content_text', '<>', '')
-            ->where('document_pages.status', 'parsed'); // Только обработанные страницы
+            ->where('document_pages.status', 'processed');
         
-        // Поиск по тексту страниц
         $pagesQuery->where(function($q) use ($searchTerms) {
             foreach ($searchTerms as $term) {
                 $cleanTerm = $this->cleanUtf8String($term);
@@ -487,11 +491,9 @@ class EnhancedAISearchController extends Controller
             }
         });
         
-        // Фильтр по модели
         if ($modelId) {
             $pagesQuery->where('documents.car_model_id', $modelId);
         } elseif ($brandId) {
-            // Фильтр по марке через car_models
             $pagesQuery->whereExists(function($query) use ($brandId) {
                 $query->select(DB::raw(1))
                       ->from('car_models')
@@ -501,70 +503,249 @@ class EnhancedAISearchController extends Controller
         }
         
         $pages = $pagesQuery
+            ->orderByRaw('
+                CASE 
+                    WHEN document_pages.section_title LIKE "%диагностик%" THEN 1
+                    WHEN document_pages.section_title LIKE "%ремонт%" THEN 2
+                    WHEN document_pages.section_title LIKE "%неисправн%" THEN 3
+                    ELSE 4
+                END
+            ')
             ->orderBy('documents.view_count', 'desc')
             ->orderBy('document_pages.page_number')
-            ->limit(15) // Берем больше страниц для группировки
+            ->limit(30)
             ->get();
         
         if ($pages->isEmpty()) {
             return [];
         }
         
-        // Группируем по документам (чтобы не показывать один документ несколько раз)
+        // Группируем по документам с выбором самой релевантной страницы
         $groupedDocuments = [];
         foreach ($pages as $page) {
             $docId = $page->doc_id;
             
+            // Рассчитываем релевантность для этой страницы
+            $pageRelevance = $this->calculatePageRelevance($page->content_text, $searchTerms, $page->section_title);
+            
             if (!isset($groupedDocuments[$docId])) {
-                // Находим лучший отрывок для этого документа
-                $bestExcerpt = $this->findBestExcerpt($page->content_text, $searchTerms);
+                // Находим лучший отрывок с подсветкой
+                $bestExcerpt = $this->findBestExcerptWithHighlight($page->content_text, $searchTerms, 200);
+                
+                // Генерируем URL для просмотра документа
+                $viewUrl = $this->generateDocumentViewUrl($docId, $page->page_number, $page->file_path, $page->source_url);
                 
                 $groupedDocuments[$docId] = [
                     'id' => $docId,
                     'title' => $this->cleanUtf8String($page->document_title ?? 'Документ'),
-                    'excerpt' => $this->truncateText($bestExcerpt, 150),
+                    'excerpt' => $bestExcerpt,
+                    'excerpt_raw' => $this->findBestExcerpt($page->content_text, $searchTerms, 300), // Полный отрывок без HTML
                     'file_type' => $page->file_type ?? 'pdf',
                     'total_pages' => $page->total_pages ?? 0,
                     'source_url' => $page->source_url ?? '',
+                    'file_path' => $page->file_path ?? '',
                     'detected_system' => $this->cleanUtf8String($page->detected_system ?? ''),
                     'detected_component' => $this->cleanUtf8String($page->detected_component ?? ''),
                     'view_count' => $page->view_count ?? 0,
                     'icon' => $this->getFileIcon($page->file_type ?? 'pdf'),
                     'best_page' => $page->page_number,
-                    'pages_found' => 1
+                    'pages_found' => 1,
+                    'relevance_score' => $pageRelevance,
+                    'view_url' => $viewUrl,
+                    'page_title' => $this->cleanUtf8String($page->section_title ?? ''),
+                    'full_content_preview' => $this->getContentPreview($page->content_text, $searchTerms, 500)
                 ];
             } else {
-                // Увеличиваем счетчик найденных страниц
-                $groupedDocuments[$docId]['pages_found']++;
-                
-                // Проверяем, не лучше ли эта страница для отрывка
-                $currentExcerpt = $groupedDocuments[$docId]['excerpt'];
-                $newExcerpt = $this->findBestExcerpt($page->content_text, $searchTerms);
-                
-                if (strlen($newExcerpt) > strlen($currentExcerpt)) {
-                    $groupedDocuments[$docId]['excerpt'] = $this->truncateText($newExcerpt, 150);
+                // Обновляем если нашли более релевантную страницу
+                if ($pageRelevance > $groupedDocuments[$docId]['relevance_score']) {
+                    $bestExcerpt = $this->findBestExcerptWithHighlight($page->content_text, $searchTerms, 200);
+                    $viewUrl = $this->generateDocumentViewUrl($docId, $page->page_number, $page->file_path, $page->source_url);
+                    
+                    $groupedDocuments[$docId]['excerpt'] = $bestExcerpt;
+                    $groupedDocuments[$docId]['excerpt_raw'] = $this->findBestExcerpt($page->content_text, $searchTerms, 300);
                     $groupedDocuments[$docId]['best_page'] = $page->page_number;
+                    $groupedDocuments[$docId]['relevance_score'] = $pageRelevance;
+                    $groupedDocuments[$docId]['view_url'] = $viewUrl;
+                    $groupedDocuments[$docId]['page_title'] = $this->cleanUtf8String($page->section_title ?? '');
+                    $groupedDocuments[$docId]['full_content_preview'] = $this->getContentPreview($page->content_text, $searchTerms, 500);
                 }
+                
+                $groupedDocuments[$docId]['pages_found']++;
             }
         }
         
-        // Сортируем по количеству найденных страниц и просмотрам
+        // Сортируем по релевантности
         usort($groupedDocuments, function($a, $b) {
-            if ($b['pages_found'] != $a['pages_found']) {
-                return $b['pages_found'] <=> $a['pages_found'];
-            }
-            return $b['view_count'] <=> $a['view_count'];
+            return $b['relevance_score'] <=> $a['relevance_score'];
         });
         
-        // Возвращаем топ-5 документов
         return array_slice($groupedDocuments, 0, 5);
         
     } catch (\Exception $e) {
-        Log::error('Error searching document pages: ' . $e->getMessage(), [
-            'trace' => $e->getTraceAsString()
-        ]);
+        Log::error('Error searching document pages: ' . $e->getMessage());
         return [];
     }
+}
+
+/**
+ * Генерирует URL для просмотра документа
+ */
+private function generateDocumentViewUrl($documentId, $pageNumber, $filePath = null, $sourceUrl = null)
+{
+    // Если есть прямой URL к файлу
+    if (!empty($sourceUrl)) {
+        // Добавляем якорь на страницу если это PDF
+        if (str_ends_with(strtolower($sourceUrl), '.pdf') && $pageNumber > 1) {
+            return $sourceUrl . '#page=' . $pageNumber;
+        }
+        return $sourceUrl;
+    }
+    
+    // Если есть локальный путь к файлу
+    if (!empty($filePath) && file_exists(public_path($filePath))) {
+        $url = asset($filePath);
+        if (str_ends_with(strtolower($url), '.pdf') && $pageNumber > 1) {
+            return $url . '#page=' . $pageNumber;
+        }
+        return $url;
+    }
+    
+    // Генерируем URL через маршрут Laravel
+    return route('documents.view', [
+        'id' => $documentId,
+        'page' => $pageNumber
+    ]);
+}
+
+/**
+ * Рассчитывает релевантность страницы
+ */
+private function calculatePageRelevance($content, $searchTerms, $sectionTitle = '')
+{
+    $score = 0;
+    $content = mb_strtolower($this->cleanUtf8String($content), 'UTF-8');
+    $sectionTitle = mb_strtolower($this->cleanUtf8String($sectionTitle), 'UTF-8');
+    
+    foreach ($searchTerms as $term) {
+        $term = mb_strtolower($this->cleanUtf8String($term), 'UTF-8');
+        
+        // Высокий балл за совпадение в заголовке раздела
+        if (!empty($sectionTitle) && str_contains($sectionTitle, $term)) {
+            $score += 0.5;
+        }
+        
+        // Средний балл за полное слово в контенте
+        if (preg_match('/\b' . preg_quote($term, '/') . '\b/', $content)) {
+            $score += 0.3;
+        }
+        // Низкий балл за частичное совпадение
+        elseif (str_contains($content, $term)) {
+            $score += 0.1;
+        }
+    }
+    
+    return min(1.0, $score);
+}
+
+/**
+ * Находит лучший отрывок с подсветкой найденных слов
+ */
+private function findBestExcerptWithHighlight($text, $searchTerms, $length = 200)
+{
+    $text = $this->cleanUtf8String($text);
+    $textLength = mb_strlen($text);
+    
+    if ($textLength <= $length) {
+        $excerpt = $text;
+    } else {
+        // Находим позицию с максимальным количеством совпадений
+        $bestPosition = 0;
+        $bestScore = 0;
+        
+        for ($i = 0; $i <= $textLength - $length; $i += 50) {
+            $chunk = mb_substr($text, $i, $length);
+            $score = 0;
+            
+            foreach ($searchTerms as $term) {
+                if (mb_stripos($chunk, $term) !== false) {
+                    $score++;
+                }
+            }
+            
+            if ($score > $bestScore) {
+                $bestScore = $score;
+                $bestPosition = $i;
+            }
+        }
+        
+        // Вырезаем отрывок
+        $start = max(0, $bestPosition - 30);
+        $excerpt = mb_substr($text, $start, $length + 60);
+        
+        if ($start > 0) {
+            $excerpt = '...' . $excerpt;
+        }
+        if ($start + $length + 60 < $textLength) {
+            $excerpt .= '...';
+        }
+    }
+    
+    // Подсвечиваем найденные слова
+    foreach ($searchTerms as $term) {
+        $excerpt = preg_replace(
+            '/(' . preg_quote($term, '/') . ')/iu',
+            '<mark class="bg-warning text-dark">$1</mark>',
+            $excerpt
+        );
+    }
+    
+    return $excerpt;
+}
+
+/**
+ * Получает превью контента с найденными словами
+ */
+private function getContentPreview($text, $searchTerms, $maxLength = 500)
+{
+    $text = $this->cleanUtf8String($text);
+    
+    // Находим первый абзац с найденными словами
+    $paragraphs = preg_split('/\n+/', $text);
+    
+    foreach ($paragraphs as $paragraph) {
+        $paragraph = trim($paragraph);
+        if (empty($paragraph) || mb_strlen($paragraph) < 50) {
+            continue;
+        }
+        
+        foreach ($searchTerms as $term) {
+            if (mb_stripos($paragraph, $term) !== false) {
+                // Обрезаем если слишком длинный
+                if (mb_strlen($paragraph) > $maxLength) {
+                    $paragraph = mb_substr($paragraph, 0, $maxLength) . '...';
+                }
+                
+                // Подсвечиваем слова
+                foreach ($searchTerms as $term) {
+                    $paragraph = preg_replace(
+                        '/(' . preg_quote($term, '/') . ')/iu',
+                        '<mark class="bg-warning text-dark">$1</mark>',
+                        $paragraph
+                    );
+                }
+                
+                return $paragraph;
+            }
+        }
+    }
+    
+    // Если не нашли, возвращаем начало текста
+    $preview = mb_substr($text, 0, $maxLength);
+    if (mb_strlen($text) > $maxLength) {
+        $preview .= '...';
+    }
+    
+    return $preview;
 }
 
 /**

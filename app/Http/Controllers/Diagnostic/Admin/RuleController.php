@@ -124,13 +124,13 @@ class RuleController extends Controller
             'rule' => $rule,
             'brands' => $brands,
             'matchedPriceItems' => $matchedPriceItems,
-            'title' => 'Правило диагностики: ' . ($rule->symptom->name ?? 'Unknown')
+            'title' => 'Код ошибки или симптом OBD: ' . ($rule->symptom->name ?? 'Unknown')
         ]);
     } catch (\Exception $e) {
         Log::error('Error showing rule', ['rule_id' => $id, 'error' => $e->getMessage()]);
         
         return redirect()->route('admin.diagnostic.rules.index')
-            ->with('error', 'Правило не найдено: ' . $e->getMessage());
+            ->with('error', 'Код ошибки или симптом OBD: ' . $e->getMessage());
     }
 }
 

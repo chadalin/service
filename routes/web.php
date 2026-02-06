@@ -797,3 +797,6 @@ Route::prefix('admin/documents')->name('admin.documents.')->group(function () {
 Route::get('/admin/documents/processing/{id}/page/{pageId}/show', 
     [DocumentProcessingController::class, 'showPageDetails'])
     ->name('admin.documents.processing.page.detal');
+
+    Route::get('/documents/{id}', [DocumentController::class, 'show'])->name('documents.show');
+Route::get('/documents/{id}/page/{page}', [DocumentController::class, 'showPage'])->name('documents.page');
