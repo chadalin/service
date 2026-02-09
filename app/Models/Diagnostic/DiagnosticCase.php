@@ -12,8 +12,11 @@ class DiagnosticCase extends Model
     protected $table = 'diagnostic_cases';
     
     // Используем UUID в качестве первичного ключа
-    protected $keyType = 'string';
-    public $incrementing = false;
+   // protected $keyType = 'string';
+    //public $incrementing = false;
+
+    public $incrementing = true; // Включаем автоинкремент
+   protected $keyType = 'int';  // Тип ключа - integer
     
     protected $fillable = [
         'id', // Добавляем id для UUID
@@ -34,20 +37,82 @@ class DiagnosticCase extends Model
         'mileage' => 'integer',
     ];
     
-    protected static function boot()
+    //protected static function boot()
+    //{
+   //     parent::boot();
+        
+   //     static::creating(function ($model) {
+    //        if (empty($model->id)) {
+     //           $model->id = (string) \Illuminate\Support\Str::uuid();
+    //        }
+    //    });
+   // }
+
+
+
+      public static function boot()
     {
         parent::boot();
         
-        static::creating(function ($model) {
-            if (empty($model->id)) {
-                $model->id = (string) \Illuminate\Support\Str::uuid();
+        static::updated(function ($case) {
+            // При изменении статуса на report_ready создаем чат
+            if ($case->isDirty('status') && $case->status === 'report_ready') {
+                // Проверяем, есть ли уже активная консультация
+                $activeConsultation = Consultation::where('case_id', $case->id)
+                    ->whereIn('status', ['pending', 'in_progress', 'scheduled'])
+                    ->first();
+                    
+                if (!$activeConsultation) {
+                    // Создаем автоматическую консультацию
+                    $consultation = Consultation::create([
+                        'case_id' => $case->id,
+                        'user_id' => $case->user_id,
+                        'type' => 'expert',
+                        'price' => $case->price_estimate ?? 3000,
+                        'status' => 'pending',
+                        'payment_status' => 'pending',
+                        'is_auto_created' => true, // флаг автосоздания
+                    ]);
+                    
+                    // Создаем системное сообщение
+                    ConsultationMessage::create([
+                        'consultation_id' => $consultation->id,
+                        'user_id' => $case->user_id,
+                        'message' => "Диагностический случай готов к консультации. Отчет сформирован автоматически.",
+                        'type' => 'system',
+                    ]);
+                    
+                    // Если есть отчет, прикрепляем его
+                    if ($case->activeReport) {
+                        ConsultationMessage::create([
+                            'consultation_id' => $consultation->id,
+                            'user_id' => $case->user_id,
+                            'message' => "Сформирован отчет по диагностике",
+                            'type' => 'report',
+                            'metadata' => [
+                                'report_id' => $case->activeReport->id,
+                                'summary' => $case->activeReport->summary,
+                            ],
+                        ]);
+                    }
+                }
             }
         });
     }
     
-    public function user(): BelongsTo
+   // public function activeReport()
+ //   {
+  //      return $this->hasOne(DiagnosticReport::class, 'case_id')->latest();
+  //  }
+    
+    //public function consultations()
+    //{
+    //    return $this->hasMany(Consultation::class, 'case_id');
+   // }
+    
+    public function user()
     {
-        return $this->belongsTo(\App\Models\User::class);
+        return $this->belongsTo(\App\Models\User::class, 'user_id');
     }
     
     public function rule(): BelongsTo
@@ -70,10 +135,10 @@ class DiagnosticCase extends Model
         return $this->hasMany(Report::class, 'case_id');
     }
     
-    public function activeReport(): HasOne
-    {
-        return $this->hasOne(Report::class, 'case_id')->latest();
-    }
+   // public function activeReport(): HasOne
+   // {
+    //    return $this->hasOne(Report::class, 'case_id')->latest();
+   // }
     
     public function consultations(): HasMany
     {

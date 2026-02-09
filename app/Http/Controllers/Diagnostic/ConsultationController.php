@@ -14,6 +14,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class ConsultationController extends Controller
 {
@@ -109,7 +110,7 @@ public function orderConsultation(Request $request, $caseId)
     
     $user = Auth::user();
     $case = DiagnosticCase::where('user_id', $user->id)
-        ->with(['brand', 'model'])
+        ->with(['brand', 'model', 'activeReport'])
         ->findOrFail($caseId);
     
     // Цены по типам
@@ -121,8 +122,18 @@ public function orderConsultation(Request $request, $caseId)
     
     $price = $prices[$request->type] ?? 500;
     
+    // Проверяем, есть ли уже активная консультация
+    $existingConsultation = Consultation::where('case_id', $case->id)
+        ->whereIn('status', ['pending', 'in_progress', 'scheduled'])
+        ->first();
+    
+    if ($existingConsultation) {
+        return redirect()->route('diagnostic.consultation.show', $existingConsultation->id)
+            ->with('info', 'Уже есть активная консультация для этого случая');
+    }
+    
     // Создаем запись о консультации
-    $consultation = \App\Models\Diagnostic\Consultation::create([
+    $consultation = Consultation::create([
         'case_id' => $case->id,
         'user_id' => $user->id,
         'expert_id' => $request->expert_id,
@@ -140,7 +151,7 @@ public function orderConsultation(Request $request, $caseId)
     
     // Создаем первое сообщение в чат консультации
     if ($request->notes) {
-       \App\Models\Diagnostic\ConsultationMessage::create([
+        ConsultationMessage::create([
             'consultation_id' => $consultation->id,
             'user_id' => $user->id,
             'message' => $request->notes,
@@ -148,11 +159,25 @@ public function orderConsultation(Request $request, $caseId)
         ]);
     } else {
         // Стандартное приветственное сообщение
-        \App\Models\ConsultationMessage::create([
+        ConsultationMessage::create([
             'consultation_id' => $consultation->id,
             'user_id' => $user->id,
             'message' => "Запрошена консультация типа: {$request->type}",
             'type' => 'system',
+        ]);
+    }
+    
+    // Если есть готовый отчет, добавляем его в чат
+    if ($case->activeReport) {
+        ConsultationMessage::create([
+            'consultation_id' => $consultation->id,
+            'user_id' => $user->id,
+            'message' => "Доступен диагностический отчет",
+            'type' => 'report_link',
+            'metadata' => [
+                'report_id' => $case->activeReport->id,
+                'has_report' => true,
+            ],
         ]);
     }
     
@@ -253,27 +278,158 @@ public function index(Request $request)
      //   return view('diagnostic.consultation.client.index', compact('consultations', 'status'));
   //  }
     
-    /**
-     * Просмотр консультации для клиента
-     */
-    public function showClient($id)
-    {
-        $consultation = Consultation::where('id', $id)
-            ->where('user_id', Auth::id())
-            ->with([
-                'case.brand',
-                'case.model',
-                'case.activeReport',
-                'expert',
-                'messages' => function($query) {
-                    $query->with('user')->latest();
-                }
-            ])
-            ->firstOrFail();
-            
-        return view('diagnostic.consultation.client.show', compact('consultation'));
+   /**
+ * Просмотр консультации для клиента
+ */
+public function showClient($id)
+{
+    \Log::info('=== SHOW CLIENT CONSULTATION ===', ['id' => $id, 'user_id' => auth()->id()]);
+    
+    // Сначала получаем консультацию без отношений
+    $consultation = Consultation::findOrFail($id);
+    
+    // Проверка прав доступа
+    $user = auth()->user();
+    $hasAccess = $user->id === $consultation->user_id || 
+                $user->id === $consultation->expert_id || 
+                $user->role === 'admin';
+    
+    if (!$hasAccess) {
+        abort(403, 'У вас нет доступа к этой консультации');
     }
     
+    // Логируем базовые данные
+    \Log::info('Consultation found:', [
+        'id' => $consultation->id,
+        'case_id' => $consultation->case_id,
+        'user_id' => $consultation->user_id,
+        'expert_id' => $consultation->expert_id,
+    ]);
+    
+    // Теперь загружаем все отношения отдельно
+    
+    // 1. Загружаем пользователя
+    $consultation->load('user:id,name,email,company_name');
+    \Log::info('User loaded:', ['user' => $consultation->user ? $consultation->user->toArray() : null]);
+    
+    // 2. Загружаем эксперта
+    if ($consultation->expert_id) {
+        $consultation->load('expert:id,name,email,expert_specialization,company_name');
+    }
+    
+    // 3. Загружаем диагностический случай
+    $case = null;
+    if ($consultation->case_id) {
+        $case = \App\Models\Diagnostic\DiagnosticCase::with([
+            'brand:id,name,name_cyrillic,logo',
+            'model:id,name,name_cyrillic',
+            'rule' => function($q) {
+                $q->with(['symptom:id,name,description']);
+            }
+        ])->find($consultation->case_id);
+        
+        if ($case) {
+            // Декодируем JSON поля
+            if (is_string($case->symptoms)) {
+                $case->symptoms = json_decode($case->symptoms, true) ?? [];
+            } elseif (is_array($case->symptoms)) {
+                // Уже массив
+            } else {
+                $case->symptoms = [];
+            }
+            
+            if (is_string($case->uploaded_files)) {
+                $case->uploaded_files = json_decode($case->uploaded_files, true) ?? [];
+            } elseif (is_array($case->uploaded_files)) {
+                // Уже массив
+            } else {
+                $case->uploaded_files = [];
+            }
+            
+            if (is_string($case->analysis_result)) {
+                $case->analysis_result = json_decode($case->analysis_result, true);
+            }
+            
+            \Log::info('Case loaded:', [
+                'case_id' => $case->id,
+                'brand_id' => $case->brand_id,
+                'model_id' => $case->model_id,
+                'rule_id' => $case->rule_id,
+                'symptoms_count' => count($case->symptoms),
+                'files_count' => count($case->uploaded_files),
+                'description' => $case->description,
+            ]);
+            
+            // Привязываем к консультации
+            $consultation->case = $case;
+        } else {
+            \Log::warning('Case not found:', ['case_id' => $consultation->case_id]);
+            $consultation->case = (object)[
+                'id' => null,
+                'brand' => null,
+                'model' => null,
+                'rule' => null,
+                'symptoms' => [],
+                'uploaded_files' => [],
+                'description' => '',
+                'year' => null,
+                'mileage' => null,
+                'engine_type' => null,
+                'vin' => null,
+                'analysis_result' => null,
+                'price_estimate' => null,
+                'time_estimate' => null,
+                'contact_name' => null,
+                'contact_phone' => null,
+                'contact_email' => null,
+            ];
+        }
+    } else {
+        \Log::warning('Consultation has no case_id');
+        $consultation->case = (object)[
+            'id' => null,
+            'brand' => null,
+            'model' => null,
+            'rule' => null,
+            'symptoms' => [],
+            'uploaded_files' => [],
+            'description' => '',
+            'year' => null,
+            'mileage' => null,
+            'engine_type' => null,
+            'vin' => null,
+            'analysis_result' => null,
+            'price_estimate' => null,
+            'time_estimate' => null,
+            'contact_name' => null,
+            'contact_phone' => null,
+            'contact_email' => null,
+        ];
+    }
+    
+    // 4. Загружаем сообщения
+    $consultation->load([
+        'messages' => function($query) {
+            $query->with('user:id,name,email')->orderBy('created_at', 'asc');
+        }
+    ]);
+    
+    \Log::info('Messages loaded:', ['count' => $consultation->messages->count()]);
+    
+    // Для отладки: смотрим что получилось
+    \Log::info('Final consultation data for view:', [
+        'consultation_id' => $consultation->id,
+        'case_exists' => isset($consultation->case->id),
+        'case_id' => $consultation->case->id ?? null,
+        'brand_exists' => isset($consultation->case->brand),
+        'model_exists' => isset($consultation->case->model),
+        'rule_exists' => isset($consultation->case->rule),
+        'symptoms' => $consultation->case->symptoms ?? [],
+        'files' => $consultation->case->uploaded_files ?? [],
+    ]);
+    
+    return view('diagnostic.consultation.client.show', compact('consultation'));
+}
     /**
      * Добавить отзыв клиента
      */
@@ -340,29 +496,182 @@ public function index(Request $request)
      * Просмотр консультации для эксперта
      */
     public function showExpert($id)
-    {
-        $expert = Auth::user();
+{
+    $expert = Auth::user();
+    
+    if (!$expert->is_expert) {
+        abort(403, 'Доступ запрещен');
+    }
+    
+    \Log::info('=== SHOW EXPERT CONSULTATION ===', ['id' => $id, 'expert_id' => $expert->id]);
+    
+    // Получаем консультацию с проверкой эксперта
+    $consultation = Consultation::where('id', $id)
+        ->where('expert_id', $expert->id)
+        ->firstOrFail();
+    
+    \Log::info('Consultation found:', [
+        'id' => $consultation->id,
+        'case_id' => $consultation->case_id,
+        'user_id' => $consultation->user_id,
+        'expert_id' => $consultation->expert_id,
+        'status' => $consultation->status,
+    ]);
+    
+    // 1. Загружаем пользователя (клиента)
+    $consultation->load('user:id,name,email,phone,company_name');
+    \Log::info('User loaded:', ['user' => $consultation->user ? $consultation->user->toArray() : null]);
+    
+    // 2. Загружаем эксперта (самого себя)
+    $consultation->expert = $expert;
+    
+    // 3. Загружаем диагностический случай
+    $case = null;
+    if ($consultation->case_id) {
+        $case = \App\Models\Diagnostic\DiagnosticCase::with([
+            'brand:id,name,name_cyrillic,logo',
+            'model:id,name,name_cyrillic',
+            'rule' => function($q) {
+                $q->with(['symptom:id,name,description']);
+            }
+        ])->find($consultation->case_id);
         
-        if (!$expert->is_expert) {
-            abort(403, 'Доступ запрещен');
+        if ($case) {
+            // Декодируем JSON поля
+            if (is_string($case->symptoms)) {
+                $case->symptoms = json_decode($case->symptoms, true) ?? [];
+            } elseif (is_array($case->symptoms)) {
+                // Уже массив
+            } else {
+                $case->symptoms = [];
+            }
+            
+            if (is_string($case->uploaded_files)) {
+                $case->uploaded_files = json_decode($case->uploaded_files, true) ?? [];
+            } elseif (is_array($case->uploaded_files)) {
+                // Уже массив
+            } else {
+                $case->uploaded_files = [];
+            }
+            
+            if (is_string($case->analysis_result)) {
+                $case->analysis_result = json_decode($case->analysis_result, true);
+            }
+            
+            // Загружаем отчеты (если есть)
+            $case->reports = \App\Models\Diagnostic\DiagnosticReport::where('case_id', $case->id)
+                ->orderBy('created_at', 'desc')
+                ->get();
+            
+            $case->activeReport = $case->reports->first();
+            
+            \Log::info('Case loaded for expert:', [
+                'case_id' => $case->id,
+                'brand' => $case->brand ? $case->brand->name : 'NULL',
+                'model' => $case->model ? $case->model->name : 'NULL',
+                'rule' => $case->rule ? 'YES' : 'NO',
+                'symptoms_count' => count($case->symptoms),
+                'files_count' => count($case->uploaded_files),
+                'reports_count' => $case->reports->count(),
+            ]);
+            
+            // Привязываем к консультации
+            $consultation->case = $case;
+        } else {
+            \Log::warning('Case not found for expert:', ['case_id' => $consultation->case_id]);
+            $consultation->case = (object)[
+                'id' => null,
+                'brand' => null,
+                'model' => null,
+                'rule' => null,
+                'symptoms' => [],
+                'uploaded_files' => [],
+                'reports' => collect(),
+                'activeReport' => null,
+                'description' => '',
+                'year' => null,
+                'mileage' => null,
+                'engine_type' => null,
+                'vin' => null,
+                'analysis_result' => null,
+                'price_estimate' => null,
+                'time_estimate' => null,
+                'contact_name' => null,
+                'contact_phone' => null,
+                'contact_email' => null,
+            ];
+        }
+    } else {
+        \Log::warning('Consultation has no case_id (expert view)');
+        $consultation->case = (object)[
+            'id' => null,
+            'brand' => null,
+            'model' => null,
+            'rule' => null,
+            'symptoms' => [],
+            'uploaded_files' => [],
+            'reports' => collect(),
+            'activeReport' => null,
+            'description' => '',
+            'year' => null,
+            'mileage' => null,
+            'engine_type' => null,
+            'vin' => null,
+            'analysis_result' => null,
+            'price_estimate' => null,
+            'time_estimate' => null,
+            'contact_name' => null,
+            'contact_phone' => null,
+            'contact_email' => null,
+        ];
+    }
+    
+    // 4. Загружаем сообщения (с сортировкой от старых к новым для правильного отображения в чате)
+    $consultation->messages = \App\Models\Diagnostic\ConsultationMessage::with('user:id,name,email')
+        ->where('consultation_id', $consultation->id)
+        ->orderBy('created_at', 'asc')
+        ->get();
+    
+    \Log::info('Messages loaded for expert:', ['count' => $consultation->messages->count()]);
+    
+    // 5. Если есть симптомы в виде ID, загружаем их объекты
+    if (isset($consultation->case->symptoms) && is_array($consultation->case->symptoms)) {
+        $symptomIds = [];
+        foreach ($consultation->case->symptoms as $symptom) {
+            if (is_array($symptom) && isset($symptom['id'])) {
+                $symptomIds[] = $symptom['id'];
+            } elseif (is_numeric($symptom)) {
+                $symptomIds[] = $symptom;
+            }
         }
         
-        $consultation = Consultation::where('id', $id)
-            ->where('expert_id', $expert->id)
-            ->with([
-                'case.brand',
-                'case.model',
-                'case.activeReport',
-                'case.symptoms',
-                'user',
-                'messages' => function($query) {
-                    $query->with('user')->latest();
-                }
-            ])
-            ->firstOrFail();
-            
-        return view('diagnostic.consultation.expert.show', compact('consultation'));
+        if (!empty($symptomIds)) {
+            $loadedSymptoms = \App\Models\Diagnostic\Symptom::whereIn('id', $symptomIds)->get();
+            $consultation->case->loadedSymptoms = $loadedSymptoms;
+            \Log::info('Symptoms loaded:', ['count' => $loadedSymptoms->count()]);
+        }
     }
+    
+    // 6. Загружаем дополнительные данные эксперта
+    $consultation->expert_notes_data = $consultation->expert_notes ? 
+        (is_string($consultation->expert_notes) ? json_decode($consultation->expert_notes, true) : $consultation->expert_notes) : 
+        null;
+    
+    // Логируем финальные данные
+    \Log::info('Final consultation data for expert view:', [
+        'consultation_id' => $consultation->id,
+        'case_exists' => isset($consultation->case->id),
+        'brand' => $consultation->case->brand ? $consultation->case->brand->name : 'NULL',
+        'model' => $consultation->case->model ? $consultation->case->model->name : 'NULL',
+        'rule' => $consultation->case->rule ? 'YES' : 'NO',
+        'symptoms_count' => count($consultation->case->symptoms),
+        'files_count' => count($consultation->case->uploaded_files),
+        'reports_count' => $consultation->case->reports->count(),
+        'messages_count' => $consultation->messages->count(),
+    ]);
+    
+    return view('diagnostic.consultation.expert.show', compact('consultation'));
+}
     
     /**
      * Начать консультацию экспертом
@@ -993,26 +1302,7 @@ public function show($id)
    /**
      * Расчет цены консультации
      */
-    private function calculatePrice($type, $ruleId = null)
-    {
-        $basePrices = [
-            'basic' => 500,
-            'premium' => 1500,
-            'expert' => 3000,
-        ];
-        
-        $price = $basePrices[$type] ?? 3000;
-        
-        // Для экспертной консультации берем цену из правила
-        if ($type === 'expert' && $ruleId) {
-            $rule = Rule::find($ruleId);
-            if ($rule && $rule->base_consultation_price > 0) {
-                $price = $rule->base_consultation_price;
-            }
-        }
-        
-        return $price;
-    }
+   
     
    /**
      * Страница подтверждения заказа
@@ -1078,104 +1368,680 @@ public function show($id)
 
     
 
-   public function store(Request $request)
+ public function store(Request $request)
 {
-     // Код отладки ДОЛЖЕН быть здесь, в начале метода
     \Log::info('=== CONSULTATION STORE START ===');
-    \Log::info('Full request data:', $request->all());
-    \Log::info('Brand ID from request:', ['value' => $request->input('brand_id'), 'type' => gettype($request->input('brand_id'))]);
     
-    // ВРЕМЕННО: посмотрим все бренды
-    $allBrands = Brand::all();
-    \Log::info('All brands:', $allBrands->map(function($b) {
-        return ['id' => $b->id, 'name' => $b->name, 'cyrillic' => $b->name_cyrillic];
-    })->toArray());
-    
-    $validated = $request->validate([
-        'consultation_type' => 'required|in:basic,premium,expert',
-        'contact_name' => 'required|string|max:255',
-        'contact_phone' => 'required|string|max:20',
-        'contact_email' => 'required|email',
-        'brand_id' => 'required', // Убираем exists проверку
-        'model_id' => 'nullable',
-        'year' => 'nullable|integer|min:1990|max:' . date('Y'),
-        'engine_type' => 'nullable|string|max:50',
-        'vin' => 'nullable|string|max:17',
-        'mileage' => 'nullable|integer|min:0|max:1000000',
-        'description' => 'nullable|string|max:2000',
-        'agreement' => 'required|accepted',
-        'rule_id' => 'required|exists:diagnostic_rules,id',
-        'symptoms' => 'nullable|array',
-        'symptoms.*' => 'exists:diagnostic_symptoms,id',
-        'symptom_description' => 'required|string|min:20|max:2000',
-        'additional_info' => 'nullable|string|max:1000',
-    ]);
-    
-    // Преобразуем строковый brand_id в числовой
-    $brandId = $this->getBrandId($validated['brand_id']);
-    if (!$brandId) {
+    try {
+        // ВАЛИДАЦИЯ
+        $validator = Validator::make($request->all(), [
+            'consultation_type' => 'required|in:basic,premium,expert',
+            'contact_name' => 'required|string|max:255',
+            'contact_phone' => 'required|string|max:20',
+            'contact_email' => 'required|email',
+            'brand_id' => 'required|string|max:50',
+            'model_id' => 'nullable',
+            'year' => 'nullable|integer|min:1990|max:' . date('Y'),
+            'engine_type' => 'nullable|string|max:50',
+            'vin' => 'nullable|string|max:17',
+            'mileage' => 'nullable|integer|min:0|max:1000000',
+            'description' => 'nullable|string|max:2000',
+            'agreement' => 'required|accepted',
+            'rule_id' => 'required|exists:diagnostic_rules,id',
+            'symptoms' => 'nullable|array',
+            'symptoms.*' => 'exists:diagnostic_symptoms,id',
+            'symptom_description' => 'required|string|min:20|max:2000',
+            'additional_info' => 'nullable|string|max:1000',
+        ]);
+        
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+                'message' => 'Пожалуйста, исправьте ошибки в форме'
+            ], 422);
+        }
+        
+        $validated = $validator->validated();
+        
+        DB::beginTransaction();
+        
+        try {
+            // ===== 1. СОЗДАЕМ ДИАГНОСТИЧЕСКИЙ СЛУЧАЙ =====
+            \Log::info('Step 1: Creating diagnostic case...');
+            
+            // Проверяем тип поля id
+            $caseIdInfo = DB::selectOne("SHOW COLUMNS FROM diagnostic_cases WHERE Field = 'id'");
+            $caseIdType = $caseIdInfo->Type ?? '';
+            $caseIsAutoIncrement = strpos($caseIdInfo->Extra ?? '', 'auto_increment') !== false;
+            
+            // Готовим данные для случая
+            $symptomsJson = !empty($validated['symptoms']) ? 
+                           json_encode($validated['symptoms']) : '[]';
+            
+            $description = $validated['description'] ?? $validated['symptom_description'];
+            
+            // Если поле id - VARCHAR, генерируем UUID
+            if (strpos($caseIdType, 'varchar') !== false || strpos($caseIdType, 'char') !== false) {
+                $caseId = (string) \Illuminate\Support\Str::uuid();
+                
+                $caseSql = "INSERT INTO diagnostic_cases (id, user_id, rule_id, brand_id, model_id, engine_type, year, vin, mileage, symptoms, description, status, step, price_estimate, contact_name, contact_phone, contact_email, contacted_at, created_at, updated_at) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                
+                $caseParams = [
+                    $caseId,
+                    Auth::id(),
+                    (int) $validated['rule_id'],
+                    $validated['brand_id'],
+                    !empty($validated['model_id']) ? $validated['model_id'] : null,
+                    $validated['engine_type'] ?? null,
+                    $validated['year'] ? (int) $validated['year'] : null,
+                    $validated['vin'] ?? null,
+                    $validated['mileage'] ? (int) $validated['mileage'] : null,
+                    $symptomsJson,
+                    $description,
+                    'consultation_pending',
+                    5,
+                    $this->calculatePrice($validated['consultation_type'], $validated['rule_id']),
+                    $validated['contact_name'],
+                    $validated['contact_phone'],
+                    $validated['contact_email'],
+                    now(),
+                ];
+                
+                DB::insert($caseSql, $caseParams);
+                \Log::info('Case created with UUID:', ['id' => $caseId]);
+                
+            } else {
+                // Если AUTO_INCREMENT
+                $caseSql = "INSERT INTO diagnostic_cases (user_id, rule_id, brand_id, model_id, engine_type, year, vin, mileage, symptoms, description, status, step, price_estimate, contact_name, contact_phone, contact_email, contacted_at, created_at, updated_at) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                
+                $caseParams = [
+                    Auth::id(),
+                    (int) $validated['rule_id'],
+                    $validated['brand_id'],
+                    !empty($validated['model_id']) ? $validated['model_id'] : null,
+                    $validated['engine_type'] ?? null,
+                    $validated['year'] ? (int) $validated['year'] : null,
+                    $validated['vin'] ?? null,
+                    $validated['mileage'] ? (int) $validated['mileage'] : null,
+                    $symptomsJson,
+                    $description,
+                    'consultation_pending',
+                    5,
+                    $this->calculatePrice($validated['consultation_type'], $validated['rule_id']),
+                    $validated['contact_name'],
+                    $validated['contact_phone'],
+                    $validated['contact_email'],
+                    now(),
+                ];
+                
+                DB::insert($caseSql, $caseParams);
+                $caseId = DB::getPdo()->lastInsertId();
+                \Log::info('Case created with auto-increment:', ['id' => $caseId]);
+            }
+            
+            // Получаем созданный случай
+            $case = DiagnosticCase::find($caseId);
+            
+            if (!$case) {
+                \Log::error('Case not found after creation:', ['id' => $caseId]);
+                
+                // Пробуем найти другим способом
+                $case = DB::table('diagnostic_cases')->where('id', $caseId)->first();
+                
+                if (!$case) {
+                    throw new \Exception("Диагностический случай не найден после создания. ID: {$caseId}");
+                }
+            }
+            
+            \Log::info('Case retrieved:', ['id' => $case->id ?? $case->id]);
+            
+            // ===== 2. ОБРАБОТКА ФАЙЛОВ =====
+            \Log::info('Step 2: Processing files...');
+            
+            if ($request->hasFile('protocol_files') || $request->hasFile('symptom_photos') || $request->hasFile('symptom_videos')) {
+                $this->processConsultationFiles($case, $request);
+            }
+            
+            // ===== 3. СОЗДАЕМ КОНСУЛЬТАЦИЮ =====
+            \Log::info('Step 3: Creating consultation...');
+            
+            $price = $this->calculatePrice($validated['consultation_type'], $validated['rule_id']);
+            
+            // Проверяем таблицу diagnostic_consultations
+            $consultIdInfo = DB::selectOne("SHOW COLUMNS FROM diagnostic_consultations WHERE Field = 'id'");
+            $consultIdType = $consultIdInfo->Type ?? '';
+            $consultIsAutoIncrement = strpos($consultIdInfo->Extra ?? '', 'auto_increment') !== false;
+            
+            $consultationId = null;
+            
+            if (strpos($consultIdType, 'varchar') !== false || strpos($consultIdType, 'char') !== false) {
+                $consultationId = (string) \Illuminate\Support\Str::uuid();
+                
+                $consultSql = "INSERT INTO diagnostic_consultations (id, case_id, user_id, expert_id, type, price, status, payment_status, scheduled_at, duration, payment_id, paid_at, expert_notes, customer_feedback, rating, created_at, updated_at) 
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                
+                $consultParams = [
+                    $consultationId,
+                    $caseId,
+                    Auth::id(),
+                    null,
+                    $validated['consultation_type'],
+                    $price,
+                    'pending',
+                    'pending',
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                ];
+                
+                DB::insert($consultSql, $consultParams);
+                
+            } else {
+                $consultSql = "INSERT INTO diagnostic_consultations (case_id, user_id, expert_id, type, price, status, payment_status, scheduled_at, duration, payment_id, paid_at, expert_notes, customer_feedback, rating, created_at, updated_at) 
+                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                
+                $consultParams = [
+                    $caseId,
+                    Auth::id(),
+                    null,
+                    $validated['consultation_type'],
+                    $price,
+                    'pending',
+                    'pending',
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                    null,
+                ];
+                
+                DB::insert($consultSql, $consultParams);
+                $consultationId = DB::getPdo()->lastInsertId();
+            }
+            
+            \Log::info('Consultation created:', ['id' => $consultationId]);
+            
+            // Получаем консультацию
+            $consultation = \App\Models\Diagnostic\Consultation::find($consultationId);
+            
+            if (!$consultation) {
+                $consultation = DB::table('diagnostic_consultations')->where('id', $consultationId)->first();
+                if (!$consultation) {
+                    throw new \Exception("Консультация не найдена после создания. ID: {$consultationId}");
+                }
+            }
+            
+            // ===== 4. СОЗДАЕМ ПЕРВОЕ СООБЩЕНИЕ =====
+            \Log::info('Step 4: Creating initial message...');
+            
+            $brandName = $this->getBrandDisplayName($validated['brand_id']);
+            $modelName = !empty($validated['model_id']) ? $validated['model_id'] : 'Не указана';
+            $initialMessage = $this->createInitialChatMessage($validated, $brandName, $modelName);
+            
+            // Проверяем таблицу consultation_messages
+            $msgIdInfo = DB::selectOne("SHOW COLUMNS FROM consultation_messages WHERE Field = 'id'");
+            $msgIdType = $msgIdInfo->Type ?? '';
+            $msgIsAutoIncrement = strpos($msgIdInfo->Extra ?? '', 'auto_increment') !== false;
+            
+            if (strpos($msgIdType, 'varchar') !== false || strpos($msgIdType, 'char') !== false) {
+                $messageId = (string) \Illuminate\Support\Str::uuid();
+                
+                $msgSql = "INSERT INTO consultation_messages (id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
+                           VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                
+                DB::insert($msgSql, [
+                    $messageId,
+                    $consultationId,
+                    Auth::id(),
+                    $initialMessage,
+                    'system',
+                    null,
+                    null,
+                ]);
+            } else {
+                $msgSql = "INSERT INTO consultation_messages (consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
+                           VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                
+                DB::insert($msgSql, [
+                    $consultationId,
+                    Auth::id(),
+                    $initialMessage,
+                    'system',
+                    null,
+                    null,
+                ]);
+            }
+            
+            // ===== 5. ДОПОЛНИТЕЛЬНАЯ ИНФОРМАЦИЯ =====
+            if (!empty($validated['additional_info'])) {
+                $additionalMsg = "📝 Дополнительная информация:\n" . $validated['additional_info'];
+                
+                if (strpos($msgIdType, 'varchar') !== false || strpos($msgIdType, 'char') !== false) {
+                    $additionalId = (string) \Illuminate\Support\Str::uuid();
+                    
+                    DB::insert("INSERT INTO consultation_messages (id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                        $additionalId,
+                        $consultationId,
+                        Auth::id(),
+                        $additionalMsg,
+                        'text',
+                        null,
+                        null,
+                    ]);
+                } else {
+                    DB::insert("INSERT INTO consultation_messages (consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
+                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                        $consultationId,
+                        Auth::id(),
+                        $additionalMsg,
+                        'text',
+                        null,
+                        null,
+                    ]);
+                }
+            }
+            
+            // ===== 6. ФАЙЛЫ =====
+            $fileCount = 0;
+            if ($request->hasFile('protocol_files')) $fileCount += count($request->file('protocol_files'));
+            if ($request->hasFile('symptom_photos')) $fileCount += count($request->file('symptom_photos'));
+            if ($request->hasFile('symptom_videos')) $fileCount += count($request->file('symptom_videos'));
+            
+            if ($fileCount > 0) {
+                $fileMsg = "📎 Прикреплено файлов: {$fileCount}";
+                
+                if (strpos($msgIdType, 'varchar') !== false || strpos($msgIdType, 'char') !== false) {
+                    $fileId = (string) \Illuminate\Support\Str::uuid();
+                    
+                    DB::insert("INSERT INTO consultation_messages (id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
+                                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                        $fileId,
+                        $consultationId,
+                        Auth::id(),
+                        $fileMsg,
+                        'system',
+                        null,
+                        null,
+                    ]);
+                } else {
+                    DB::insert("INSERT INTO consultation_messages (consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
+                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                        $consultationId,
+                        Auth::id(),
+                        $fileMsg,
+                        'system',
+                        null,
+                        null,
+                    ]);
+                }
+            }
+            
+            // ===== 7. КОММИТ =====
+            DB::commit();
+            
+            \Log::info('=== STORE SUCCESS ===', [
+                'case_id' => $caseId,
+                'consultation_id' => $consultationId
+            ]);
+            
+            return response()->json([
+                'success' => true,
+                'message' => '✅ Заявка создана успешно! Чат доступен для общения.',
+                'case_id' => $caseId,
+                'consultation_id' => $consultationId,
+                'redirect_url' => route('diagnostic.consultation.show', $consultationId)
+            ]);
+            
+        } catch (\Exception $e) {
+            DB::rollBack();
+            throw $e;
+        }
+        
+    } catch (\Exception $e) {
+        \Log::error('=== STORE ERROR ===', [
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
         return response()->json([
             'success' => false,
-            'message' => 'Марка автомобиля не найдена'
-        ], 422);
+            'message' => '❌ Ошибка при создании заявки: ' . $e->getMessage()
+        ], 500);
+    }
+}
+
+/**
+ * Получить отображаемое имя модели
+ */
+private function getModelDisplayName($modelId, $brandId)
+{
+    if (is_numeric($modelId)) {
+        $model = CarModel::find($modelId);
+        if ($model) {
+            return $model->name_cyrillic ?? $model->name;
+        }
     }
     
-    // Преобразуем строковый model_id в числовой (если передан)
-    $modelId = null;
-    if (!empty($validated['model_id'])) {
-        $modelId = $this->getModelId($validated['model_id'], $brandId);
+    // Ищем по названию для кон
+    $brand = Brand::where('name', $brandId)
+        ->orWhere('name_cyrillic', $brandId)
+        ->first();
+    
+    if ($brand) {
+        $model = CarModel::where('brand_id', $brand->id)
+            ->where(function($query) use ($modelId) {
+                $query->where('name', $modelId)
+                      ->orWhere('name_cyrillic', $modelId);
+            })
+            ->first();
+            
+        if ($model) {
+            return $model->name_cyrillic ?? $model->name;
+        }
     }
     
-    // Создание диагностического кейса
-    $case = DiagnosticCase::create([
-        'user_id' => Auth::id(),
-        'rule_id' => $validated['rule_id'],
-        'brand_id' => $brandId,
-        'model_id' => $modelId,
-        'engine_type' => $validated['engine_type'] ?? null,
-        'year' => $validated['year'] ?? null,
-        'vin' => $validated['vin'] ?? null,
-        'mileage' => $validated['mileage'] ?? null,
-        'symptoms' => $validated['symptoms'] ?? [],
-        'description' => $validated['description'] ?? $validated['symptom_description'],
-        'status' => 'draft',
-        'step' => 1,
-
-        // Добавьте эти поля в модель DiagnosticCase
-        'contact_name' => $validated['contact_name'],
-        'contact_phone' => $validated['contact_phone'],
-        'contact_email' => $validated['contact_email'],
-        'contacted_at' => now(),
+    return $modelId;
+}
 
 
-       // 'contact_name' => $validated['contact_name'],
-       // 'contact_phone' => $validated['contact_phone'],
-       // 'contact_email' => $validated['contact_email'],
-        'consultation_type' => $validated['consultation_type'],
-        'price_estimate' => $this->calculatePrice($validated['consultation_type'], $validated['rule_id']),
-    ]);
+/**
+ * Создать начальное сообщение для чата
+ */
+
+
+/**
+ * Подсчет загруженных файлов
+ */
+private function countUploadedFiles($request)
+{
+    $count = 0;
     
-    // Обработка загруженных файлов
-    if ($request->hasFile('protocol_files') || $request->hasFile('symptom_photos') || $request->hasFile('symptom_videos')) {
-        $this->processConsultationFiles($case, $request);
+    if ($request->hasFile('protocol_files')) {
+        $count += count($request->file('protocol_files'));
     }
     
-    // Сохраняем дополнительное описание симптома
-    $additionalData = [
-        'symptom_description' => $validated['symptom_description'],
-        'additional_info' => $validated['additional_info'] ?? null,
+    if ($request->hasFile('symptom_photos')) {
+        $count += count($request->file('symptom_photos'));
+    }
+    
+    if ($request->hasFile('symptom_videos')) {
+        $count += count($request->file('symptom_videos'));
+    }
+    
+    return $count;
+}
+
+/**
+ * Уведомление экспертов
+ */
+private function notifyExpertsAboutNewConsultation($consultation)
+{
+    try {
+        $experts = User::where('status', 'active')
+            ->whereIn('role', ['expert', 'admin'])
+            ->get();
+        
+        foreach ($experts as $expert) {
+            \App\Models\Notification::create([
+                'user_id' => $expert->id,
+                'type' => 'new_consultation',
+                'title' => 'Новая заявка на консультацию',
+                'message' => 'Поступила новая заявка от ' . Auth::user()->name,
+                'data' => [
+                    'consultation_id' => $consultation->id,
+                    'case_id' => $consultation->case_id,
+                    'consultation_type' => $consultation->type,
+                ],
+                'created_at' => now(),
+                'updated_at' => now(),
+            ]);
+        }
+        
+        \Log::info('Experts notified:', ['count' => $experts->count()]);
+        
+    } catch (\Exception $e) {
+        \Log::error('Error notifying experts:', ['error' => $e->getMessage()]);
+    }
+}
+
+/**
+ * Расчет цены консультации
+ */
+private function calculatePrice($type, $ruleId = null)
+{
+    $basePrices = [
+        'basic' => 500,
+        'premium' => 1500,
+        'expert' => 3000,
     ];
     
-    $case->update($additionalData);
+    $price = $basePrices[$type] ?? 3000;
     
-    // Перенаправление на страницу успеха
-    return response()->json([
-        'success' => true,
-        'message' => 'Заявка на консультацию успешно создана!',
-        'case_id' => $case->id,
-        'redirect_url' => route('consultation.success', $case->id)
-    ]);
+    // Для экспертной консультации берем цену из правила
+    if ($type === 'expert' && $ruleId) {
+        try {
+            $rule = \App\Models\Diagnostic\Rule::find($ruleId);
+            if ($rule && $rule->base_consultation_price > 0) {
+                $price = $rule->base_consultation_price;
+            }
+        } catch (\Exception $e) {
+            \Log::error('Error getting rule price:', ['error' => $e->getMessage()]);
+        }
+    }
+    
+    return $price;
 }
+
+/**
+ * Получить отображаемое имя бренда
+ */
+private function getBrandDisplayName($brandId)
+{
+    // Если brand_id похож на строку типа "LAND_ROVER", ищем в базе
+    if (!is_numeric($brandId)) {
+        $brand = Brand::where('name', $brandId)
+            ->orWhere('name_cyrillic', $brandId)
+            ->first();
+        
+        if ($brand) {
+            return $brand->name_cyrillic ?? $brand->name;
+        }
+    }
+    
+    return $brandId; // Возвращаем как есть, если не нашли
+}
+
+/**
+ * Создать начальное сообщение для чата
+ */
+private function createInitialChatMessage($data, $brandName, $modelName)
+{
+    $message = "🆕 НОВАЯ ЗАЯВКА НА КОНСУЛЬТАЦИЮ\n";
+    $message .= str_repeat("=", 40) . "\n\n";
+    
+    $message .= "📋 ТИП КОНСУЛЬТАЦИИ: " . strtoupper($data['consultation_type']) . "\n";
+    $message .= "⏰ ДАТА СОЗДАНИЯ: " . now()->format('d.m.Y H:i') . "\n\n";
+    
+    $message .= "👤 КОНТАКТНАЯ ИНФОРМАЦИЯ:\n";
+    $message .= "• Имя: " . $data['contact_name'] . "\n";
+    $message .= "• Телефон: " . $data['contact_phone'] . "\n";
+    $message .= "• Email: " . $data['contact_email'] . "\n\n";
+    
+    $message .= "🚗 АВТОМОБИЛЬ:\n";
+    $message .= "• Марка: " . $brandName . "\n";
+    if ($modelName) {
+        $message .= "• Модель: " . $modelName . "\n";
+    }
+    if (!empty($data['year'])) {
+        $message .= "• Год выпуска: " . $data['year'] . "\n";
+    }
+    if (!empty($data['mileage'])) {
+        $message .= "• Пробег: " . number_format($data['mileage'], 0, '', ' ') . " км\n";
+    }
+    if (!empty($data['engine_type'])) {
+        $message .= "• Тип двигателя: " . $data['engine_type'] . "\n";
+    }
+    if (!empty($data['vin'])) {
+        $message .= "• VIN: " . $data['vin'] . "\n";
+    }
+    
+    $message .= "\n⚠️ ОПИСАНИЕ ПРОБЛЕМЫ:\n";
+    $message .= $data['symptom_description'] . "\n";
+    
+    if (!empty($data['description'])) {
+        $message .= "\n📄 ДОПОЛНИТЕЛЬНОЕ ОПИСАНИЕ:\n";
+        $message .= $data['description'] . "\n";
+    }
+    
+    $message .= "\n" . str_repeat("=", 40) . "\n";
+    $message .= "Заявка создана через форму на сайте";
+    
+    return $message;
+}
+
+/**
+ * Экстренный метод для проверки и исправления таблицы
+ */
+private function emergencyFixTable()
+{
+    try {
+        \Log::info('=== EMERGENCY TABLE CHECK ===');
+        
+        // Проверяем структуру таблицы
+        $tableInfo = DB::select("SHOW COLUMNS FROM diagnostic_cases WHERE Field = 'id'");
+        
+        if (empty($tableInfo)) {
+            \Log::error('Table diagnostic_cases or id column not found!');
+            return false;
+        }
+        
+        $idColumn = $tableInfo[0];
+        \Log::info('ID column info:', (array) $idColumn);
+        
+        // Если нет значения по умолчанию и не автоинкремент
+        if ($idColumn->Default === null && $idColumn->Extra !== 'auto_increment') {
+            \Log::warning('ID column has no default value and is not auto-increment!');
+            
+            // Временное решение: делаем автоинкремент
+            DB::statement("ALTER TABLE diagnostic_cases MODIFY COLUMN id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT");
+            \Log::info('Table fixed: added AUTO_INCREMENT to id column');
+            
+            return true;
+        }
+        
+        return true;
+        
+    } catch (\Exception $e) {
+        \Log::error('Emergency fix failed:', ['error' => $e->getMessage()]);
+        return false;
+    }
+}
+
+/**
+ * Добавить уведомление о файлах
+ */
+private function addFileNotification($request, $consultation)
+{
+    $totalFiles = 0;
+    $fileTypes = [];
+    
+    if ($request->hasFile('protocol_files')) {
+        $totalFiles += count($request->file('protocol_files'));
+        $fileTypes[] = 'протоколы диагностики';
+    }
+    if ($request->hasFile('symptom_photos')) {
+        $totalFiles += count($request->file('symptom_photos'));
+        $fileTypes[] = 'фотографии';
+    }
+    if ($request->hasFile('symptom_videos')) {
+        $totalFiles += count($request->file('symptom_videos'));
+        $fileTypes[] = 'видео';
+    }
+    
+    if ($totalFiles > 0) {
+        \App\Models\Diagnostic\ConsultationMessage::create([
+            'consultation_id' => $consultation->id,
+            'user_id' => Auth::id(),
+            'message' => "📎 Прикреплено файлов: " . $totalFiles . 
+                        " (" . implode(', ', $fileTypes) . ")",
+            'type' => 'system',
+        ]);
+    }
+}
+
+/**
+ * Уведомить экспертов о новой консультации
+ */
+
+
+/**
+ * Обработка файлов консультации
+ */
+private function processConsultationFiles($consultationOrder, $request)
+{
+    $uploadedFiles = [];
+    
+    // Обработка протоколов
+    if ($request->hasFile('protocol_files')) {
+        foreach ($request->file('protocol_files') as $file) {
+            $path = $file->store('consultations/' . $consultationOrder->id . '/protocols', 'public');
+            $uploadedFiles[] = [
+                'type' => 'protocol',
+                'name' => $file->getClientOriginalName(),
+                'path' => $path,
+                'mime_type' => $file->getMimeType(),
+                'size' => $file->getSize(),
+            ];
+        }
+    }
+    
+    // Обработка фото
+    if ($request->hasFile('symptom_photos')) {
+        foreach ($request->file('symptom_photos') as $file) {
+            $path = $file->store('consultations/' . $consultationOrder->id . '/photos', 'public');
+            $uploadedFiles[] = [
+                'type' => 'photo',
+                'name' => $file->getClientOriginalName(),
+                'path' => $path,
+                'mime_type' => $file->getMimeType(),
+                'size' => $file->getSize(),
+            ];
+        }
+    }
+    
+    // Обработка видео
+    if ($request->hasFile('symptom_videos')) {
+        foreach ($request->file('symptom_videos') as $file) {
+            $path = $file->store('consultations/' . $consultationOrder->id . '/videos', 'public');
+            $uploadedFiles[] = [
+                'type' => 'video',
+                'name' => $file->getClientOriginalName(),
+                'path' => $path,
+                'mime_type' => $file->getMimeType(),
+                'size' => $file->getSize(),
+            ];
+        }
+    }
+    
+    // Сохраняем в additional_data или отдельном поле
+    if (!empty($uploadedFiles)) {
+        $consultationOrder->update([
+            'uploaded_files' => json_encode($uploadedFiles),
+        ]);
+    }
+}
+
+
 
 private function getBrandId($brandIdentifier)
 {
@@ -1210,83 +2076,69 @@ private function getModelId($modelIdentifier, $brandId)
 
 
     
-    private function processConsultationFiles($consultationOrder, $request)
-    {
-        $uploadedFiles = [];
-        
-        // Обработка протоколов
-        if ($request->hasFile('protocol_files')) {
-            foreach ($request->file('protocol_files') as $file) {
-                $path = $file->store('consultations/' . $consultationOrder->id . '/protocols', 'public');
-                $uploadedFiles[] = [
-                    'type' => 'protocol',
-                    'name' => $file->getClientOriginalName(),
-                    'path' => $path,
-                    'mime_type' => $file->getMimeType(),
-                    'size' => $file->getSize(),
-                ];
-            }
-        }
-        
-        // Обработка фото
-        if ($request->hasFile('symptom_photos')) {
-            foreach ($request->file('symptom_photos') as $file) {
-                $path = $file->store('consultations/' . $consultationOrder->id . '/photos', 'public');
-                $uploadedFiles[] = [
-                    'type' => 'photo',
-                    'name' => $file->getClientOriginalName(),
-                    'path' => $path,
-                    'mime_type' => $file->getMimeType(),
-                    'size' => $file->getSize(),
-                ];
-            }
-        }
-        
-        // Обработка видео
-        if ($request->hasFile('symptom_videos')) {
-            foreach ($request->file('symptom_videos') as $file) {
-                $path = $file->store('consultations/' . $consultationOrder->id . '/videos', 'public');
-                $uploadedFiles[] = [
-                    'type' => 'video',
-                    'name' => $file->getClientOriginalName(),
-                    'path' => $path,
-                    'mime_type' => $file->getMimeType(),
-                    'size' => $file->getSize(),
-                ];
-            }
-        }
-        
-        // Сохраняем описание симптома и дополнительные файлы
-        if ($request->has('symptom_description')) {
-            $consultationOrder->update([
-                'symptom_description' => $request->input('symptom_description'),
-                'additional_info' => $request->input('additional_info'),
-                'uploaded_files' => $uploadedFiles,
-            ]);
-        }
+   
+
+  public function readyForConsultation($caseId)
+{
+    $user = Auth::user();
+    
+    $case = DiagnosticCase::where('user_id', $user->id)
+        ->with(['brand', 'model', 'activeReport'])
+        ->findOrFail($caseId);
+    
+    // Проверяем, что статус позволяет начать консультацию
+    if ($case->status !== 'report_ready') {
+        return back()->with('error', 'Сначала должен быть готов отчет');
     }
     
-    public function success($id = null)
-{
-    if ($id === 'new' || $id === null) {
-        // Для нового заказа без ID
-        return view('consultation.success', [
-            'case' => null,
-            'isNew' => true
+    // Проверяем, есть ли уже активная консультация
+    $existingConsultation = Consultation::where('case_id', $case->id)
+        ->whereIn('status', ['pending', 'in_progress', 'scheduled'])
+        ->first();
+    
+    if ($existingConsultation) {
+        return redirect()->route('diagnostic.consultation.show', $existingConsultation->id)
+            ->with('info', 'Консультация уже создана');
+    }
+    
+    // Создаем консультацию
+    $consultation = Consultation::create([
+        'case_id' => $case->id,
+        'user_id' => $user->id,
+        'type' => 'expert',
+        'price' => $case->price_estimate ?? 3000,
+        'status' => 'pending',
+        'payment_status' => 'pending',
+        'is_auto_created' => false,
+    ]);
+    
+    // Обновляем статус случая
+    $case->update(['status' => 'consultation_pending']);
+    
+    // Создаем сообщения в чате
+    ConsultationMessage::create([
+        'consultation_id' => $consultation->id,
+        'user_id' => $user->id,
+        'message' => "Диагностика завершена. Готов к консультации по результатам отчета.",
+        'type' => 'system',
+    ]);
+    
+    // Добавляем ссылку на отчет если есть
+    if ($case->activeReport) {
+        ConsultationMessage::create([
+            'consultation_id' => $consultation->id,
+            'user_id' => $user->id,
+            'message' => "Доступен диагностический отчет",
+            'type' => 'report_link',
+            'metadata' => [
+                'report_id' => $case->activeReport->id,
+                'has_report' => true,
+            ],
         ]);
     }
     
-    $case = DiagnosticCase::findOrFail($id);
-    
-    // Проверка прав доступа
-    if ($case->user_id !== Auth::id()) {
-        abort(403, 'Доступ запрещён');
-    }
-    
-    return view('consultation.success', [
-        'case' => $case,
-        'isNew' => false
-    ]);
+    return redirect()->route('diagnostic.consultation.show', $consultation->id)
+        ->with('success', 'Чат консультации создан! Можете начать общение с экспертом.');
 }
     
 }

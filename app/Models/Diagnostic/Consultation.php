@@ -11,6 +11,9 @@ use Illuminate\Database\Eloquent\Relations\HasOne;
 class Consultation extends Model
 {
     protected $table = 'diagnostic_consultations';
+
+     public $incrementing = true;
+    protected $keyType = 'int';
     
     protected $fillable = [
         'case_id', 'user_id', 'expert_id',

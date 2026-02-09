@@ -8,6 +8,9 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 class ConsultationMessage extends Model
 {
     protected $table = 'consultation_messages';
+
+      public $incrementing = true;
+    protected $keyType = 'int';
     
     protected $fillable = [
         'consultation_id',

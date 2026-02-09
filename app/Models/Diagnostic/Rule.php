@@ -26,19 +26,19 @@ class Rule extends Model
         'is_active' => 'boolean',
     ];
     
-    public function symptom(): BelongsTo
+    public function symptom()
     {
-        return $this->belongsTo(Symptom::class);
+        return $this->belongsTo(Symptom::class, 'symptom_id');
     }
     
-    public function brand(): BelongsTo
+    public function brand()
     {
-        return $this->belongsTo(Brand::class);
+        return $this->belongsTo(\App\Models\Brand::class, 'brand_id');
     }
     
-    public function model(): BelongsTo
+    public function model()
     {
-        return $this->belongsTo(CarModel::class);
+        return $this->belongsTo(\App\Models\CarModel::class, 'model_id');
     }
     
     // Поиск правил по условиям
