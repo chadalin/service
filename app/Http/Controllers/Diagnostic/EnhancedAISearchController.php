@@ -2,6 +2,8 @@
 
 namespace App\Http\Controllers\Diagnostic;
 
+
+use App\Services\DeepSeekAIService;
 use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Diagnostic\Symptom;
@@ -19,6 +21,15 @@ use Illuminate\Support\Str;
 
 class EnhancedAISearchController extends Controller
 {
+
+  protected $deepSeekService;
+    
+    public function __construct(DeepSeekAIService $deepSeekService)
+    {
+        $this->deepSeekService = $deepSeekService;
+    }
+
+
     /**
      * Показать страницу AI поиска
      */
@@ -71,6 +82,10 @@ class EnhancedAISearchController extends Controller
         $modelId = $request->input('model_id');
         $searchType = $request->input('search_type', 'advanced');
 
+        // Преобразуем пустые строки в null
+        $brandId = $brandId !== '' && $brandId !== null ? (int)$brandId : null;
+        $modelId = $modelId !== '' && $modelId !== null ? (int)$modelId : null;
+
         Log::info('Enhanced AI Search', [
             'query' => $query,
             'brand_id' => $brandId,
@@ -79,12 +94,12 @@ class EnhancedAISearchController extends Controller
         ]);
 
         try {
-            // 1. Приоритетный поиск симптомов
-            $exactSymptoms = $this->searchExactSymptoms($query, $brandId, $modelId);
+            // 1. Приоритетный поиск симптомов с фильтрацией по бренду
+            $exactSymptoms = $this->searchExactSymptoms($query, $brandId);
             
             // 2. Поиск по ключевым словам если точных нет
             if (empty($exactSymptoms)) {
-                $keywordSymptoms = $this->searchByKeywords($query, $brandId, $modelId);
+                $keywordSymptoms = $this->searchByKeywords($query, $brandId);
             } else {
                 $keywordSymptoms = [];
             }
@@ -94,11 +109,11 @@ class EnhancedAISearchController extends Controller
             
             if (empty($allSymptoms)) {
                 // Если ничего не найдено, ищем похожие
-                $allSymptoms = $this->searchSimilarSymptoms($query, $brandId, $modelId);
+                $allSymptoms = $this->searchSimilarSymptoms($query, $brandId);
             }
             
             // 4. Группируем симптомы с правилами
-            $groupedResults = $this->groupSymptomsWithRules($allSymptoms);
+            $groupedResults = $this->groupSymptomsWithRules($allSymptoms, $brandId);
             
             // 5. Ищем документы только если есть симптомы
             $documents = [];
@@ -106,12 +121,30 @@ class EnhancedAISearchController extends Controller
             
             if (!empty($groupedResults)) {
                 $topSymptoms = array_slice($groupedResults, 0, 3);
-                $documents = $this->searchDocumentsForSymptoms($topSymptoms, $brandId, $modelId);
+                $documents = $this->searchDocumentsForSymptoms($topSymptoms, $brandId);
                 $parts = $this->searchPartsForSymptoms($topSymptoms, $brandId);
             }
             
             // 6. Генерируем AI ответ
-            $aiResponse = $this->generateStructuredAIResponse($query, $groupedResults, $parts, $documents, $brandId, $modelId);
+             // 6. Генерируем AI ответ через DeepSeek
+            $aiAnalysis = $this->deepSeekService->analyzeDiagnosticProblem(
+                $query,
+                $groupedResults,
+                $parts,
+                $documents,
+                $brandId,
+                $modelId
+            );
+            
+            // 7. Объединяем AI анализ с существующим ответом
+            $aiResponse = $this->generateEnhancedAIResponse($aiAnalysis, $query, $groupedResults);
+            
+            // 8. Добавляем расширенные рекомендации для топ-симптомов
+            $enhancedSymptoms = [];
+            if (!empty($groupedResults) && count($groupedResults) > 0) {
+                $topSymptom = $groupedResults[0];
+                $enhancedSymptoms = $this->deepSeekService->findAdditionalCauses($topSymptom, $query);
+            }
             
             $executionTime = round((microtime(true) - $startTime) * 1000, 2);
 
@@ -128,6 +161,8 @@ class EnhancedAISearchController extends Controller
                 'parts' => $cleanedParts,
                 'documents' => $cleanedDocuments,
                 'ai_response' => $cleanedAiResponse,
+                  'ai_analysis' => $aiAnalysis, // Полный AI анализ
+                'enhanced_symptoms' => $enhancedSymptoms, // Дополнительные рекомендации
                 'search_type' => $searchType,
                 'execution_time' => $executionTime,
                 'stats' => [
@@ -192,28 +227,33 @@ class EnhancedAISearchController extends Controller
     }
 
     /**
-     * Поиск точных совпадений симптомов
+     * Поиск точных совпадений симптомов с фильтрацией по бренду
      */
-    private function searchExactSymptoms($query, $brandId = null, $modelId = null)
+    private function searchExactSymptoms($query, $brandId = null)
     {
         // Нормализуем запрос для поиска
         $searchQuery = $this->normalizeSearchQuery($query);
         
-        $symptomsQuery = Symptom::where('is_active', true)
-            ->with(['rules' => function($q) use ($brandId, $modelId) {
-                $q->where('is_active', true)
-                  ->with(['brand', 'model'])
-                  ->orderBy('brand_id')
-                  ->orderBy('model_id');
-                
-                if ($brandId) {
-                    $q->where('brand_id', $brandId);
-                }
-                
-                if ($modelId) {
-                    $q->where('model_id', $modelId);
-                }
-            }]);
+        // Если выбран бренд, ищем через правила этого бренда
+        if ($brandId) {
+            return $this->searchExactSymptomsByBrand($searchQuery, $brandId);
+        }
+        
+        // Если бренд не выбран, ищем общие симптомы
+        return $this->searchExactGeneralSymptoms($searchQuery);
+    }
+
+    /**
+     * Поиск точных симптомов для конкретного бренда
+     */
+    private function searchExactSymptomsByBrand($searchQuery, $brandId)
+    {
+        // Ищем правила для выбранного бренда
+        $rulesQuery = Rule::where('is_active', true)
+            ->where('brand_id', $brandId)
+            ->with(['symptom' => function($q) {
+                $q->where('is_active', true);
+            }, 'brand', 'model']);
         
         // Разбиваем запрос на слова для поиска
         $words = $this->extractSearchWords($searchQuery);
@@ -221,6 +261,71 @@ class EnhancedAISearchController extends Controller
         if (empty($words)) {
             return [];
         }
+        
+        // Ищем в симптомах связанных с правилами
+        $rulesQuery->whereHas('symptom', function($q) use ($words) {
+            $q->where(function($subQ) use ($words) {
+                foreach ($words as $word) {
+                    if (mb_strlen($word) > 2) {
+                        $subQ->orWhere('name', 'like', "%{$word}%")
+                             ->orWhere('description', 'like', "%{$word}%");
+                    }
+                }
+            });
+        });
+        
+        $rules = $rulesQuery->get();
+        
+        if ($rules->isEmpty()) {
+            return [];
+        }
+        
+        // Собираем уникальные симптомы из найденных правил
+        $scoredSymptoms = [];
+        $processedSymptomIds = [];
+        
+        foreach ($rules as $rule) {
+            if ($rule->symptom && !in_array($rule->symptom->id, $processedSymptomIds)) {
+                $score = $this->calculateExactMatchScore($rule->symptom->name, $searchQuery);
+                
+                if ($score > 0.3) {
+                    $scoredSymptoms[] = [
+                        'symptom' => $rule->symptom,
+                        'score' => $score,
+                        'match_type' => 'exact',
+                        'rule' => $rule
+                    ];
+                    $processedSymptomIds[] = $rule->symptom->id;
+                }
+            }
+        }
+        
+        // Сортируем по убыванию точности
+        usort($scoredSymptoms, function($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        
+        return array_slice($scoredSymptoms, 0, 5);
+    }
+
+    /**
+     * Поиск общих точных симптомов (без фильтра по бренду)
+     */
+    private function searchExactGeneralSymptoms($searchQuery)
+    {
+        $words = $this->extractSearchWords($searchQuery);
+        
+        if (empty($words)) {
+            return [];
+        }
+        
+        $symptomsQuery = Symptom::where('is_active', true)
+            ->with(['rules' => function($q) {
+                $q->where('is_active', true)
+                  ->with(['brand', 'model'])
+                  ->orderBy('brand_id')
+                  ->orderBy('model_id');
+            }]);
         
         $symptomsQuery->where(function($q) use ($words) {
             foreach ($words as $word) {
@@ -237,10 +342,14 @@ class EnhancedAISearchController extends Controller
         foreach ($symptoms as $symptom) {
             $score = $this->calculateExactMatchScore($symptom->name, $searchQuery);
             if ($score > 0.3) {
+                // Находим первое правило для симптома
+                $rule = $symptom->rules->first();
+                
                 $scoredSymptoms[] = [
                     'symptom' => $symptom,
                     'score' => $score,
-                    'match_type' => 'exact'
+                    'match_type' => 'exact',
+                    'rule' => $rule
                 ];
             }
         }
@@ -254,9 +363,9 @@ class EnhancedAISearchController extends Controller
     }
 
     /**
-     * Поиск по ключевым словам
+     * Поиск по ключевым словам с фильтрацией по бренду
      */
-    private function searchByKeywords($query, $brandId = null, $modelId = null)
+    private function searchByKeywords($query, $brandId = null)
     {
         $keywords = $this->extractRelevantKeywords($query);
         
@@ -264,20 +373,80 @@ class EnhancedAISearchController extends Controller
             return [];
         }
         
+        // Если выбран бренд, ищем через правила этого бренда
+        if ($brandId) {
+            return $this->searchByKeywordsByBrand($query, $brandId, $keywords);
+        }
+        
+        // Если бренд не выбран, ищем общие симптомы
+        return $this->searchByKeywordsGeneral($query, $keywords);
+    }
+
+    /**
+     * Поиск по ключевым словам для конкретного бренда
+     */
+    private function searchByKeywordsByBrand($query, $brandId, $keywords)
+    {
+        // Ищем правила для выбранного бренда
+        $rulesQuery = Rule::where('is_active', true)
+            ->where('brand_id', $brandId)
+            ->with(['symptom' => function($q) {
+                $q->where('is_active', true);
+            }, 'brand', 'model']);
+        
+        $rulesQuery->whereHas('symptom', function($q) use ($keywords) {
+            $q->where(function($subQ) use ($keywords) {
+                foreach ($keywords as $keyword) {
+                    if (mb_strlen($keyword) > 2) {
+                        $subQ->orWhere('name', 'like', "%{$keyword}%")
+                             ->orWhere('description', 'like', "%{$keyword}%");
+                    }
+                }
+            });
+        });
+        
+        $rules = $rulesQuery->get();
+        
+        if ($rules->isEmpty()) {
+            return [];
+        }
+        
+        $scoredSymptoms = [];
+        $processedSymptomIds = [];
+        
+        foreach ($rules as $rule) {
+            if ($rule->symptom && !in_array($rule->symptom->id, $processedSymptomIds)) {
+                $score = $this->calculateKeywordScore($rule->symptom, $keywords);
+                if ($score > 0.2) {
+                    $scoredSymptoms[] = [
+                        'symptom' => $rule->symptom,
+                        'score' => $score,
+                        'match_type' => 'keyword',
+                        'rule' => $rule
+                    ];
+                    $processedSymptomIds[] = $rule->symptom->id;
+                }
+            }
+        }
+        
+        usort($scoredSymptoms, function($a, $b) {
+            return $b['score'] <=> $a['score'];
+        });
+        
+        return array_slice($scoredSymptoms, 0, 5);
+    }
+
+    /**
+     * Поиск по ключевым словам общих симптомов
+     */
+    private function searchByKeywordsGeneral($query, $keywords)
+    {
         $symptomsQuery = Symptom::where('is_active', true)
-            ->with(['rules' => function($q) use ($brandId, $modelId) {
+            ->with(['rules' => function($q) {
                 $q->where('is_active', true)
                   ->with(['brand', 'model'])
                   ->orderBy('brand_id')
                   ->orderBy('model_id');
-                
-                if ($brandId) {
-                    $q->where('brand_id', $brandId);
-                }
-                
-                if ($modelId) {
-                    $q->where('model_id', $modelId);
-                }
             }]);
         
         $symptomsQuery->where(function($q) use ($keywords) {
@@ -295,10 +464,14 @@ class EnhancedAISearchController extends Controller
         foreach ($symptoms as $symptom) {
             $score = $this->calculateKeywordScore($symptom, $keywords);
             if ($score > 0.2) {
+                // Находим первое правило для симптома
+                $rule = $symptom->rules->first();
+                
                 $scoredSymptoms[] = [
                     'symptom' => $symptom,
                     'score' => $score,
-                    'match_type' => 'keyword'
+                    'match_type' => 'keyword',
+                    'rule' => $rule
                 ];
             }
         }
@@ -311,9 +484,9 @@ class EnhancedAISearchController extends Controller
     }
 
     /**
-     * Поиск похожих симптомов
+     * Поиск похожих симптомов с фильтрацией по бренду
      */
-    private function searchSimilarSymptoms($query, $brandId = null, $modelId = null)
+    private function searchSimilarSymptoms($query, $brandId = null)
     {
         $keywords = $this->extractRelevantKeywords($query);
         
@@ -321,40 +494,89 @@ class EnhancedAISearchController extends Controller
             return [];
         }
         
+        // Если выбран бренд, ищем через правила этого бренда
+        if ($brandId) {
+            return $this->searchSimilarSymptomsByBrand($brandId, $keywords);
+        }
+        
+        // Если бренд не выбран, ищем общие симптомы
+        return $this->searchSimilarGeneralSymptoms($keywords);
+    }
+
+    /**
+     * Поиск похожих симптомов для конкретного бренда
+     */
+    private function searchSimilarSymptomsByBrand($brandId, $keywords)
+    {
+        // Ищем правила для выбранного бренда с часто встречающимися симптомами
+        $rulesQuery = Rule::where('is_active', true)
+            ->where('brand_id', $brandId)
+            ->with(['symptom' => function($q) {
+                $q->where('is_active', true)
+                  ->where('frequency', '>', 0)
+                  ->orderBy('frequency', 'desc');
+            }, 'brand', 'model'])
+            ->limit(10);
+        
+        $rules = $rulesQuery->get();
+        
+        $scoredSymptoms = [];
+        $processedSymptomIds = [];
+        
+        foreach ($rules as $rule) {
+            if ($rule->symptom && !in_array($rule->symptom->id, $processedSymptomIds)) {
+                $score = $this->calculateKeywordScore($rule->symptom, $keywords) * 0.5;
+                $scoredSymptoms[] = [
+                    'symptom' => $rule->symptom,
+                    'score' => max(0.1, $score),
+                    'match_type' => 'similar',
+                    'rule' => $rule
+                ];
+                $processedSymptomIds[] = $rule->symptom->id;
+            }
+        }
+        
+        return $scoredSymptoms;
+    }
+
+    /**
+     * Поиск похожих общих симптомов
+     */
+    private function searchSimilarGeneralSymptoms($keywords)
+    {
         $symptomsQuery = Symptom::where('is_active', true)
-            ->with(['rules' => function($q) use ($brandId, $modelId) {
+            ->where('frequency', '>', 0)
+            ->with(['rules' => function($q) {
                 $q->where('is_active', true)
                   ->with(['brand', 'model'])
                   ->orderBy('brand_id')
                   ->orderBy('model_id');
-                
-                if ($brandId) {
-                    $q->where('brand_id', $brandId);
-                }
-                
-                if ($modelId) {
-                    $q->where('model_id', $modelId);
-                }
             }])
-            ->where('frequency', '>', 0)
-            ->orderBy('frequency', 'desc');
+            ->orderBy('frequency', 'desc')
+            ->limit(10);
         
-        $symptoms = $symptomsQuery->limit(10)->get();
+        $symptoms = $symptomsQuery->get();
         
-        return $symptoms->map(function($symptom) use ($keywords) {
-            $score = $this->calculateKeywordScore($symptom, $keywords) * 0.5; // Понижаем вес
-            return [
+        $scoredSymptoms = [];
+        foreach ($symptoms as $symptom) {
+            $score = $this->calculateKeywordScore($symptom, $keywords) * 0.5;
+            $rule = $symptom->rules->first();
+            
+            $scoredSymptoms[] = [
                 'symptom' => $symptom,
                 'score' => max(0.1, $score),
-                'match_type' => 'similar'
+                'match_type' => 'similar',
+                'rule' => $rule
             ];
-        })->toArray();
+        }
+        
+        return $scoredSymptoms;
     }
 
     /**
-     * Группировка симптомов с правилами
+     * Группировка симптомов с правилами с учетом фильтра по бренду
      */
-    private function groupSymptomsWithRules($symptoms)
+    private function groupSymptomsWithRules($symptoms, $brandId = null)
     {
         $groupedResults = [];
         
@@ -362,9 +584,34 @@ class EnhancedAISearchController extends Controller
             $symptom = $item['symptom'];
             $score = $item['score'];
             $matchType = $item['match_type'];
+            $rule = $item['rule'] ?? null;
             
-            if ($symptom->rules->isEmpty()) {
-                // Симптом без правил
+            // Если есть правило и оно соответствует выбранному бренду (или бренд не выбран)
+            if ($rule && (!$brandId || $rule->brand_id == $brandId)) {
+                $groupedResults[] = [
+                    'type' => 'rule',
+                    'id' => $rule->id,
+                    'symptom_id' => $symptom->id,
+                    'title' => $this->cleanUtf8String($symptom->name),
+                    'description' => $this->cleanUtf8String($symptom->description ?? ''),
+                    'brand' => $this->cleanUtf8String($rule->brand->name ?? ''),
+                    'brand_id' => $rule->brand_id,
+                    'model' => $this->cleanUtf8String($rule->model->name ?? ''),
+                    'model_id' => $rule->model_id,
+                    'diagnostic_steps' => $this->cleanArrayForJson($rule->diagnostic_steps ?? []),
+                    'possible_causes' => $this->cleanArrayForJson($rule->possible_causes ?? []),
+                    'required_data' => $this->cleanArrayForJson($rule->required_data ?? []),
+                    'complexity_level' => $rule->complexity_level ?? 1,
+                    'estimated_time' => $rule->estimated_time ?? 60,
+                    'consultation_price' => $rule->base_consultation_price ?? 3000,
+                    'relevance_score' => $score,
+                    'match_type' => $matchType,
+                    'has_rules' => true,
+                    'related_systems' => $symptom->related_systems,
+                    'frequency' => $symptom->frequency ?? 0,
+                ];
+            } else {
+                // Симптом без конкретного правила или правило не подходит по бренду
                 $groupedResults[] = [
                     'type' => 'symptom',
                     'id' => $symptom->id,
@@ -376,32 +623,6 @@ class EnhancedAISearchController extends Controller
                     'related_systems' => $symptom->related_systems,
                     'frequency' => $symptom->frequency ?? 0,
                 ];
-            } else {
-                // Группируем правила по симптомам
-                foreach ($symptom->rules as $rule) {
-                    $groupedResults[] = [
-                        'type' => 'rule',
-                        'id' => $rule->id,
-                        'symptom_id' => $symptom->id,
-                        'title' => $this->cleanUtf8String($symptom->name),
-                        'description' => $this->cleanUtf8String($symptom->description ?? ''),
-                        'brand' => $this->cleanUtf8String($rule->brand->name ?? ''),
-                        'brand_id' => $rule->brand_id,
-                        'model' => $this->cleanUtf8String($rule->model->name ?? ''),
-                        'model_id' => $rule->model_id,
-                        'diagnostic_steps' => $this->cleanArrayForJson($rule->diagnostic_steps ?? []),
-                        'possible_causes' => $this->cleanArrayForJson($rule->possible_causes ?? []),
-                        'required_data' => $this->cleanArrayForJson($rule->required_data ?? []),
-                        'complexity_level' => $rule->complexity_level ?? 1,
-                        'estimated_time' => $rule->estimated_time ?? 60,
-                        'consultation_price' => $rule->base_consultation_price ?? 3000,
-                        'relevance_score' => $score,
-                        'match_type' => $matchType,
-                        'has_rules' => true,
-                        'related_systems' => $symptom->related_systems,
-                        'frequency' => $symptom->frequency ?? 0,
-                    ];
-                }
             }
         }
         
@@ -422,248 +643,356 @@ class EnhancedAISearchController extends Controller
     }
 
     /**
-     * Поиск документов для симптомов
+     * Поиск документов для симптомов с фильтрацией по бренду
      */
-   private function searchDocumentsForSymptoms($symptoms, $brandId = null, $modelId = null)
-{
-
-
-Log::debug('=== DOCUMENT SEARCH START ===');
-    Log::debug('Symptoms count:', ['count' => count($symptoms)]);
-    Log::debug('Brand ID:', ['brand_id' => $brandId]);
-    Log::debug('Model ID:', ['model_id' => $modelId]);
-    if (empty($symptoms) || !Schema::hasTable('document_pages') || !Schema::hasTable('documents')) {
-        return [];
-    }
-    
-    $searchTerms = [];
-    foreach ($symptoms as $symptom) {
-        if (!empty($symptom['title'])) {
-            $keywords = $this->extractRelevantKeywords($symptom['title']);
-            $searchTerms = array_merge($searchTerms, $keywords);
-        }
+    private function searchDocumentsForSymptoms($symptoms, $brandId = null)
+    {
+        Log::debug('=== DOCUMENT SEARCH START ===');
+        Log::debug('Symptoms count:', ['count' => count($symptoms)]);
+        Log::debug('Brand ID:', ['brand_id' => $brandId]);
         
-        if (!empty($symptom['related_systems'])) {
-            $systems = is_array($symptom['related_systems']) 
-                ? $symptom['related_systems'] 
-                : explode(',', $symptom['related_systems']);
-            $searchTerms = array_merge($searchTerms, $systems);
-        }
-    }
-    
-    $searchTerms = array_unique(array_filter($searchTerms, function($term) {
-        return mb_strlen($term) > 2;
-    }));
-    
-    if (empty($searchTerms)) {
-        return [];
-    }
-    
-    try {
-        $pagesQuery = DB::table('document_pages')
-            ->select([
-                'document_pages.id as page_id',
-                'document_pages.document_id',
-                'document_pages.page_number',
-                'document_pages.content_text',
-                'document_pages.section_title',
-                'documents.id as doc_id',
-                'documents.title as document_title',
-                'documents.file_type',
-                'documents.source_url',
-                'documents.view_count',
-                'documents.total_pages',
-                'documents.detected_system',
-                'documents.detected_component',
-                'documents.car_model_id',
-                'documents.file_path'
-            ])
-            ->join('documents', 'document_pages.document_id', '=', 'documents.id')
-            ->whereNotNull('document_pages.content_text')
-            ->where('document_pages.content_text', '<>', '')
-            ->where('document_pages.status', 'processed');
-        
-        $pagesQuery->where(function($q) use ($searchTerms) {
-            foreach ($searchTerms as $term) {
-                $cleanTerm = $this->cleanUtf8String($term);
-                $q->orWhere('document_pages.content_text', 'like', "%{$cleanTerm}%")
-                  ->orWhere('document_pages.section_title', 'like', "%{$cleanTerm}%");
-            }
-        });
-        
-        if ($modelId) {
-            $pagesQuery->where('documents.car_model_id', $modelId);
-        } elseif ($brandId) {
-            $pagesQuery->whereExists(function($query) use ($brandId) {
-                $query->select(DB::raw(1))
-                      ->from('car_models')
-                      ->whereColumn('car_models.id', 'documents.car_model_id')
-                      ->where('car_models.brand_id', $brandId);
-            });
-        }
-        
-        $pages = $pagesQuery
-            ->orderByRaw('
-                CASE 
-                    WHEN document_pages.section_title LIKE "%диагностик%" THEN 1
-                    WHEN document_pages.section_title LIKE "%ремонт%" THEN 2
-                    WHEN document_pages.section_title LIKE "%неисправн%" THEN 3
-                    ELSE 4
-                END
-            ')
-            ->orderBy('documents.view_count', 'desc')
-            ->orderBy('document_pages.page_number')
-            ->limit(30)
-            ->get();
-        
-        if ($pages->isEmpty()) {
+        if (empty($symptoms) || !Schema::hasTable('document_pages') || !Schema::hasTable('documents')) {
             return [];
         }
         
-        // Группируем по документам с выбором самой релевантной страницы
-        $groupedDocuments = [];
-        foreach ($pages as $page) {
-            $docId = $page->doc_id;
+        $searchTerms = [];
+        foreach ($symptoms as $symptom) {
+            if (!empty($symptom['title'])) {
+                $keywords = $this->extractRelevantKeywords($symptom['title']);
+                $searchTerms = array_merge($searchTerms, $keywords);
+            }
             
-            // Рассчитываем релевантность для этой страницы
-            $pageRelevance = $this->calculatePageRelevance($page->content_text, $searchTerms, $page->section_title);
-            
-            if (!isset($groupedDocuments[$docId])) {
-                // Находим лучший отрывок с подсветкой
-                $bestExcerpt = $this->findBestExcerptWithHighlight($page->content_text, $searchTerms, 200);
-                
-                // Генерируем URL для просмотра документа
-                $viewUrl = $this->generateDocumentViewUrl($docId, $page->page_number, $page->file_path, $page->source_url);
-                
-                $groupedDocuments[$docId] = [
-                    'id' => $docId,
-                    'title' => $this->cleanUtf8String($page->document_title ?? 'Документ'),
-                    'excerpt' => $bestExcerpt,
-                    'excerpt_raw' => $this->findBestExcerpt($page->content_text, $searchTerms, 300), // Полный отрывок без HTML
-                    'file_type' => $page->file_type ?? 'pdf',
-                    'total_pages' => $page->total_pages ?? 0,
-                    'source_url' => $page->source_url ?? '',
-                    'file_path' => $page->file_path ?? '',
-                    'detected_system' => $this->cleanUtf8String($page->detected_system ?? ''),
-                    'detected_component' => $this->cleanUtf8String($page->detected_component ?? ''),
-                    'view_count' => $page->view_count ?? 0,
-                    'icon' => $this->getFileIcon($page->file_type ?? 'pdf'),
-                    'best_page' => $page->page_number,
-                    'pages_found' => 1,
-                    'relevance_score' => $pageRelevance,
-                    'view_url' => $viewUrl,
-                    'page_title' => $this->cleanUtf8String($page->section_title ?? ''),
-                    'full_content_preview' => $this->getContentPreview($page->content_text, $searchTerms, 500)
-                ];
-            } else {
-                // Обновляем если нашли более релевантную страницу
-                if ($pageRelevance > $groupedDocuments[$docId]['relevance_score']) {
-                    $bestExcerpt = $this->findBestExcerptWithHighlight($page->content_text, $searchTerms, 200);
-                    $viewUrl = $this->generateDocumentViewUrl($docId, $page->page_number, $page->file_path, $page->source_url);
-                    
-                    $groupedDocuments[$docId]['excerpt'] = $bestExcerpt;
-                    $groupedDocuments[$docId]['excerpt_raw'] = $this->findBestExcerpt($page->content_text, $searchTerms, 300);
-                    $groupedDocuments[$docId]['best_page'] = $page->page_number;
-                    $groupedDocuments[$docId]['relevance_score'] = $pageRelevance;
-                    $groupedDocuments[$docId]['view_url'] = $viewUrl;
-                    $groupedDocuments[$docId]['page_title'] = $this->cleanUtf8String($page->section_title ?? '');
-                    $groupedDocuments[$docId]['full_content_preview'] = $this->getContentPreview($page->content_text, $searchTerms, 500);
-                }
-                
-                $groupedDocuments[$docId]['pages_found']++;
+            if (!empty($symptom['related_systems'])) {
+                $systems = is_array($symptom['related_systems']) 
+                    ? $symptom['related_systems'] 
+                    : explode(',', $symptom['related_systems']);
+                $searchTerms = array_merge($searchTerms, $systems);
             }
         }
         
-        // Сортируем по релевантности
-        usort($groupedDocuments, function($a, $b) {
-            return $b['relevance_score'] <=> $a['relevance_score'];
-        });
+        $searchTerms = array_unique(array_filter($searchTerms, function($term) {
+            return mb_strlen($term) > 2;
+        }));
         
-        return array_slice($groupedDocuments, 0, 5);
+        if (empty($searchTerms)) {
+            return [];
+        }
         
-    } catch (\Exception $e) {
-        Log::error('Error searching document pages: ' . $e->getMessage());
-        return [];
+        try {
+            $pagesQuery = DB::table('document_pages')
+                ->select([
+                    'document_pages.id as page_id',
+                    'document_pages.document_id',
+                    'document_pages.page_number',
+                    'document_pages.content_text',
+                    'document_pages.section_title',
+                    'documents.id as doc_id',
+                    'documents.title as document_title',
+                    'documents.file_type',
+                    'documents.source_url',
+                    'documents.view_count',
+                    'documents.total_pages',
+                    'documents.detected_system',
+                    'documents.detected_component',
+                    'documents.car_model_id',
+                    'documents.file_path'
+                ])
+                ->join('documents', 'document_pages.document_id', '=', 'documents.id')
+                ->whereNotNull('document_pages.content_text')
+                ->where('document_pages.content_text', '<>', '')
+                ->where('document_pages.status', 'processed');
+            
+            $pagesQuery->where(function($q) use ($searchTerms) {
+                foreach ($searchTerms as $term) {
+                    $cleanTerm = $this->cleanUtf8String($term);
+                    $q->orWhere('document_pages.content_text', 'like', "%{$cleanTerm}%")
+                      ->orWhere('document_pages.section_title', 'like', "%{$cleanTerm}%");
+                }
+            });
+            
+            // Фильтрация по бренду
+            if ($brandId) {
+                $pagesQuery->whereExists(function($query) use ($brandId) {
+                    $query->select(DB::raw(1))
+                          ->from('car_models')
+                          ->whereColumn('car_models.id', 'documents.car_model_id')
+                          ->where('car_models.brand_id', $brandId);
+                });
+            }
+            
+            $pages = $pagesQuery
+                ->orderByRaw('
+                    CASE 
+                        WHEN document_pages.section_title LIKE "%диагностик%" THEN 1
+                        WHEN document_pages.section_title LIKE "%ремонт%" THEN 2
+                        WHEN document_pages.section_title LIKE "%неисправн%" THEN 3
+                        ELSE 4
+                    END
+                ')
+                ->orderBy('documents.view_count', 'desc')
+                ->orderBy('document_pages.page_number')
+                ->limit(30)
+                ->get();
+            
+            if ($pages->isEmpty()) {
+                return [];
+            }
+            
+            // Группируем по документам с выбором самой релевантной страницы
+            $groupedDocuments = [];
+            foreach ($pages as $page) {
+                $docId = $page->doc_id;
+                
+                // Рассчитываем релевантность для этой страницы
+                $pageRelevance = $this->calculatePageRelevance($page->content_text, $searchTerms, $page->section_title);
+                
+                if (!isset($groupedDocuments[$docId])) {
+                    // Находим лучший отрывок с подсветкой
+                    $bestExcerpt = $this->findBestExcerptWithHighlight($page->content_text, $searchTerms, 200);
+                    
+                    // Генерируем URL для просмотра документа
+                    $viewUrl = $this->generateDocumentViewUrl($docId, $page->page_number, $page->file_path, $page->source_url);
+                    
+                    $groupedDocuments[$docId] = [
+                        'id' => $docId,
+                        'title' => $this->cleanUtf8String($page->document_title ?? 'Документ'),
+                        'excerpt' => $bestExcerpt,
+                        'excerpt_raw' => $this->findBestExcerpt($page->content_text, $searchTerms, 300),
+                        'file_type' => $page->file_type ?? 'pdf',
+                        'total_pages' => $page->total_pages ?? 0,
+                        'source_url' => $page->source_url ?? '',
+                        'file_path' => $page->file_path ?? '',
+                        'detected_system' => $this->cleanUtf8String($page->detected_system ?? ''),
+                        'detected_component' => $this->cleanUtf8String($page->detected_component ?? ''),
+                        'view_count' => $page->view_count ?? 0,
+                        'icon' => $this->getFileIcon($page->file_type ?? 'pdf'),
+                        'best_page' => $page->page_number,
+                        'pages_found' => 1,
+                        'relevance_score' => $pageRelevance,
+                        'view_url' => $viewUrl,
+                        'page_title' => $this->cleanUtf8String($page->section_title ?? ''),
+                        'full_content_preview' => $this->getContentPreview($page->content_text, $searchTerms, 500)
+                    ];
+                } else {
+                    // Обновляем если нашли более релевантную страницу
+                    if ($pageRelevance > $groupedDocuments[$docId]['relevance_score']) {
+                        $bestExcerpt = $this->findBestExcerptWithHighlight($page->content_text, $searchTerms, 200);
+                        $viewUrl = $this->generateDocumentViewUrl($docId, $page->page_number, $page->file_path, $page->source_url);
+                        
+                        $groupedDocuments[$docId]['excerpt'] = $bestExcerpt;
+                        $groupedDocuments[$docId]['excerpt_raw'] = $this->findBestExcerpt($page->content_text, $searchTerms, 300);
+                        $groupedDocuments[$docId]['best_page'] = $page->page_number;
+                        $groupedDocuments[$docId]['relevance_score'] = $pageRelevance;
+                        $groupedDocuments[$docId]['view_url'] = $viewUrl;
+                        $groupedDocuments[$docId]['page_title'] = $this->cleanUtf8String($page->section_title ?? '');
+                        $groupedDocuments[$docId]['full_content_preview'] = $this->getContentPreview($page->content_text, $searchTerms, 500);
+                    }
+                    
+                    $groupedDocuments[$docId]['pages_found']++;
+                }
+            }
+            
+            // Сортируем по релевантности
+            usort($groupedDocuments, function($a, $b) {
+                return $b['relevance_score'] <=> $a['relevance_score'];
+            });
+            
+            return array_slice($groupedDocuments, 0, 5);
+            
+        } catch (\Exception $e) {
+            Log::error('Error searching document pages: ' . $e->getMessage());
+            return [];
+        }
     }
-}
 
-/**
- * Генерирует URL для просмотра документа
- */
-private function generateDocumentViewUrl($documentId, $pageNumber, $filePath = null, $sourceUrl = null)
-{
-    // Если есть прямой URL к файлу
-    if (!empty($sourceUrl)) {
-        // Добавляем якорь на страницу если это PDF
-        if (str_ends_with(strtolower($sourceUrl), '.pdf') && $pageNumber > 1) {
-            return $sourceUrl . '#page=' . $pageNumber;
-        }
-        return $sourceUrl;
-    }
-    
-    // Если есть локальный путь к файлу
-    if (!empty($filePath) && file_exists(public_path($filePath))) {
-        $url = asset($filePath);
-        if (str_ends_with(strtolower($url), '.pdf') && $pageNumber > 1) {
-            return $url . '#page=' . $pageNumber;
-        }
-        return $url;
-    }
-    
-    // Генерируем URL через маршрут Laravel
-    return route('documents.view', [
-        'id' => $documentId,
-        'page' => $pageNumber
-    ]);
-}
-
-/**
- * Рассчитывает релевантность страницы
- */
-private function calculatePageRelevance($content, $searchTerms, $sectionTitle = '')
-{
-    $score = 0;
-    $content = mb_strtolower($this->cleanUtf8String($content), 'UTF-8');
-    $sectionTitle = mb_strtolower($this->cleanUtf8String($sectionTitle), 'UTF-8');
-    
-    foreach ($searchTerms as $term) {
-        $term = mb_strtolower($this->cleanUtf8String($term), 'UTF-8');
-        
-        // Высокий балл за совпадение в заголовке раздела
-        if (!empty($sectionTitle) && str_contains($sectionTitle, $term)) {
-            $score += 0.5;
+    /**
+     * Генерирует URL для просмотра документа
+     */
+    private function generateDocumentViewUrl($documentId, $pageNumber, $filePath = null, $sourceUrl = null)
+    {
+        // Если есть прямой URL к файлу
+        if (!empty($sourceUrl)) {
+            // Добавляем якорь на страницу если это PDF
+            if (str_ends_with(strtolower($sourceUrl), '.pdf') && $pageNumber > 1) {
+                return $sourceUrl . '#page=' . $pageNumber;
+            }
+            return $sourceUrl;
         }
         
-        // Средний балл за полное слово в контенте
-        if (preg_match('/\b' . preg_quote($term, '/') . '\b/', $content)) {
-            $score += 0.3;
+        // Если есть локальный путь к файлу
+        if (!empty($filePath) && file_exists(public_path($filePath))) {
+            $url = asset($filePath);
+            if (str_ends_with(strtolower($url), '.pdf') && $pageNumber > 1) {
+                return $url . '#page=' . $pageNumber;
+            }
+            return $url;
         }
-        // Низкий балл за частичное совпадение
-        elseif (str_contains($content, $term)) {
-            $score += 0.1;
+        
+        // Генерируем URL через маршрут Laravel
+        try {
+            return route('documents.view', [
+                'id' => $documentId,
+                'page' => $pageNumber
+            ]);
+        } catch (\Exception $e) {
+            return '/documents/' . $documentId . '?page=' . $pageNumber;
         }
     }
-    
-    return min(1.0, $score);
-}
 
-/**
- * Находит лучший отрывок с подсветкой найденных слов
- */
-private function findBestExcerptWithHighlight($text, $searchTerms, $length = 200)
-{
-    $text = $this->cleanUtf8String($text);
-    $textLength = mb_strlen($text);
-    
-    if ($textLength <= $length) {
-        $excerpt = $text;
-    } else {
-        // Находим позицию с максимальным количеством совпадений
+    /**
+     * Рассчитывает релевантность страницы
+     */
+    private function calculatePageRelevance($content, $searchTerms, $sectionTitle = '')
+    {
+        $score = 0;
+        $content = mb_strtolower($this->cleanUtf8String($content), 'UTF-8');
+        $sectionTitle = mb_strtolower($this->cleanUtf8String($sectionTitle), 'UTF-8');
+        
+        foreach ($searchTerms as $term) {
+            $term = mb_strtolower($this->cleanUtf8String($term), 'UTF-8');
+            
+            // Высокий балл за совпадение в заголовке раздела
+            if (!empty($sectionTitle) && str_contains($sectionTitle, $term)) {
+                $score += 0.5;
+            }
+            
+            // Средний балл за полное слово в контенте
+            if (preg_match('/\b' . preg_quote($term, '/') . '\b/', $content)) {
+                $score += 0.3;
+            }
+            // Низкий балл за частичное совпадение
+            elseif (str_contains($content, $term)) {
+                $score += 0.1;
+            }
+        }
+        
+        return min(1.0, $score);
+    }
+
+    /**
+     * Находит лучший отрывок с подсветкой найденных слов
+     */
+    private function findBestExcerptWithHighlight($text, $searchTerms, $length = 200)
+    {
+        $text = $this->cleanUtf8String($text);
+        $textLength = mb_strlen($text);
+        
+        if ($textLength <= $length) {
+            $excerpt = $text;
+        } else {
+            // Находим позицию с максимальным количеством совпадений
+            $bestPosition = 0;
+            $bestScore = 0;
+            
+            for ($i = 0; $i <= $textLength - $length; $i += 50) {
+                $chunk = mb_substr($text, $i, $length);
+                $score = 0;
+                
+                foreach ($searchTerms as $term) {
+                    if (mb_stripos($chunk, $term) !== false) {
+                        $score++;
+                    }
+                }
+                
+                if ($score > $bestScore) {
+                    $bestScore = $score;
+                    $bestPosition = $i;
+                }
+            }
+            
+            // Вырезаем отрывок
+            $start = max(0, $bestPosition - 30);
+            $excerpt = mb_substr($text, $start, $length + 60);
+            
+            if ($start > 0) {
+                $excerpt = '...' . $excerpt;
+            }
+            if ($start + $length + 60 < $textLength) {
+                $excerpt .= '...';
+            }
+        }
+        
+        // Подсвечиваем найденные слова
+        foreach ($searchTerms as $term) {
+            $excerpt = preg_replace(
+                '/(' . preg_quote($term, '/') . ')/iu',
+                '<mark class="bg-warning text-dark">$1</mark>',
+                $excerpt
+            );
+        }
+        
+        return $excerpt;
+    }
+
+    /**
+     * Получает превью контента с найденными словами
+     */
+    private function getContentPreview($text, $searchTerms, $maxLength = 500)
+    {
+        $text = $this->cleanUtf8String($text);
+        
+        // Находим первый абзац с найденными словами
+        $paragraphs = preg_split('/\n+/', $text);
+        
+        foreach ($paragraphs as $paragraph) {
+            $paragraph = trim($paragraph);
+            if (empty($paragraph) || mb_strlen($paragraph) < 50) {
+                continue;
+            }
+            
+            foreach ($searchTerms as $term) {
+                if (mb_stripos($paragraph, $term) !== false) {
+                    // Обрезаем если слишком длинный
+                    if (mb_strlen($paragraph) > $maxLength) {
+                        $paragraph = mb_substr($paragraph, 0, $maxLength) . '...';
+                    }
+                    
+                    // Подсвечиваем слова
+                    foreach ($searchTerms as $term) {
+                        $paragraph = preg_replace(
+                            '/(' . preg_quote($term, '/') . ')/iu',
+                            '<mark class="bg-warning text-dark">$1</mark>',
+                            $paragraph
+                        );
+                    }
+                    
+                    return $paragraph;
+                }
+            }
+        }
+        
+        // Если не нашли, возвращаем начало текста
+        $preview = mb_substr($text, 0, $maxLength);
+        if (mb_strlen($text) > $maxLength) {
+            $preview .= '...';
+        }
+        
+        return $preview;
+    }
+
+    /**
+     * Находит лучший отрывок текста содержащий поисковые термины
+     */
+    private function findBestExcerpt($text, $searchTerms, $excerptLength = 200)
+    {
+        if (empty($text)) {
+            return '';
+        }
+        
+        $text = $this->cleanUtf8String($text);
+        $textLength = mb_strlen($text);
+        
+        // Если текст короткий, возвращаем его полностью
+        if ($textLength <= $excerptLength) {
+            return $text;
+        }
+        
         $bestPosition = 0;
         $bestScore = 0;
         
-        for ($i = 0; $i <= $textLength - $length; $i += 50) {
-            $chunk = mb_substr($text, $i, $length);
+        // Ищем позицию с максимальным количеством совпадений
+        for ($i = 0; $i <= $textLength - $excerptLength; $i += 50) {
+            $chunk = mb_substr($text, $i, $excerptLength);
             $score = 0;
             
             foreach ($searchTerms as $term) {
@@ -678,127 +1007,20 @@ private function findBestExcerptWithHighlight($text, $searchTerms, $length = 200
             }
         }
         
-        // Вырезаем отрывок
+        // Вырезаем отрывок с контекстом
         $start = max(0, $bestPosition - 30);
-        $excerpt = mb_substr($text, $start, $length + 60);
+        $excerpt = mb_substr($text, $start, $excerptLength + 60);
         
+        // Добавляем многоточия если текст обрезан
         if ($start > 0) {
             $excerpt = '...' . $excerpt;
         }
-        if ($start + $length + 60 < $textLength) {
+        if ($start + $excerptLength + 60 < $textLength) {
             $excerpt .= '...';
         }
-    }
-    
-    // Подсвечиваем найденные слова
-    foreach ($searchTerms as $term) {
-        $excerpt = preg_replace(
-            '/(' . preg_quote($term, '/') . ')/iu',
-            '<mark class="bg-warning text-dark">$1</mark>',
-            $excerpt
-        );
-    }
-    
-    return $excerpt;
-}
-
-/**
- * Получает превью контента с найденными словами
- */
-private function getContentPreview($text, $searchTerms, $maxLength = 500)
-{
-    $text = $this->cleanUtf8String($text);
-    
-    // Находим первый абзац с найденными словами
-    $paragraphs = preg_split('/\n+/', $text);
-    
-    foreach ($paragraphs as $paragraph) {
-        $paragraph = trim($paragraph);
-        if (empty($paragraph) || mb_strlen($paragraph) < 50) {
-            continue;
-        }
         
-        foreach ($searchTerms as $term) {
-            if (mb_stripos($paragraph, $term) !== false) {
-                // Обрезаем если слишком длинный
-                if (mb_strlen($paragraph) > $maxLength) {
-                    $paragraph = mb_substr($paragraph, 0, $maxLength) . '...';
-                }
-                
-                // Подсвечиваем слова
-                foreach ($searchTerms as $term) {
-                    $paragraph = preg_replace(
-                        '/(' . preg_quote($term, '/') . ')/iu',
-                        '<mark class="bg-warning text-dark">$1</mark>',
-                        $paragraph
-                    );
-                }
-                
-                return $paragraph;
-            }
-        }
+        return $excerpt;
     }
-    
-    // Если не нашли, возвращаем начало текста
-    $preview = mb_substr($text, 0, $maxLength);
-    if (mb_strlen($text) > $maxLength) {
-        $preview .= '...';
-    }
-    
-    return $preview;
-}
-
-/**
- * Находит лучший отрывок текста содержащий поисковые термины
- */
-private function findBestExcerpt($text, $searchTerms, $excerptLength = 200)
-{
-    if (empty($text)) {
-        return '';
-    }
-    
-    $text = $this->cleanUtf8String($text);
-    $textLength = mb_strlen($text);
-    
-    // Если текст короткий, возвращаем его полностью
-    if ($textLength <= $excerptLength) {
-        return $text;
-    }
-    
-    $bestPosition = 0;
-    $bestScore = 0;
-    
-    // Ищем позицию с максимальным количеством совпадений
-    for ($i = 0; $i <= $textLength - $excerptLength; $i += 50) {
-        $chunk = mb_substr($text, $i, $excerptLength);
-        $score = 0;
-        
-        foreach ($searchTerms as $term) {
-            if (mb_stripos($chunk, $term) !== false) {
-                $score++;
-            }
-        }
-        
-        if ($score > $bestScore) {
-            $bestScore = $score;
-            $bestPosition = $i;
-        }
-    }
-    
-    // Вырезаем отрывок с контекстом
-    $start = max(0, $bestPosition - 30);
-    $excerpt = mb_substr($text, $start, $excerptLength + 60);
-    
-    // Добавляем многоточия если текст обрезан
-    if ($start > 0) {
-        $excerpt = '...' . $excerpt;
-    }
-    if ($start + $excerptLength + 60 < $textLength) {
-        $excerpt .= '...';
-    }
-    
-    return $excerpt;
-}
 
     /**
      * Поиск запчастей для возможных причин
@@ -1147,5 +1369,82 @@ private function findBestExcerpt($text, $searchTerms, $excerptLength = 200)
         }
         
         return $cleaned;
+    }
+
+     /**
+     * Новый метод для улучшенного AI ответа
+     */
+    private function generateEnhancedAIResponse(array $aiAnalysis, string $query, array $symptoms): string
+    {
+        $response = "🤖 **AI-анализ проблемы**\n\n";
+        $response .= "🔍 **Запрос:** {$query}\n\n";
+        
+        if (!empty($aiAnalysis['summary'])) {
+            $response .= "📋 **Резюме:** {$aiAnalysis['summary']}\n\n";
+        }
+        
+        if (!empty($aiAnalysis['confidence_score'])) {
+            $confidence = $aiAnalysis['confidence_score'];
+            $confidenceEmoji = $confidence > 70 ? '✅' : ($confidence > 40 ? '⚠️' : '❓');
+            $response .= "🎯 **Уверенность в диагнозе:** {$confidence}% {$confidenceEmoji}\n\n";
+        }
+        
+        if (!empty($aiAnalysis['most_likely_cause'])) {
+            $response .= "⚡ **Наиболее вероятная причина:** {$aiAnalysis['most_likely_cause']}\n\n";
+        }
+        
+        if (!empty($aiAnalysis['diagnostic_steps']) && count($aiAnalysis['diagnostic_steps']) > 0) {
+            $response .= "🔧 **План диагностики:**\n";
+            foreach ($aiAnalysis['diagnostic_steps'] as $index => $step) {
+                $response .= ($index + 1) . ". {$step}\n";
+            }
+            $response .= "\n";
+        }
+        
+        if (!empty($aiAnalysis['repair_recommendations']) && count($aiAnalysis['repair_recommendations']) > 0) {
+            $response .= "🛠️ **Рекомендации по ремонту:**\n";
+            foreach ($aiAnalysis['repair_recommendations'] as $rec) {
+                $response .= "• {$rec}\n";
+            }
+            $response .= "\n";
+        }
+        
+        if (!empty($aiAnalysis['safety_warnings']) && count($aiAnalysis['safety_warnings']) > 0) {
+            $response .= "⚠️ **Меры безопасности:**\n";
+            foreach ($aiAnalysis['safety_warnings'] as $warning) {
+                $response .= "• {$warning}\n";
+            }
+            $response .= "\n";
+        }
+        
+        if (!empty($aiAnalysis['estimated_time']) || !empty($aiAnalysis['estimated_cost'])) {
+            $response .= "💰 **Оценка работ:**\n";
+            if (!empty($aiAnalysis['estimated_time'])) {
+                $response .= "⏱️ Время: {$aiAnalysis['estimated_time']}\n";
+            }
+            if (!empty($aiAnalysis['estimated_cost'])) {
+                $response .= "💵 Стоимость: {$aiAnalysis['estimated_cost']}\n";
+            }
+            $response .= "\n";
+        }
+        
+        if (!empty($aiAnalysis['when_to_contact_professional'])) {
+            $response .= "👨‍🔧 **Когда к специалисту:** {$aiAnalysis['when_to_contact_professional']}\n\n";
+        }
+        
+        // Добавляем информацию из базы данных
+        if (!empty($symptoms)) {
+            $response .= "📊 **Найдено в базе данных:** " . count($symptoms) . " совпадений\n";
+            
+            $exactMatches = array_filter($symptoms, function($item) {
+                return $item['match_type'] === 'exact' && $item['relevance_score'] > 0.7;
+            });
+            
+            if (!empty($exactMatches)) {
+                $response .= "✅ Точные совпадения: " . count($exactMatches) . "\n";
+            }
+        }
+        
+        return $response;
     }
 }

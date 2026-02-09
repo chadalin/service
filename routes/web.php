@@ -800,3 +800,41 @@ Route::get('/admin/documents/processing/{id}/page/{pageId}/show',
 
     Route::get('/documents/{id}', [DocumentController::class, 'show'])->name('documents.show');
 Route::get('/documents/{id}/page/{page}', [DocumentController::class, 'showPage'])->name('documents.page');
+
+// routes/web.php - добавьте маршрут для теста
+Route::get('/test-deepseek', function () {
+    $apiKey = 'sk-441125148785447987e4475157a4c8b0';
+    
+    try {
+        $client = new \GuzzleHttp\Client();
+        $response = $client->post('https://api.deepseek.com/v1/chat/completions', [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $apiKey,
+                'Content-Type' => 'application/json',
+            ],
+            'json' => [
+                'model' => 'deepseek-chat',
+                'messages' => [
+                    ['role' => 'user', 'content' => 'Привет! Тестовое сообщение']
+                ],
+                'max_tokens' => 50,
+                'temperature' => 0.7,
+            ],
+            'timeout' => 10,
+        ]);
+        
+        $data = json_decode($response->getBody(), true);
+        return response()->json([
+            'status' => 'success',
+            'response' => $data['choices'][0]['message']['content'] ?? 'No content',
+            'full_response' => $data
+        ]);
+        
+    } catch (\Exception $e) {
+        return response()->json([
+            'status' => 'error',
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ], 500);
+    }
+});

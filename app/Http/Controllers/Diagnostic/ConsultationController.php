@@ -815,6 +815,7 @@ public function show($id)
                     : explode(',', $request->symptoms);
             }
             
+           // dd($data);
             return view('diagnostic.consultation.order', $data);
             
         } catch (\Exception $e) {
@@ -1139,9 +1140,17 @@ public function show($id)
         'description' => $validated['description'] ?? $validated['symptom_description'],
         'status' => 'draft',
         'step' => 1,
+
+        // Добавьте эти поля в модель DiagnosticCase
         'contact_name' => $validated['contact_name'],
         'contact_phone' => $validated['contact_phone'],
         'contact_email' => $validated['contact_email'],
+        'contacted_at' => now(),
+
+
+       // 'contact_name' => $validated['contact_name'],
+       // 'contact_phone' => $validated['contact_phone'],
+       // 'contact_email' => $validated['contact_email'],
         'consultation_type' => $validated['consultation_type'],
         'price_estimate' => $this->calculatePrice($validated['consultation_type'], $validated['rule_id']),
     ]);

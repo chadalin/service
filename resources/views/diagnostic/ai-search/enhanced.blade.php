@@ -665,17 +665,25 @@ async function performEnhancedSearch() {
         // Используем FormData для корректной отправки данных
         const formData = new FormData(form);
         
+        // Получаем значения и конвертируем пустые строки в null
+        const brandIdValue = formData.get('brand_id');
+        const modelIdValue = document.getElementById('model_id').disabled ? null : formData.get('model_id');
+        
         // Создаем объект с данными
         const searchData = {
             query: formData.get('query'),
-            brand_id: formData.get('brand_id') || null,
-            model_id: document.getElementById('model_id').disabled ? null : formData.get('model_id'),
+            brand_id: brandIdValue && brandIdValue !== '' ? parseInt(brandIdValue) : null,
+            model_id: modelIdValue && modelIdValue !== '' ? parseInt(modelIdValue) : null,
             search_type: formData.get('search_type'),
         };
         
-        // Преобразуем пустые строки в null
-        if (searchData.brand_id === '') searchData.brand_id = null;
-        if (searchData.model_id === '') searchData.model_id = null;
+        // Проверяем валидность числовых значений
+        if (searchData.brand_id !== null && isNaN(searchData.brand_id)) {
+            searchData.brand_id = null;
+        }
+        if (searchData.model_id !== null && isNaN(searchData.model_id)) {
+            searchData.model_id = null;
+        }
         
         console.log('Sending search data:', searchData);
         
