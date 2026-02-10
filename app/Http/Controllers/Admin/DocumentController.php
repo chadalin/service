@@ -4,6 +4,7 @@ namespace App\Http\Controllers\Admin;
 
 use App\Http\Controllers\Controller;
 use App\Models\Document;
+use App\Models\DocumentPage;
 use App\Models\Brand;
 use App\Models\CarModel;
 use App\Models\RepairCategory;
@@ -698,4 +699,43 @@ class DocumentController extends Controller
             'message' => "Обработано: {$processed}, Ошибок: {$errors}"
         ]);
     }
+
+    // В DocumentController добавьте методы:
+public function showPage($id, $page)
+{
+    $document = Document::with(['pages' => function($query) use ($page) {
+        $query->where('page_number', $page);
+    }])->findOrFail($id);
+    
+    $pageContent = $document->pages->first();
+    
+    if (!$pageContent) {
+        abort(404, 'Страница не найдена');
+    }
+    
+    return view('documents.page', compact('document', 'pageContent'));
+}
+
+public function viewPage(Request $request)
+{
+    $documentId = $request->get('document_id');
+    $pageId = $request->get('page_id');
+    $pageNumber = $request->get('page');
+    $highlight = $request->get('highlight', '');
+    
+    $document = Document::findOrFail($documentId);
+    
+    // Получаем конкретную страницу
+    $page = $pageId 
+        ? DocumentPage::find($pageId)
+        : DocumentPage::where('document_id', $documentId)
+                      ->where('page_number', $pageNumber)
+                      ->first();
+    
+    if (!$page) {
+        abort(404, 'Страница не найдена');
+    }
+    
+    return view('documents.view-page', compact('document', 'page', 'highlight'));
+}
 }

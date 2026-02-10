@@ -20,6 +20,7 @@ use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\PriceItemController;
 use App\Http\Controllers\Admin\PriceImportController;
 use App\Http\Controllers\SearchTestController;
+use App\Http\Controllers\Diagnostic\DocumentViewController;
 
 
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
@@ -839,3 +840,18 @@ Route::get('/test-deepseek', function () {
         ], 500);
     }
 });
+
+// Публичные маршруты для просмотра документов
+Route::get('/documents/{id}/pages/{pageNumber}', [DocumentViewController::class, 'showPage'])
+    ->name('documents.pages')
+    ->where(['id' => '[0-9]+', 'pageNumber' => '[0-9]+']);
+
+// Альтернативный маршрут по ID страницы
+Route::get('/documents/pages/{pageId}', [DocumentViewController::class, 'showPageById'])
+    ->name('documents.pages.show-by-id')
+    ->where(['pageId' => '[0-9]+']);
+
+// Маршрут для подсветки текста
+Route::get('/documents/{id}/pages/{pageNumber}/search', [DocumentViewController::class, 'showPageWithHighlight'])
+    ->name('documents.pages.show-with-highlight')
+    ->where(['id' => '[0-9]+', 'pageNumber' => '[0-9]+']);

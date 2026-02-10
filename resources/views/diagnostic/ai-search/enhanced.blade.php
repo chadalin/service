@@ -1116,35 +1116,98 @@ function createPartCardHTML(part, index) {
 function createDocumentCardHTML(doc, index) {
     const icon = doc.icon || 'bi-file-earmark';
     const fileType = doc.file_type || 'документ';
-    const pages = doc.total_pages ? `(${doc.total_pages} стр.)` : '';
-    const pagesFound = doc.pages_found ? `, найдено: ${doc.pages_found} стр.` : '';
+    
+    // Используем публичный URL
+    const pageUrl = doc.page_url || 
+                   doc.view_url || 
+                   doc.source_url || 
+                   '/documents/' + doc.id + '/pages/' + doc.page_number;
+    
+    const pageNumberText = doc.page_number ? ` (стр. ${doc.page_number})` : '';
+    const highlightParam = doc.highlight_term ? `?highlight=${encodeURIComponent(doc.highlight_term)}` : '';
     
     return `
-        <div class="document-item fade-in-up" style="animation-delay: ${index * 0.1}s">
-            <div class="document-icon">
-                <i class="bi ${icon}"></i>
-            </div>
-            <div class="document-info">
-                <a href="${doc.source_url || '/documents/' + doc.id}" 
-                   target="_blank" 
-                   class="document-title">
-                    ${escapeHtml(doc.title || 'Документ')}
-                </a>
-                <div class="document-meta">
-                    <span><i class="bi bi-file-earmark"></i> ${fileType} ${pages}${pagesFound}</span>
-                    ${doc.detected_system ? `<br><small><i class="bi bi-gear"></i> Система: ${escapeHtml(doc.detected_system)}</small>` : ''}
-                    ${doc.detected_component ? `<br><small><i class="bi bi-cpu"></i> Компонент: ${escapeHtml(doc.detected_component)}</small>` : ''}
-                    ${doc.best_page ? `<br><small><i class="bi bi-file-text"></i> Страница: ${doc.best_page}</small>` : ''}
+        <div class="document-result fade-in-up" style="animation-delay: ${index * 0.1}s">
+            <div class="document-header">
+                <div class="document-icon">
+                    <i class="bi ${icon}"></i>
                 </div>
-                ${doc.excerpt ? `<div class="text-muted mt-2 small">${escapeHtml(doc.excerpt)}</div>` : ''}
+                <div class="document-title">
+                    <a href="${pageUrl}${highlightParam}" 
+                       target="_blank" 
+                       class="document-link">
+                        ${escapeHtml(doc.title || 'Документ')}
+                    </a>
+                    <div class="document-page-title">
+                        Страница ${doc.page_number || ''}
+                        ${doc.brand ? ` • ${escapeHtml(doc.brand)}` : ''}
+                        ${doc.model ? ` ${escapeHtml(doc.model)}` : ''}
+                    </div>
+                </div>
+                <div class="document-meta">
+                    <span class="badge bg-light text-dark">
+                        <i class="bi bi-file-earmark"></i> ${fileType}
+                    </span>
+                </div>
             </div>
-            <div>
-                <a href="${doc.source_url || '/documents/' + doc.id}" target="_blank">
-                    <i class="bi bi-arrow-right"></i>
+            
+            ${doc.excerpt ? `
+                <div class="document-excerpt">
+                    ${escapeHtml(doc.excerpt)}
+                </div>
+            ` : ''}
+            
+            ${doc.content_preview ? `
+                <div class="document-preview">
+                    <div class="preview-content">
+                        ${this.highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}
+                    </div>
+                </div>
+            ` : ''}
+            
+            <div class="document-tags">
+                ${doc.detected_system ? `
+                    <span class="badge bg-info me-1">
+                        <i class="bi bi-gear"></i> ${escapeHtml(doc.detected_system)}
+                    </span>
+                ` : ''}
+                
+                ${doc.detected_component ? `
+                    <span class="badge bg-secondary me-1">
+                        <i class="bi bi-cpu"></i> ${escapeHtml(doc.detected_component)}
+                    </span>
+                ` : ''}
+                
+                <a href="${pageUrl}${highlightParam}" 
+                   target="_blank" 
+                   class="btn btn-sm btn-primary float-end">
+                    <i class="bi bi-arrow-up-right me-1"></i> Открыть страницу
                 </a>
             </div>
         </div>
     `;
+}
+
+// Функция для подсветки найденных терминов
+function highlightSearchTerms(text, terms) {
+    if (!text || !terms || terms.length === 0) {
+        return escapeHtml(text || '');
+    }
+    
+    let highlighted = escapeHtml(text);
+    
+    terms.forEach(term => {
+        if (term && term.length > 2) {
+            const regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
+            highlighted = highlighted.replace(regex, '<mark class="bg-warning">$1</mark>');
+        }
+    });
+    
+    return highlighted;
+}
+
+function escapeRegex(string) {
+    return string.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function formatAIResponse(text) {
