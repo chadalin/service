@@ -142,8 +142,14 @@ class DiagnosticCase extends Model
     
     public function consultations(): HasMany
     {
-        return $this->hasMany(Consultation::class, 'case_id');
+       return $this->hasMany(Consultation::class, 'case_id');
+
+
+
     }
+
+
+
     
     // Получить тип рекомендуемой консультации
     public function getRecommendedConsultationType(): string
@@ -242,4 +248,31 @@ class DiagnosticCase extends Model
         ],
     ]);
 }
+
+
+            /**
+     * Связь с сообщениями чата (консультации)
+     * consultation_id в таблице consultation_messages ссылается на id кейса
+     */
+    public function consultationMessages()
+    {
+        return $this->hasMany(ConsultationMessage::class, 'consultation_id');
+    }
+    
+    /**
+     * Получить последнее сообщение
+     */
+    public function getLastMessageAttribute()
+    {
+        return $this->consultationMessages()->latest()->first();
+    }
+    
+    /**
+     * Проверить, есть ли чат
+     */
+    public function hasChat()
+    {
+        return $this->consultationMessages()->exists();
+    }
+    
 }

@@ -32,9 +32,17 @@
         <div class="message-text">{{ $message->message }}</div>
         
         @if($message->metadata)
-            @php
-                $attachments = json_decode($message->metadata, true)['attachments'] ?? [];
-            @endphp
+    @php
+        // Проверяем тип данных
+        if (is_string($message->metadata)) {
+            $metadataArray = json_decode($message->metadata, true);
+            $attachments = $metadataArray['attachments'] ?? [];
+        } elseif (is_array($message->metadata)) {
+            $attachments = $message->metadata['attachments'] ?? [];
+        } else {
+            $attachments = [];
+        }
+    @endphp
             
             @if(count($attachments) > 0)
             <div class="message-attachments">

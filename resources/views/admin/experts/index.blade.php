@@ -1,4 +1,4 @@
-@extends('layouts.diagnostic')
+@extends('layouts.app')
 
 @section('title', 'Управление экспертами')
 

@@ -197,10 +197,14 @@ public function index(Request $request)
     
     // Запрос для диагностических случаев
     $query = DiagnosticCase::where('user_id', $user->id)
-        ->with(['brand', 'model', 'consultations' => function($q) {
-            $q->with('expert')->latest();
-        }]);
-    
+        ->with([
+            'brand', 
+            'model', 
+            'consultationMessages' => function($q) {
+                $q->orderBy('created_at', 'desc');
+            }
+        ]);
+ //dd($query);
     // Фильтрация по статусу
     if ($status !== 'all') {
         $query->where('status', $status);
@@ -224,7 +228,22 @@ public function index(Request $request)
     }
     
     // Получаем с пагинацией
-    $consultations = $query->paginate(15);
+    $cases = $query->paginate(15);
+    
+    // ДЕБАГ: Включите для проверки
+    if ($cases->count() > 0) {
+        $firstCase = $cases->first();
+        $hasMessages = $firstCase->consultationMessages->count() > 0;
+        
+        echo "<pre>";
+        echo "ID кейса: " . $firstCase->id . "\n";
+        echo "Статус: " . $firstCase->status . "\n";
+        echo "Сообщений в чате: " . $firstCase->consultationMessages->count() . "\n";
+        if ($hasMessages) {
+            echo "Первое сообщение: " . json_encode($firstCase->consultationMessages->first()->toArray()) . "\n";
+        }
+        echo "</pre>";
+    }
     
     // Статистика по статусам
     $statusStats = [
@@ -239,7 +258,7 @@ public function index(Request $request)
     ];
     
     return view('diagnostic.consultation.client.index', compact(
-        'consultations',
+        'cases',
         'status',
         'statusStats'
     ));
@@ -452,15 +471,15 @@ public function showClient($id)
         
         return back()->with('success', 'Спасибо за ваш отзыв!');
     }
-    
+   
     /**
      * Дашборд эксперта
      */
     public function expertDashboard(Request $request)
-    {
+    { 
         $expert = Auth::user();
         
-        if (!$expert->is_expert) {
+        if (!$expert->expert_is_available) {
             abort(403, 'Доступ запрещен');
         }
         
@@ -499,7 +518,7 @@ public function showClient($id)
 {
     $expert = Auth::user();
     
-    if (!$expert->is_expert) {
+    if (!$expert->expert_is_available) {
         abort(403, 'Доступ запрещен');
     }
     
@@ -519,7 +538,7 @@ public function showClient($id)
     ]);
     
     // 1. Загружаем пользователя (клиента)
-    $consultation->load('user:id,name,email,phone,company_name');
+    $consultation->load('user:id,name,email');
     \Log::info('User loaded:', ['user' => $consultation->user ? $consultation->user->toArray() : null]);
     
     // 2. Загружаем эксперта (самого себя)
@@ -559,7 +578,7 @@ public function showClient($id)
             }
             
             // Загружаем отчеты (если есть)
-            $case->reports = \App\Models\Diagnostic\DiagnosticReport::where('case_id', $case->id)
+            $case->reports = \App\Models\Diagnostic\Report::where('case_id', $case->id)
                 ->orderBy('created_at', 'desc')
                 ->get();
             
@@ -677,25 +696,39 @@ public function showClient($id)
      * Начать консультацию экспертом
      */
     public function startExpertConsultation($id)
-    {
-        $expert = Auth::user();
-        
-        if (!$expert->is_expert) {
-            abort(403, 'Доступ запрещен');
-        }
-        
-        $consultation = Consultation::where('id', $id)
-            ->where('expert_id', $expert->id)
-            ->where('status', 'scheduled')
-            ->firstOrFail();
-            
-        $consultation->update([
-            'status' => 'in_progress',
-            'started_at' => now(),
-        ]);
-        
-        return back()->with('success', 'Консультация начата');
+{
+    $expert = Auth::user();
+    
+    if (!$expert->expert_is_available) {
+        abort(403, 'Доступ запрещен');
     }
+    
+    $consultation = Consultation::where('id', $id)
+        ->where('expert_id', $expert->id)
+        ->whereIn('status', ['pending', 'scheduled'])
+        ->firstOrFail();
+        
+    $consultation->update([
+        'status' => 'in_progress',
+        'started_at' => now(),
+    ]);
+    
+    // Добавляем системное сообщение о начале консультации
+    \App\Models\Diagnostic\ConsultationMessage::create([
+        'consultation_id' => $consultation->id,
+        'user_id' => $expert->id,
+        'message' => "Эксперт начал консультацию",
+        'type' => 'system',
+    ]);
+    
+    // Обновляем статус диагностического случая
+    if ($consultation->case_id) {
+        \App\Models\Diagnostic\DiagnosticCase::where('id', $consultation->case_id)
+            ->update(['status' => 'consultation_in_progress']);
+    }
+    
+    return back()->with('success', 'Консультация начата');
+}
     
     /**
      * Добавить анализ эксперта
@@ -711,7 +744,7 @@ public function showClient($id)
         
         $expert = Auth::user();
         
-        if (!$expert->is_expert) {
+        if (!$expert->expert_is_available) {
             abort(403, 'Доступ запрещен');
         }
         
@@ -745,7 +778,7 @@ public function showClient($id)
         
         $expert = Auth::user();
         
-        if (!$expert->is_expert) {
+        if (!$expert->expert_is_available) {
             abort(403, 'Доступ запрещен');
         }
         
@@ -771,32 +804,43 @@ public function showClient($id)
     /**
      * Завершить консультацию
      */
-    public function completeConsultation($id)
-    {
-        $expert = Auth::user();
-        
-        if (!$expert->is_expert) {
-            abort(403, 'Доступ запрещен');
-        }
-        
-        $consultation = Consultation::where('id', $id)
-            ->where('expert_id', $expert->id)
-            ->where('status', 'in_progress')
-            ->firstOrFail();
-            
-        $consultation->update([
-            'status' => 'completed',
-            'completed_at' => now(),
-        ]);
-        
-        // Обновляем статус случая
-        $consultation->case->update([
-            'status' => 'completed'
-        ]);
-        
-        return redirect()->route('diagnostic.consultation.expert-dashboard')
-            ->with('success', 'Консультация завершена');
+   public function completeConsultation($id)
+{
+    $expert = Auth::user();
+    
+    if (!$expert->expert_is_available) {
+        abort(403, 'Доступ запрещен');
     }
+    
+    $consultation = Consultation::where('id', $id)
+        ->where('expert_id', $expert->id)
+        ->where('status', 'in_progress')
+        ->firstOrFail();
+        
+    $consultation->update([
+        'status' => 'completed',
+        'completed_at' => now(),
+        'duration' => $consultation->started_at ? 
+            now()->diffInMinutes($consultation->started_at) : null,
+    ]);
+    
+    // Добавляем системное сообщение о завершении
+    \App\Models\Diagnostic\ConsultationMessage::create([
+        'consultation_id' => $consultation->id,
+        'user_id' => $expert->id,
+        'message' => "Эксперт завершил консультацию",
+        'type' => 'system',
+    ]);
+    
+    // Обновляем статус случая
+    if ($consultation->case_id) {
+        \App\Models\Diagnostic\DiagnosticCase::where('id', $consultation->case_id)
+            ->update(['status' => 'completed']);
+    }
+    
+    return redirect()->route('diagnostic.consultation.expert-dashboard')
+        ->with('success', 'Консультация завершена');
+}
     
    
     

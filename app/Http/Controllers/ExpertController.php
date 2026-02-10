@@ -13,8 +13,8 @@ class ExpertController extends Controller
 {
     public function __construct()
     {
-        $this->middleware('auth');
-        $this->middleware('expert');
+        //$this->middleware('auth');
+       // $this->middleware('expert');
     }
 
     /**

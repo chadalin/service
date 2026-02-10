@@ -295,6 +295,7 @@ Route::middleware(['auth'])->prefix('admin')->name('admin.')->group(function () 
     Route::prefix('experts')->name('experts.')->group(function () {
         Route::get('/', [ExpertController::class, 'index'])->name('index');
         Route::get('/create', [ExpertController::class, 'create'])->name('create');
+        Route::get('/{expert}', [ExpertController::class, 'show'])->name('show');
         Route::post('/', [ExpertController::class, 'store'])->name('store');
         Route::get('/{expert}/edit', [ExpertController::class, 'edit'])->name('edit');
         Route::put('/{expert}', [ExpertController::class, 'update'])->name('update');
