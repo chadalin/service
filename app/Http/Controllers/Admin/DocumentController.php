@@ -7,6 +7,9 @@ use App\Models\Document;
 use App\Models\DocumentPage;
 use App\Models\Brand;
 use App\Models\CarModel;
+use App\Models\Diagnostic\Symptom;
+use App\Models\Diagnostic\Rule;
+use App\Models\PriceItem;
 use App\Models\RepairCategory;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Storage;
@@ -701,61 +704,414 @@ class DocumentController extends Controller
     }
 
     // В DocumentController добавьте методы:
-public function showPage($id, $pageNumber)
-{
-    // Находим документ
-    $document = Document::findOrFail($id);
-    
-    // Находим страницу документа по номеру
-    $page = DocumentPage::where('document_id', $id)
-        ->where('page_number', $pageNumber)
-        ->firstOrFail();
-    
-    // Получаем предыдущую и следующую страницы для навигации
-    $prevPage = DocumentPage::where('document_id', $id)
-        ->where('page_number', '<', $pageNumber)
-        ->orderBy('page_number', 'desc')
-        ->first();
-    
-    $nextPage = DocumentPage::where('document_id', $id)
-        ->where('page_number', '>', $pageNumber)
-        ->orderBy('page_number', 'asc')
-        ->first();
-    
-    // Получаем терм для подсветки из запроса
-    $highlightTerm = request()->input('highlight', '');
-    
-    // Получаем скриншоты для страницы
-    $screenshots = $this->getPageScreenshots($document, $page);
-    
-    // Получаем дополнительные изображения
-    $images = $this->getPageImages($document, $page);
-    
-    // Парсим текст на абзацы
-    $paragraphs = $this->parseParagraphs($page->content_text ?? '');
-    
-    // Подсвечиваем искомый термин в тексте
-    $highlightedContent = null;
-    if (!empty($highlightTerm)) {
-        $highlightedContent = $this->highlightText($page->content_text, $highlightTerm);
+public function showPage($id, $pageNumber, Request $request)
+    {
+        // Находим документ
+        $document = Document::with(['carModel.brand'])->findOrFail($id);
+        
+        // Находим страницу документа по номеру
+        $page = DocumentPage::where('document_id', $id)
+            ->where('page_number', $pageNumber)
+            ->firstOrFail();
+        
+        // Получаем предыдущую и следующую страницы
+        $prevPage = DocumentPage::where('document_id', $id)
+            ->where('page_number', '<', $pageNumber)
+            ->orderBy('page_number', 'desc')
+            ->first();
+        
+        $nextPage = DocumentPage::where('document_id', $id)
+            ->where('page_number', '>', $pageNumber)
+            ->orderBy('page_number', 'asc')
+            ->first();
+        
+        // Получаем терм для подсветки
+        $highlightTerm = $request->input('highlight', '');
+        
+        // ПОИСК ДИАГНОСТИЧЕСКОЙ ИНФОРМАЦИИ
+        $diagnosticInfo = $this->findDiagnosticInfo($page->content_text ?? '', $document);
+        
+        // Получаем связанные симптомы и правила
+        $relatedSymptoms = $diagnosticInfo['symptoms'] ?? [];
+        $relatedRules = $diagnosticInfo['rules'] ?? [];
+        $errorCodes = $diagnosticInfo['error_codes'] ?? [];
+        
+        // Получаем рекомендуемые запчасти
+        $recommendedParts = $this->findRecommendedParts($diagnosticInfo, $document);
+        
+        // Получаем скриншоты
+        $screenshots = $this->getPageScreenshots($document, $page);
+        
+        // Получаем изображения
+        $images = $this->getPageImages($document, $page);
+        
+        // Парсим текст с умной разбивкой на абзацы
+        $paragraphs = $this->smartParagraphSplit($page->content_text ?? '');
+        
+        // Подсвечиваем текст
+        $highlightedContent = $this->highlightText($page->content_text ?? '', $highlightTerm, $errorCodes);
+        
+        // Извлекаем мета-информацию
+        $metaInfo = $this->extractMetaInfo($page, $document, $diagnosticInfo);
+        
+        // Формируем заголовок страницы
+        $title = $this->generatePageTitle($document, $page, $diagnosticInfo);
+        
+        return view('documents.public.page', compact(
+            'document',
+            'page',
+            'prevPage',
+            'nextPage',
+            'highlightTerm',
+            'highlightedContent',
+            'screenshots',
+            'images',
+            'paragraphs',
+            'metaInfo',
+            'title',
+            'diagnosticInfo',
+            'relatedSymptoms',
+            'relatedRules',
+            'errorCodes',
+            'recommendedParts'
+        ));
     }
-    
-    // Извлекаем мета-информацию
-    $metaInfo = $this->extractMetaInfo($page, $document);
-    
-    return view('documents.public.page', compact(
-        'document',
-        'page',
-        'prevPage',
-        'nextPage',
-        'highlightTerm',
-        'highlightedContent',
-        'screenshots',
-        'images',
-        'paragraphs',
-        'metaInfo'
-    ));
-}
+/**
+     * Поиск диагностической информации в тексте
+     */
+    private function findDiagnosticInfo($text, $document)
+    {
+        $result = [
+            'symptoms' => [],
+            'rules' => [],
+            'error_codes' => [],
+            'procedures' => [],
+            'keywords' => []
+        ];
+        
+        if (empty($text)) {
+            return $result;
+        }
+        
+        $textLower = mb_strtolower($text, 'UTF-8');
+        
+        // 1. Поиск кодов ошибок
+        preg_match_all('/\b([A-Z]{1,2}[0-9]{3,4}(?:-[0-9]{1,2})?)\b/', $text, $errorMatches);
+        $result['error_codes'] = array_unique($errorMatches[1] ?? []);
+        
+        // 2. Поиск симптомов в базе данных
+        $possibleSymptoms = Symptom::where('is_active', true)
+            ->where(function($q) use ($textLower) {
+                $q->whereRaw('LOWER(name) LIKE ?', ['%' . $textLower . '%'])
+                  ->orWhereRaw('LOWER(description) LIKE ?', ['%' . $textLower . '%']);
+            })
+            ->limit(5)
+            ->get();
+        
+        foreach ($possibleSymptoms as $symptom) {
+            $result['symptoms'][] = [
+                'id' => $symptom->id,
+                'name' => $symptom->name,
+                'description' => Str::limit($symptom->description, 150),
+                'relevance' => $this->calculateRelevanceScore($textLower, $symptom)
+            ];
+        }
+        
+        // 3. Поиск правил диагностики
+        if (!empty($result['error_codes']) || !empty($result['symptoms'])) {
+            $rulesQuery = Rule::where('is_active', true)
+                ->with(['symptom', 'brand', 'model']);
+            
+            // Фильтр по бренду
+            if ($document->carModel && $document->carModel->brand) {
+                $rulesQuery->where('brand_id', $document->carModel->brand->id);
+            }
+            
+            // Поиск по кодам ошибок
+            if (!empty($result['error_codes'])) {
+                $rulesQuery->where(function($q) use ($result) {
+                    foreach ($result['error_codes'] as $code) {
+                        $q->orWhere('possible_causes', 'like', "%{$code}%");
+                    }
+                });
+            }
+            
+            // Поиск по симптомам
+            if (!empty($result['symptoms'])) {
+                $symptomIds = array_column($result['symptoms'], 'id');
+                $rulesQuery->orWhereIn('symptom_id', $symptomIds);
+            }
+            
+            $rules = $rulesQuery->limit(3)->get();
+            
+            foreach ($rules as $rule) {
+                $result['rules'][] = [
+                    'id' => $rule->id,
+                    'symptom_name' => $rule->symptom->name ?? 'Неизвестный симптом',
+                    'possible_causes' => is_array($rule->possible_causes) ? array_slice($rule->possible_causes, 0, 3) : [],
+                    'diagnostic_steps' => is_array($rule->diagnostic_steps) ? array_slice($rule->diagnostic_steps, 0, 3) : [],
+                    'complexity' => $rule->complexity_level ?? 1,
+                    'estimated_time' => $rule->estimated_time ?? 30,
+                    'price' => $rule->base_consultation_price ?? 3000
+                ];
+            }
+        }
+        
+        // 4. Извлечение диагностических процедур из текста
+        $procedurePatterns = [
+            '/[^.!?]*?(?:проверить|проверка|диагностик|измерить|заменить|отрегулировать)[^.!?]*[.!?]/iu',
+            '/[^.!?]*?(?:check|inspect|test|measure|replace|adjust)[^.!?]*[.!?]/i',
+            '/[^.!?]*?(?:неисправность|ошибка|проблема|симптом)[^.!?]*[.!?]/iu'
+        ];
+        
+        foreach ($procedurePatterns as $pattern) {
+            preg_match_all($pattern, $text, $matches);
+            foreach ($matches[0] ?? [] as $procedure) {
+                $procedure = trim($procedure);
+                if (!empty($procedure) && !in_array($procedure, $result['procedures'])) {
+                    $result['procedures'][] = $procedure;
+                }
+            }
+        }
+        $result['procedures'] = array_slice($result['procedures'], 0, 5);
+        
+        return $result;
+    }
+
+    /**
+     * Поиск рекомендуемых запчастей
+     */
+    private function findRecommendedParts($diagnosticInfo, $document)
+    {
+        $parts = collect();
+        
+        // Поиск по кодам ошибок
+        if (!empty($diagnosticInfo['error_codes'])) {
+            foreach ($diagnosticInfo['error_codes'] as $code) {
+                $found = PriceItem::where('sku', 'like', "%{$code}%")
+                    ->orWhere('name', 'like', "%{$code}%")
+                    ->where('price', '>', 0)
+                    ->limit(2)
+                    ->get();
+                $parts = $parts->concat($found);
+            }
+        }
+        
+        // Поиск по симптомам
+        if (!empty($diagnosticInfo['symptoms'])) {
+            foreach ($diagnosticInfo['symptoms'] as $symptom) {
+                $keywords = explode(' ', $symptom['name']);
+                foreach ($keywords as $keyword) {
+                    if (strlen($keyword) > 3) {
+                        $found = PriceItem::where('name', 'like', "%{$keyword}%")
+                            ->orWhere('description', 'like', "%{$keyword}%")
+                            ->where('price', '>', 0)
+                            ->limit(2)
+                            ->get();
+                        $parts = $parts->concat($found);
+                    }
+                }
+            }
+        }
+        
+        // Фильтр по бренду
+        if ($document->carModel && $document->carModel->brand) {
+            $parts = $parts->filter(function($part) use ($document) {
+                return $part->brand_id == $document->carModel->brand->id;
+            });
+        }
+        
+        // Уникальные и ограничение
+        $parts = $parts->unique('id')->take(3);
+        
+        return $parts->map(function($part) {
+            return [
+                'id' => $part->id,
+                'sku' => $part->sku,
+                'name' => Str::limit($part->name, 60),
+                'price' => $part->price,
+                'formatted_price' => number_format($part->price, 0, '', ' '),
+                'brand' => $part->catalog_brand ?? '',
+                'quantity' => $part->quantity ?? 0,
+                'availability' => $part->quantity > 10 ? 'В наличии' : 
+                                 ($part->quantity > 0 ? 'Мало' : 'Под заказ'),
+                'url' => route('admin.price.show', $part->id)
+            ];
+        })->toArray();
+    }
+
+    /**
+     * Умная разбивка текста на абзацы по 5-6 строк
+     */
+    private function smartParagraphSplit($text)
+    {
+        if (empty($text)) {
+            return [];
+        }
+        
+        // Сначала разбиваем по двойным переносам строк
+        $paragraphs = preg_split('/\n\s*\n/', $text);
+        
+        $result = [];
+        
+        foreach ($paragraphs as $paragraph) {
+            $paragraph = trim($paragraph);
+            if (empty($paragraph)) {
+                continue;
+            }
+            
+            // Разбиваем на строки
+            $lines = explode("\n", $paragraph);
+            $lines = array_filter(array_map('trim', $lines));
+            
+            if (count($lines) <= 6) {
+                // Если абзац маленький - оставляем как есть
+                $result[] = [
+                    'title' => $this->extractParagraphTitle($paragraph),
+                    'content' => $paragraph,
+                    'lines' => count($lines)
+                ];
+            } else {
+                // Разбиваем большой абзац на части по 5-6 строк
+                $chunks = array_chunk($lines, 6);
+                
+                foreach ($chunks as $index => $chunk) {
+                    $chunkText = implode("\n", $chunk);
+                    $result[] = [
+                        'title' => $this->extractParagraphTitle($chunkText, $index > 0),
+                        'content' => $chunkText,
+                        'lines' => count($chunk)
+                    ];
+                }
+            }
+        }
+        
+        return $result;
+    }
+
+    /**
+     * Извлечение заголовка абзаца из первой строки
+     */
+    private function extractParagraphTitle($text, $isContinued = false)
+    {
+        $lines = explode("\n", trim($text));
+        $firstLine = trim($lines[0] ?? '');
+        
+        // Берем первые 5-7 слов
+        $words = explode(' ', $firstLine);
+        $title = implode(' ', array_slice($words, 0, 7));
+        
+        if (strlen($title) > 50) {
+            $title = substr($title, 0, 50) . '...';
+        }
+        
+        if ($isContinued) {
+            $title = 'Продолжение: ' . $title;
+        }
+        
+        return $title;
+    }
+
+    /**
+     * Подсветка текста с приоритетом для кодов ошибок
+     */
+    private function highlightText($text, $term, $errorCodes = [])
+    {
+        if (empty($text) || (empty($term) && empty($errorCodes))) {
+            return null;
+        }
+        
+        $escapedText = htmlspecialchars($text);
+        
+        // Сначала подсвечиваем коды ошибок (желтым)
+        foreach ($errorCodes as $code) {
+            $pattern = '/' . preg_quote($code, '/') . '/';
+            $escapedText = preg_replace($pattern, '<mark class="bg-warning text-dark fw-bold">$0</mark>', $escapedText);
+        }
+        
+        // Затем подсвечиваем поисковый термин (голубым)
+        if (!empty($term)) {
+            $pattern = '/' . preg_quote($term, '/') . '/iu';
+            $escapedText = preg_replace($pattern, '<mark class="bg-info text-white">$0</mark>', $escapedText);
+        }
+        
+        return $escapedText;
+    }
+
+    /**
+     * Расчет релевантности симптома
+     */
+    private function calculateRelevanceScore($text, $symptom)
+    {
+        $score = 0;
+        $nameLower = mb_strtolower($symptom->name, 'UTF-8');
+        $descLower = mb_strtolower($symptom->description ?? '', 'UTF-8');
+        
+        if (strpos($text, $nameLower) !== false) {
+            $score += 0.7;
+        }
+        
+        if (strpos($text, $descLower) !== false) {
+            $score += 0.3;
+        }
+        
+        return min(1.0, $score);
+    }
+
+    /**
+     * Генерация заголовка страницы
+     */
+    private function generatePageTitle($document, $page, $diagnosticInfo)
+    {
+        if (!empty($diagnosticInfo['error_codes'])) {
+            return 'Код ошибки ' . implode(', ', array_slice($diagnosticInfo['error_codes'], 0, 2)) . 
+                   ' - ' . $document->title;
+        }
+        
+        if (!empty($diagnosticInfo['symptoms'])) {
+            return $diagnosticInfo['symptoms'][0]['name'] . ' - ' . $document->title;
+        }
+        
+        return $document->title . ' - Страница ' . $page->page_number;
+    }
+
+    /**
+     * Извлечение мета-информации
+     */
+    private function extractMetaInfo($page, $document, $diagnosticInfo)
+    {
+        $metaInfo = [
+            'title' => $page->section_title ?? null,
+            'description' => null,
+            'keywords' => [],
+            'instructions' => $diagnosticInfo['procedures'] ?? []
+        ];
+        
+        $text = $page->content_text ?? '';
+        
+        // Описание
+        $sentences = preg_split('/(?<=[.!?])\s+/', $text, 4);
+        if (count($sentences) >= 2) {
+            $metaInfo['description'] = implode(' ', array_slice($sentences, 0, 2));
+        }
+        
+        // Ключевые слова
+        $keywords = [];
+        if (!empty($diagnosticInfo['error_codes'])) {
+            $keywords = array_merge($keywords, $diagnosticInfo['error_codes']);
+        }
+        if (!empty($diagnosticInfo['symptoms'])) {
+            foreach ($diagnosticInfo['symptoms'] as $symptom) {
+                $keywords[] = $symptom['name'];
+            }
+        }
+        $metaInfo['keywords'] = array_slice($keywords, 0, 10);
+        
+        return $metaInfo;
+    }
+
+   
+   
 
 /**
  * Получить скриншоты для страницы документа
@@ -920,62 +1276,12 @@ private function parseParagraphs($text)
 /**
  * Подсветка текста
  */
-private function highlightText($text, $term)
-{
-    if (empty($text) || empty($term)) {
-        return null;
-    }
-    
-    $pattern = '/' . preg_quote($term, '/') . '/iu';
-    $highlighted = preg_replace($pattern, '<mark class="bg-warning">$0</mark>', htmlspecialchars($text));
-    
-    return $highlighted;
-}
+
 
 /**
  * Извлечение мета-информации из текста
  */
-private function extractMetaInfo($page, $document)
-{
-    $metaInfo = [
-        'title' => $page->section_title ?? null,
-        'description' => null,
-        'keywords' => [],
-        'instructions' => []
-    ];
-    
-    $text = $page->content_text ?? '';
-    
-    // Извлекаем описание (первые 2-3 предложения)
-    $sentences = preg_split('/(?<=[.!?])\s+/', $text, 5);
-    if (count($sentences) >= 2) {
-        $metaInfo['description'] = implode(' ', array_slice($sentences, 0, 3));
-    }
-    
-    // Извлекаем ключевые слова
-    preg_match_all('/\b([A-ZА-Я][a-zа-я]{3,}(?:\s+[A-ZА-Я][a-zа-я]{3,}){0,2})\b/u', $text, $matches);
-    $metaInfo['keywords'] = array_slice(array_unique($matches[1] ?? []), 0, 10);
-    
-    // Извлекаем инструкции
-    $instructionPatterns = [
-        '/[^.!?]*?(?:должен|должна|должно|должны|необходимо|следует|требуется|нужно)[^.!?]*[.!?]/iu',
-        '/[^.!?]*?(?:remove|install|check|inspect|replace|adjust|measure)[^.!?]*[.!?]/i'
-    ];
-    
-    $instructions = [];
-    foreach ($instructionPatterns as $pattern) {
-        preg_match_all($pattern, $text, $matches);
-        foreach ($matches[0] ?? [] as $instruction) {
-            $instruction = trim($instruction);
-            if (!empty($instruction) && !in_array($instruction, $instructions)) {
-                $instructions[] = $instruction;
-            }
-        }
-    }
-    $metaInfo['instructions'] = array_slice($instructions, 0, 5);
-    
-    return $metaInfo;
-}
+
 
 public function viewPage(Request $request)
 {
