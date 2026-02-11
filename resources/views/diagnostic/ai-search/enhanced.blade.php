@@ -2153,7 +2153,25 @@ function showToast(message, type = 'info') {
         }
     }
 }
-
+   window.toggleCaseForm = function() {
+    console.log('toggleCaseForm вызвана');
+    
+    // Ищем форму
+    let form = document.querySelector('#caseFormContainer, .case-form-section');
+    
+    if (!form) {
+        alert('Форма не найдена! Выполните поиск, при котором нет результатов.');
+        return;
+    }
+    
+    // Переключаем видимость
+    if (form.style.display === 'none' || getComputedStyle(form).display === 'none') {
+        form.style.display = 'block';
+        form.scrollIntoView({ behavior: 'smooth' });
+    } else {
+        form.style.display = 'none';
+    }
+};
 </script>
 
 <!-- Toast контейнер -->
