@@ -665,22 +665,19 @@ async function performEnhancedSearch() {
         // Используем FormData для корректной отправки данных
         const formData = new FormData(form);
         
-        // Получаем значения и конвертируем пустые строки в null
+        // Получаем значения - НЕ конвертируем brand_id в число, оставляем строку
         const brandIdValue = formData.get('brand_id');
         const modelIdValue = document.getElementById('model_id').disabled ? null : formData.get('model_id');
         
         // Создаем объект с данными
         const searchData = {
             query: formData.get('query'),
-            brand_id: brandIdValue && brandIdValue !== '' ? parseInt(brandIdValue) : null,
-            model_id: modelIdValue && modelIdValue !== '' ? parseInt(modelIdValue) : null,
+            brand_id: brandIdValue && brandIdValue !== '' ? brandIdValue : null, // НЕ parseInt!
+            model_id: modelIdValue && modelIdValue !== '' ? parseInt(modelIdValue) : null, // model_id может быть числом
             search_type: formData.get('search_type'),
         };
         
-        // Проверяем валидность числовых значений
-        if (searchData.brand_id !== null && isNaN(searchData.brand_id)) {
-            searchData.brand_id = null;
-        }
+        // Проверяем валидность числовых значений (только для model_id)
         if (searchData.model_id !== null && isNaN(searchData.model_id)) {
             searchData.model_id = null;
         }
@@ -1126,6 +1123,24 @@ function createDocumentCardHTML(doc, index) {
     const pageNumberText = doc.page_number ? ` (стр. ${doc.page_number})` : '';
     const highlightParam = doc.highlight_term ? `?highlight=${encodeURIComponent(doc.highlight_term)}` : '';
     
+    // HTML для превью изображения (справа)
+    let previewHTML = '';
+    if (doc.preview_image) {
+        previewHTML = `
+            <div class="document-preview-image" style="float: right; margin-left: 1rem; margin-bottom: 0.5rem; width: 150px;">
+                <img src="${doc.preview_image}" 
+                     alt="${doc.preview_alt || 'Превью страницы'}" 
+                     style="max-width: 150px; max-height: 150px; 
+                            border: 1px solid #ddd; border-radius: 4px;
+                            object-fit: cover;"
+                     onerror="this.onerror=null; this.src='${this.getDefaultDocumentIcon(doc.file_type)}'; this.style.padding='20px'; this.style.backgroundColor='#f8f9fa'">
+                <div class="text-center small text-muted mt-1">
+                    <i class="bi bi-camera"></i> Страница ${doc.page_number}
+                </div>
+            </div>
+        `;
+    }
+    
     return `
         <div class="document-result fade-in-up" style="animation-delay: ${index * 0.1}s">
             <div class="document-header">
@@ -1148,22 +1163,31 @@ function createDocumentCardHTML(doc, index) {
                     <span class="badge bg-light text-dark">
                         <i class="bi bi-file-earmark"></i> ${fileType}
                     </span>
+                    <span class="badge bg-secondary ms-1">
+                        <i class="bi bi-eye"></i> ${doc.view_count || 0}
+                    </span>
                 </div>
             </div>
             
-            ${doc.excerpt ? `
-                <div class="document-excerpt">
-                    ${escapeHtml(doc.excerpt)}
-                </div>
-            ` : ''}
-            
-            ${doc.content_preview ? `
-                <div class="document-preview">
-                    <div class="preview-content">
-                        ${this.highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}
+            <div style="overflow: hidden; position: relative;">
+                ${previewHTML}
+                
+                ${doc.excerpt ? `
+                    <div class="document-excerpt">
+                        <i class="bi bi-quote text-muted me-1"></i>
+                        ${escapeHtml(doc.excerpt)}
                     </div>
-                </div>
-            ` : ''}
+                ` : ''}
+                
+                ${doc.content_preview ? `
+                    <div class="document-preview">
+                        <div class="preview-content" style="max-height: 100px; overflow: hidden;">
+                            ${this.highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}
+                        </div>
+                        <a href="#" class="small text-primary" onclick="togglePreview(this)">Показать больше</a>
+                    </div>
+                ` : ''}
+            </div>
             
             <div class="document-tags">
                 ${doc.detected_system ? `
@@ -1178,14 +1202,54 @@ function createDocumentCardHTML(doc, index) {
                     </span>
                 ` : ''}
                 
-                <a href="${pageUrl}${highlightParam}" 
-                   target="_blank" 
-                   class="btn btn-sm btn-primary float-end">
-                    <i class="bi bi-arrow-up-right me-1"></i> Открыть страницу
-                </a>
+                <div class="float-end">
+                    <a href="${pageUrl}${highlightParam}" 
+                       target="_blank" 
+                       class="btn btn-sm btn-primary">
+                        <i class="bi bi-arrow-up-right me-1"></i> Открыть
+                    </a>
+                    <button class="btn btn-sm btn-outline-secondary ms-1" 
+                            onclick="viewDocumentDetails(${doc.id}, ${doc.page_id})">
+                        <i class="bi bi-info-circle"></i>
+                    </button>
+                </div>
             </div>
         </div>
     `;
+}
+
+// Добавим вспомогательную функцию для дефолтных иконок
+function getDefaultDocumentIcon(fileType) {
+    const icons = {
+        'pdf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-pdf.svg',
+        'doc': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-word.svg',
+        'docx': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-word.svg',
+        'xls': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-excel.svg',
+        'xlsx': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-excel.svg',
+    };
+    
+    return icons[fileType?.toLowerCase()] || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file.svg';
+}
+
+// Функция для переключения превью
+function togglePreview(button) {
+    const previewContent = button.previousElementSibling;
+    if (previewContent.style.maxHeight === '100px') {
+        previewContent.style.maxHeight = 'none';
+        button.textContent = 'Скрыть';
+    } else {
+        previewContent.style.maxHeight = '100px';
+        button.textContent = 'Показать больше';
+    }
+}
+
+// Функция для просмотра деталей документа
+function viewDocumentDetails(documentId, pageId) {
+    if (pageId) {
+        window.open(`/documents/${documentId}/pages/${pageId}/details`, '_blank');
+    } else {
+        window.open(`/documents/${documentId}`, '_blank');
+    }
 }
 
 // Функция для подсветки найденных терминов

@@ -172,7 +172,7 @@ class DocumentController extends Controller
     }
 
     public function show(Document $document)
-    {
+    { 
         $document->load(['carModel.brand', 'category', 'uploadedBy']);
         
         $document->keywords = is_string($document->keywords) ? 
@@ -701,19 +701,280 @@ class DocumentController extends Controller
     }
 
     // В DocumentController добавьте методы:
-public function showPage($id, $page)
+public function showPage($id, $pageNumber)
 {
-    $document = Document::with(['pages' => function($query) use ($page) {
-        $query->where('page_number', $page);
-    }])->findOrFail($id);
+    // Находим документ
+    $document = Document::findOrFail($id);
     
-    $pageContent = $document->pages->first();
+    // Находим страницу документа по номеру
+    $page = DocumentPage::where('document_id', $id)
+        ->where('page_number', $pageNumber)
+        ->firstOrFail();
     
-    if (!$pageContent) {
-        abort(404, 'Страница не найдена');
+    // Получаем предыдущую и следующую страницы для навигации
+    $prevPage = DocumentPage::where('document_id', $id)
+        ->where('page_number', '<', $pageNumber)
+        ->orderBy('page_number', 'desc')
+        ->first();
+    
+    $nextPage = DocumentPage::where('document_id', $id)
+        ->where('page_number', '>', $pageNumber)
+        ->orderBy('page_number', 'asc')
+        ->first();
+    
+    // Получаем терм для подсветки из запроса
+    $highlightTerm = request()->input('highlight', '');
+    
+    // Получаем скриншоты для страницы
+    $screenshots = $this->getPageScreenshots($document, $page);
+    
+    // Получаем дополнительные изображения
+    $images = $this->getPageImages($document, $page);
+    
+    // Парсим текст на абзацы
+    $paragraphs = $this->parseParagraphs($page->content_text ?? '');
+    
+    // Подсвечиваем искомый термин в тексте
+    $highlightedContent = null;
+    if (!empty($highlightTerm)) {
+        $highlightedContent = $this->highlightText($page->content_text, $highlightTerm);
     }
     
-    return view('documents.page', compact('document', 'pageContent'));
+    // Извлекаем мета-информацию
+    $metaInfo = $this->extractMetaInfo($page, $document);
+    
+    return view('documents.public.page', compact(
+        'document',
+        'page',
+        'prevPage',
+        'nextPage',
+        'highlightTerm',
+        'highlightedContent',
+        'screenshots',
+        'images',
+        'paragraphs',
+        'metaInfo'
+    ));
+}
+
+/**
+ * Получить скриншоты для страницы документа
+ */
+private function getPageScreenshots($document, $page)
+{
+    $screenshots = [];
+    
+    // Проверяем наличие модели Screenshot
+    if (class_exists('\App\Models\DocumentScreenshot')) {
+        $dbScreenshots = \App\Models\DocumentScreenshot::where('document_id', $document->id)
+            ->where('page_number', $page->page_number)
+            ->orderBy('is_main', 'desc')
+            ->orderBy('order')
+            ->get();
+        
+        foreach ($dbScreenshots as $index => $screenshot) {
+            $screenshots[] = [
+                'url' => $this->getMediaUrl($screenshot),
+                'description' => $screenshot->description ?? 'Скриншот страницы ' . $page->page_number,
+                'alt' => $screenshot->alt_text ?? 'Скриншот страницы ' . $page->page_number,
+                'is_main' => $screenshot->is_main ?? false,
+                'width' => $screenshot->width ?? null,
+                'height' => $screenshot->height ?? null,
+                'file_size' => $screenshot->file_size ?? null,
+            ];
+        }
+    }
+    
+    // Если нет в базе, ищем файлы по шаблону
+    if (empty($screenshots)) {
+        $screenshots = $this->findScreenshotFiles($document, $page);
+    }
+    
+    return $screenshots;
+}
+
+/**
+ * Получить изображения для страницы документа
+ */
+private function getPageImages($document, $page)
+{
+    $images = [];
+    
+    if (class_exists('\App\Models\DocumentImage')) {
+        $dbImages = \App\Models\DocumentImage::where('document_id', $document->id)
+            ->where('page_number', $page->page_number)
+            //->orderBy('order')
+            ->get();
+        
+        foreach ($dbImages as $image) {
+            $images[] = (object)[
+                'url' => $this->getMediaUrl($image),
+                'description' => $image->description ?? 'Изображение',
+                'alt' => $image->alt_text ?? 'Изображение',
+                'has_screenshot' => true,
+                'screenshot_url' => $this->getMediaUrl($image),
+            ];
+        }
+    }
+    
+    return $images;
+}
+
+/**
+ * Получить URL медиафайла
+ */
+private function getMediaUrl($media)
+{
+    if (!empty($media->url)) {
+        return $media->url;
+    }
+    
+    if (!empty($media->file_path)) {
+        if (file_exists(public_path($media->file_path))) {
+            return asset($media->file_path);
+        }
+        if (file_exists(storage_path('app/public/' . $media->file_path))) {
+            return asset('storage/' . $media->file_path);
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Найти файлы скриншотов по шаблону
+ */
+private function findScreenshotFiles($document, $page)
+{
+    $screenshots = [];
+    
+    // Шаблоны путей для поиска
+    $paths = [
+        'storage/document_images/screenshots/' . $document->id . '/page_' . $page->page_number . '_full.jpg',
+        'storage/document_images/screenshots/' . $document->id . '/page_' . $page->page_number . '.jpg',
+        'storage/document_images/screenshots/' . $document->id . '/' . $page->page_number . '.jpg',
+        'public/document_images/screenshots/' . $document->id . '/page_' . $page->page_number . '_full.jpg',
+        'public/document_images/screenshots/' . $document->id . '/page_' . $page->page_number . '.jpg',
+    ];
+    
+    foreach ($paths as $path) {
+        // Проверяем в public
+        $publicPath = public_path($path);
+        if (file_exists($publicPath)) {
+            $screenshots[] = [
+                'url' => asset($path),
+                'description' => 'Скриншот страницы ' . $page->page_number,
+                'alt' => 'Скриншот страницы ' . $page->page_number,
+                'is_main' => true,
+                'width' => null,
+                'height' => null,
+                'file_size' => file_exists($publicPath) ? filesize($publicPath) : null,
+            ];
+            break;
+        }
+        
+        // Проверяем в storage
+        $storagePath = storage_path('app/' . $path);
+        if (file_exists($storagePath)) {
+            $urlPath = str_replace('storage/app/public/', 'storage/', $path);
+            $screenshots[] = [
+                'url' => asset($urlPath),
+                'description' => 'Скриншот страницы ' . $page->page_number,
+                'alt' => 'Скриншот страницы ' . $page->page_number,
+                'is_main' => true,
+                'width' => null,
+                'height' => null,
+                'file_size' => filesize($storagePath),
+            ];
+            break;
+        }
+    }
+    
+    return $screenshots;
+}
+
+/**
+ * Парсинг текста на абзацы
+ */
+private function parseParagraphs($text)
+{
+    if (empty($text)) {
+        return [];
+    }
+    
+    // Разбиваем на абзацы
+    $paragraphs = preg_split('/\n\s*\n/', $text);
+    
+    // Очищаем и фильтруем
+    $paragraphs = array_map(function($p) {
+        return trim(preg_replace('/\s+/', ' ', $p));
+    }, $paragraphs);
+    
+    $paragraphs = array_filter($paragraphs, function($p) {
+        return !empty($p) && mb_strlen($p) > 20;
+    });
+    
+    return array_values($paragraphs);
+}
+
+/**
+ * Подсветка текста
+ */
+private function highlightText($text, $term)
+{
+    if (empty($text) || empty($term)) {
+        return null;
+    }
+    
+    $pattern = '/' . preg_quote($term, '/') . '/iu';
+    $highlighted = preg_replace($pattern, '<mark class="bg-warning">$0</mark>', htmlspecialchars($text));
+    
+    return $highlighted;
+}
+
+/**
+ * Извлечение мета-информации из текста
+ */
+private function extractMetaInfo($page, $document)
+{
+    $metaInfo = [
+        'title' => $page->section_title ?? null,
+        'description' => null,
+        'keywords' => [],
+        'instructions' => []
+    ];
+    
+    $text = $page->content_text ?? '';
+    
+    // Извлекаем описание (первые 2-3 предложения)
+    $sentences = preg_split('/(?<=[.!?])\s+/', $text, 5);
+    if (count($sentences) >= 2) {
+        $metaInfo['description'] = implode(' ', array_slice($sentences, 0, 3));
+    }
+    
+    // Извлекаем ключевые слова
+    preg_match_all('/\b([A-ZА-Я][a-zа-я]{3,}(?:\s+[A-ZА-Я][a-zа-я]{3,}){0,2})\b/u', $text, $matches);
+    $metaInfo['keywords'] = array_slice(array_unique($matches[1] ?? []), 0, 10);
+    
+    // Извлекаем инструкции
+    $instructionPatterns = [
+        '/[^.!?]*?(?:должен|должна|должно|должны|необходимо|следует|требуется|нужно)[^.!?]*[.!?]/iu',
+        '/[^.!?]*?(?:remove|install|check|inspect|replace|adjust|measure)[^.!?]*[.!?]/i'
+    ];
+    
+    $instructions = [];
+    foreach ($instructionPatterns as $pattern) {
+        preg_match_all($pattern, $text, $matches);
+        foreach ($matches[0] ?? [] as $instruction) {
+            $instruction = trim($instruction);
+            if (!empty($instruction) && !in_array($instruction, $instructions)) {
+                $instructions[] = $instruction;
+            }
+        }
+    }
+    $metaInfo['instructions'] = array_slice($instructions, 0, 5);
+    
+    return $metaInfo;
 }
 
 public function viewPage(Request $request)

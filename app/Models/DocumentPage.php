@@ -84,6 +84,13 @@ class DocumentPage extends Model
             ->orderBy('page_number', 'desc')
             ->first();
     }
+
+    public function screenshots()
+{
+    return $this->hasMany(DocumentScreenshot::class, 'document_page_id')
+                ->orderBy('is_main', 'desc')
+                ->orderBy('order');
+}
     
     /**
      * Получить отформатированный контент

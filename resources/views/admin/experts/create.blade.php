@@ -1,6 +1,6 @@
 @extends('layouts.diagnostic')
 
-@section('title', 'Профиль эксперта: ' . $expert->name)
+@section('title', 'Профиль эксперта: ')
 
 @section('content')
 <div class="container-fluid">

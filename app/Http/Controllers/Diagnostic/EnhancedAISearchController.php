@@ -65,9 +65,9 @@ class EnhancedAISearchController extends Controller
 
         $startTime = microtime(true);
         
-        // Получаем параметры - ВАЖНО: brand_id передается из формы
+        // Получаем параметры
         $query = trim($request->input('query'));
-        $brandId = $request->input('brand_id'); // Это строка типа "ALFA_ROMEO" из формы
+        $brandId = $request->input('brand_id');
         $modelId = $request->input('model_id');
         $searchType = $request->input('search_type', 'advanced');
 
@@ -79,28 +79,40 @@ class EnhancedAISearchController extends Controller
             'all_params' => $request->all()
         ]);
 
-        // Получаем объект бренда для использования
+        // Получаем объект бренда
         $brand = null;
-        if ($brandId) {
+        $brandIdForSearch = null;
+        
+        if (!empty($brandId)) {
             $brand = Brand::find($brandId);
-            Log::info('Brand found from form', [
-                'brand_id' => $brandId,
-                'brand_exists' => $brand ? 'YES' : 'NO',
-                'brand_name' => $brand ? $brand->name : 'N/A'
-            ]);
+            
+            if ($brand) {
+                $brandIdForSearch = $brand->id;
+                Log::info('Brand found by ID', [
+                    'brand_id' => $brandId,
+                    'found_brand_name' => $brand->name
+                ]);
+            } else {
+                Log::warning('Brand not found in database', ['brand_id' => $brandId]);
+            }
         }
 
+        Log::info('Final brand for search', [
+            'brand_id_for_search' => $brandIdForSearch,
+            'brand_name' => $brand ? $brand->name : 'N/A'
+        ]);
+
         try {
-            // 1. Поиск симптомов с фильтрацией по бренду
-            $groupedResults = $this->searchSymptomsWithRules($query, $brandId);
+            // 1. Поиск симптомов с правилами и фильтрацией по бренду
+            $groupedResults = $this->searchSymptomsWithRules($query, $brandIdForSearch);
             
-            // 2. Поиск документов (включая коды ошибок)
-            $documents = $this->searchDocuments($query, $brand, $modelId);
+            // 2. Поиск документов с фильтрацией по бренду
+            $documents = $this->searchDocuments($query, $brandIdForSearch, $modelId);
             
-            // 3. Поиск запчастей
+            // 3. Поиск запчастей с фильтрацией по бренду
             $parts = [];
             if (!empty($groupedResults)) {
-                $parts = $this->searchParts($query, $brand);
+                $parts = $this->searchParts($query, $brandIdForSearch);
             }
             
             // 4. Генерация AI ответа
@@ -131,7 +143,10 @@ class EnhancedAISearchController extends Controller
 
         } catch (\Exception $e) {
             Log::error('Enhanced AI Search Error: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'query' => $query,
+                'brand_id' => $brandId,
+                'model_id' => $modelId
             ]);
 
             return response()->json([
@@ -147,121 +162,139 @@ class EnhancedAISearchController extends Controller
      */
     private function searchSymptomsWithRules($query, $brandId = null)
     {
-        Log::debug('Searching symptoms with rules', ['query' => $query, 'brand_id' => $brandId]);
-        
-        $results = [];
-        $cleanQuery = $this->normalizeSearchQuery($query);
-        $searchTerms = $this->extractSearchTerms($cleanQuery);
-        
-        // 1. Сначала ищем правила с фильтрацией по бренду
-        $rulesQuery = Rule::where('is_active', true)
-            ->with(['symptom' => function($q) {
-                $q->where('is_active', true);
-            }, 'brand', 'model']);
-        
-        // Фильтрация по бренду если указан
-        if ($brandId) {
-            $rulesQuery->where('brand_id', $brandId);
-            Log::debug('Filtering rules by brand', ['brand_id' => $brandId]);
-        }
-        
-        // Поиск по симптомам
-        $rulesQuery->whereHas('symptom', function($q) use ($searchTerms) {
-            $q->where(function($subQ) use ($searchTerms) {
-                foreach ($searchTerms as $term) {
-                    if (mb_strlen($term) > 2) {
-                        $subQ->orWhere('name', 'like', "%{$term}%")
-                             ->orWhere('description', 'like', "%{$term}%");
-                    }
-                }
-            });
-        });
-        
-        $rules = $rulesQuery->get();
-        Log::debug('Rules found', ['count' => $rules->count(), 'brand_filter' => $brandId]);
-        
-        // Обработка найденных правил
-        foreach ($rules as $rule) {
-            if ($rule->symptom) {
-                $relevance = $this->calculateRelevance($rule->symptom->name, $rule->symptom->description, $query);
-                
-                $results[] = [
-                    'type' => 'rule',
-                    'id' => $rule->id,
-                    'symptom_id' => $rule->symptom->id,
-                    'title' => $rule->symptom->name,
-                    'description' => $rule->symptom->description ?? '',
-                    'brand' => $rule->brand ? $rule->brand->name : '',
-                    'brand_id' => $rule->brand_id,
-                    'model' => $rule->model ? $rule->model->name : '',
-                    'model_id' => $rule->model_id,
-                    'diagnostic_steps' => is_array($rule->diagnostic_steps) ? $rule->diagnostic_steps : [],
-                    'possible_causes' => is_array($rule->possible_causes) ? $rule->possible_causes : [],
-                    'required_data' => is_array($rule->required_data) ? $rule->required_data : [],
-                    'complexity_level' => $rule->complexity_level ?? 1,
-                    'estimated_time' => $rule->estimated_time ?? 60,
-                    'consultation_price' => $rule->base_consultation_price ?? 3000,
-                    'relevance_score' => $relevance,
-                    'match_type' => 'exact',
-                    'has_rules' => true,
-                    'related_systems' => $rule->symptom->related_systems ?? [],
-                    'frequency' => $rule->symptom->frequency ?? 0,
-                ];
+        try {
+            Log::debug('Searching symptoms with rules', [
+                'query' => $query, 
+                'brand_id' => $brandId,
+                'brand_id_type' => gettype($brandId)
+            ]);
+            
+            $results = [];
+            $cleanQuery = $this->normalizeSearchQuery($query);
+            $searchTerms = $this->extractSearchTerms($cleanQuery);
+            
+            // Определяем, является ли запрос кодом ошибки
+            $isErrorCodeSearch = $this->isErrorCode($query);
+            
+            Log::debug('Search parameters', [
+                'is_error_code' => $isErrorCodeSearch,
+                'search_terms' => $searchTerms,
+                'clean_query' => $cleanQuery
+            ]);
+            
+            // Основной запрос на поиск правил
+            $rulesQuery = Rule::where('is_active', true)
+                ->with(['symptom' => function($q) {
+                    $q->where('is_active', true);
+                }, 'brand', 'model']);
+            
+            // Фильтрация по бренду если указан
+            if (!empty($brandId)) {
+                $rulesQuery->where('brand_id', $brandId);
+                Log::debug('Filtering rules by brand', ['brand_id' => $brandId]);
             }
-        }
-        
-        // 2. Если ничего не найдено или нет фильтра по бренду, ищем общие симптомы
-        if (empty($results)) {
-            $symptomsQuery = Symptom::where('is_active', true)
-                ->with(['rules' => function($q) use ($brandId) {
-                    $q->where('is_active', true)
-                      ->when($brandId, function($q) use ($brandId) {
-                          $q->where('brand_id', $brandId);
-                      })
-                      ->with(['brand', 'model']);
-                }]);
             
-            $symptomsQuery->where(function($q) use ($searchTerms) {
+            // Поиск по симптомам и возможным причинам
+            $rulesQuery->where(function($q) use ($searchTerms, $isErrorCodeSearch, $query) {
+                // Поиск через связанные симптомы
+                $q->whereHas('symptom', function($symptomQuery) use ($searchTerms, $isErrorCodeSearch, $query) {
+                    $symptomQuery->where('is_active', true)
+                        ->where(function($subQ) use ($searchTerms, $isErrorCodeSearch, $query) {
+                            foreach ($searchTerms as $term) {
+                                if (mb_strlen($term) > 2) {
+                                    $subQ->orWhere('name', 'like', "%{$term}%")
+                                         ->orWhere('description', 'like', "%{$term}%");
+                                }
+                            }
+                            
+                            if ($isErrorCodeSearch) {
+                                $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
+                                $subQ->orWhere('description', 'like', "%{$cleanErrorCode}%")
+                                     ->orWhere('description', 'like', "%{$query}%");
+                            }
+                        });
+                });
+                
+                // Также ищем в возможных причинах
+                if ($isErrorCodeSearch) {
+                    $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
+                    $q->orWhere('possible_causes', 'like', "%{$cleanErrorCode}%")
+                      ->orWhere('possible_causes', 'like', "%{$query}%");
+                }
+                
+                // Поиск по отдельным терминам в возможных причинах
                 foreach ($searchTerms as $term) {
-                    if (mb_strlen($term) > 2) {
-                        $q->orWhere('name', 'like', "%{$term}%")
-                          ->orWhere('description', 'like', "%{$term}%");
+                    if (mb_strlen($term) > 3) {
+                        $q->orWhere('possible_causes', 'like', "%{$term}%");
                     }
                 }
             });
             
-            $symptoms = $symptomsQuery->get();
+            $rules = $rulesQuery->orderBy('complexity_level')->get();
+            Log::debug('Rules found', ['count' => $rules->count()]);
             
-            foreach ($symptoms as $symptom) {
-                $relevance = $this->calculateRelevance($symptom->name, $symptom->description, $query);
+            // Обработка найденных правил
+            foreach ($rules as $rule) {
+                if ($rule->symptom) {
+                    $relevance = $this->calculateRelevanceForSymptom(
+                        $rule->symptom->name, 
+                        $rule->symptom->description, 
+                        $query,
+                        $rule->possible_causes
+                    );
+                    
+                    $results[] = [
+                        'type' => 'rule',
+                        'id' => $rule->id,
+                        'symptom_id' => $rule->symptom->id,
+                        'title' => $rule->symptom->name,
+                        'description' => $rule->symptom->description ?? '',
+                        'brand' => $rule->brand ? $rule->brand->name : '',
+                        'brand_id' => $rule->brand_id,
+                        'model' => $rule->model ? $rule->model->name : '',
+                        'model_id' => $rule->model_id,
+                        'diagnostic_steps' => is_array($rule->diagnostic_steps) ? $rule->diagnostic_steps : [],
+                        'possible_causes' => is_array($rule->possible_causes) ? $rule->possible_causes : [],
+                        'required_data' => is_array($rule->required_data) ? $rule->required_data : [],
+                        'complexity_level' => $rule->complexity_level ?? 1,
+                        'estimated_time' => $rule->estimated_time ?? 60,
+                        'consultation_price' => $rule->base_consultation_price ?? 3000,
+                        'relevance_score' => $relevance,
+                        'match_type' => $isErrorCodeSearch ? 'error_code' : 'exact',
+                        'has_rules' => true,
+                        'related_systems' => $rule->symptom->related_systems ?? [],
+                        'frequency' => $rule->symptom->frequency ?? 0,
+                    ];
+                }
+            }
+            
+            // Если ничего не найдено, ищем симптомы без правил (только если не указан бренд)
+            if (empty($results) && empty($brandId)) {
+                Log::debug('No rules found, searching symptoms without rules');
                 
-                // Если есть правила для этого симптома
-                if ($symptom->rules->isNotEmpty()) {
-                    foreach ($symptom->rules as $rule) {
-                        // Пропускаем если фильтр по бренду и правило другого бренда
-                        if ($brandId && $rule->brand_id !== $brandId) {
-                            continue;
+                $symptomsQuery = Symptom::where('is_active', true);
+                
+                $symptomsQuery->where(function($q) use ($searchTerms, $isErrorCodeSearch, $query) {
+                    foreach ($searchTerms as $term) {
+                        if (mb_strlen($term) > 2) {
+                            $q->orWhere('name', 'like', "%{$term}%")
+                              ->orWhere('description', 'like', "%{$term}%");
                         }
-                        
-                        $results[] = [
-                            'type' => 'rule',
-                            'id' => $rule->id,
-                            'symptom_id' => $symptom->id,
-                            'title' => $symptom->name,
-                            'description' => $symptom->description ?? '',
-                            'brand' => $rule->brand ? $rule->brand->name : '',
-                            'brand_id' => $rule->brand_id,
-                            'model' => $rule->model ? $rule->model->name : '',
-                            'model_id' => $rule->model_id,
-                            'diagnostic_steps' => is_array($rule->diagnostic_steps) ? $rule->diagnostic_steps : [],
-                            'possible_causes' => is_array($rule->possible_causes) ? $rule->possible_causes : [],
-                            'relevance_score' => $relevance,
-                            'match_type' => 'symptom',
-                            'has_rules' => true,
-                        ];
                     }
-                } else {
-                    // Симптом без правил
+                    
+                    if ($isErrorCodeSearch) {
+                        $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
+                        $q->orWhere('description', 'like', "%{$cleanErrorCode}%")
+                          ->orWhere('description', 'like', "%{$query}%");
+                    }
+                });
+                
+                $symptoms = $symptomsQuery->get();
+                Log::debug('Symptoms found without rules', ['count' => $symptoms->count()]);
+                
+                foreach ($symptoms as $symptom) {
+                    $relevance = $this->calculateRelevance($symptom->name, $symptom->description, $query);
+                    
                     $results[] = [
                         'type' => 'symptom',
                         'id' => $symptom->id,
@@ -275,83 +308,321 @@ class EnhancedAISearchController extends Controller
                     ];
                 }
             }
+            
+            // Сортировка по релевантности
+            usort($results, function($a, $b) {
+                return $b['relevance_score'] <=> $a['relevance_score'];
+            });
+            
+            Log::debug('Final results count', ['count' => count($results)]);
+            
+            return array_slice($results, 0, 10);
+            
+        } catch (\Exception $e) {
+            Log::error('Error in searchSymptomsWithRules: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString(),
+                'query' => $query,
+                'brand_id' => $brandId
+            ]);
+            return [];
         }
-        
-        // Сортировка по релевантности
-        usort($results, function($a, $b) {
-            return $b['relevance_score'] <=> $a['relevance_score'];
-        });
-        
-        return array_slice($results, 0, 10);
     }
 
     /**
-     * Поиск документов (включая коды ошибок)
+     * Поиск документов с фильтрацией по бренду
      */
-    private function searchDocuments($query, $brand = null, $modelId = null)
-    {
-        Log::debug('Searching documents', [
-            'query' => $query, 
-            'brand' => $brand ? $brand->name : 'N/A',
-            'model_id' => $modelId
+    /**
+ * Поиск документов с фильтрацией по бренду
+ */
+private function searchDocuments($query, $brandId = null, $modelId = null)
+{
+    Log::debug('Searching documents', [
+        'query' => $query, 
+        'brand_id' => $brandId,
+        'model_id' => $modelId
+    ]);
+    
+    if (!Schema::hasTable('document_pages') || !Schema::hasTable('documents')) {
+        Log::warning('Documents tables not found');
+        return [];
+    }
+    
+    $searchTerms = $this->extractSearchTerms($query);
+    
+    // Для кодов ошибок добавляем вариации
+    if ($this->isErrorCode($query)) {
+        $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
+        $searchTerms = array_merge($searchTerms, [
+            $query,
+            $cleanErrorCode,
+            strtoupper($query),
+            strtolower($query),
+            str_replace('-', '', $query),
+            str_replace('-', ' ', $query)
+        ]);
+    }
+    
+    $searchTerms = array_unique(array_filter($searchTerms, function($term) {
+        return !empty($term) && mb_strlen($term) > 1;
+    }));
+    
+    Log::debug('Document search terms', ['terms' => $searchTerms]);
+    
+    if (empty($searchTerms)) {
+        return [];
+    }
+    
+    try {
+        // ПРОСТОЙ ЗАПРОС - БЕЗ СЛОЖНЫХ СВЯЗЕЙ
+        $pagesQuery = DB::table('document_pages')
+            ->select([
+                'document_pages.id as page_id',
+                'document_pages.document_id',
+                'document_pages.page_number',
+                'document_pages.content_text',
+                'document_pages.section_title',
+                'documents.id as doc_id',
+                'documents.title as document_title',
+                'documents.file_type',
+                'documents.source_url',
+                'documents.view_count',
+                'documents.total_pages',
+                'documents.car_model_id',
+                'documents.file_path',
+                'documents.detected_system',
+                'documents.detected_component'
+            ])
+            ->join('documents', 'document_pages.document_id', '=', 'documents.id')
+            ->whereNotNull('document_pages.content_text')
+            ->where('document_pages.content_text', '<>', '');
+        
+        // Поиск по всем терминам
+        $pagesQuery->where(function($q) use ($searchTerms) {
+            foreach ($searchTerms as $term) {
+                $cleanTerm = $this->cleanSearchTerm($term);
+                if (!empty($cleanTerm)) {
+                    $q->orWhere('document_pages.content_text', 'like', "%{$cleanTerm}%")
+                      ->orWhere('document_pages.section_title', 'like', "%{$cleanTerm}%")
+                      ->orWhere('documents.title', 'like', "%{$cleanTerm}%");
+                }
+            }
+        });
+        
+        // ФИЛЬТРАЦИЯ ПО БРЕНДУ И МОДЕЛИ
+        if ($modelId) {
+            Log::debug('Filtering by model_id', ['model_id' => $modelId]);
+            $pagesQuery->where('documents.car_model_id', $modelId);
+        } elseif ($brandId) {
+            Log::debug('Filtering by brand_id', ['brand_id' => $brandId]);
+            // Получаем ID моделей этого бренда
+            $modelIds = CarModel::where('brand_id', $brandId)->pluck('id')->toArray();
+            Log::debug('Model IDs for brand', ['model_ids' => $modelIds]);
+            
+            if (!empty($modelIds)) {
+                $pagesQuery->whereIn('documents.car_model_id', $modelIds);
+            } else {
+                Log::debug('No models found for brand', ['brand_id' => $brandId]);
+                $pagesQuery->whereNull('documents.car_model_id');
+            }
+        }
+        
+        $pages = $pagesQuery
+            ->orderBy('documents.view_count', 'desc')
+            ->orderBy('document_pages.page_number')
+            ->limit(50)
+            ->get();
+        
+        Log::debug('Document pages found', ['count' => $pages->count()]);
+        
+        if ($pages->isEmpty()) {
+            Log::debug('No document pages found, trying without brand filter');
+            if ($brandId || $modelId) {
+                return $this->searchAllDocuments($query);
+            }
+            return [];
+        }
+        
+        // Группируем по документам
+        $groupedDocuments = [];
+        foreach ($pages as $page) {
+            $docId = $page->doc_id;
+            $pageNumber = $page->page_number;
+            
+            // Рассчитываем релевантность
+            $relevance = $this->calculateDocumentRelevance($page->content_text, $searchTerms, $page->section_title);
+            
+            // Получаем информацию о бренде и модели
+            $brandName = '';
+            $modelName = '';
+            
+            if ($page->car_model_id) {
+                $model = CarModel::find($page->car_model_id);
+                if ($model) {
+                    $modelName = $model->name;
+                    $docBrand = Brand::find($model->brand_id);
+                    if ($docBrand) {
+                        $brandName = $docBrand->name;
+                    }
+                }
+            }
+            
+            // Получаем URL превью скриншота
+            $previewImage = $this->getDocumentScreenshotUrl($page->doc_id, $page->page_number);
+            
+            // Уникальный ключ для документа
+            $docKey = $docId;
+            
+            // Берем только лучшую страницу для каждого документа
+            if (!isset($groupedDocuments[$docKey]) || 
+                $relevance > $groupedDocuments[$docKey]['relevance_score']) {
+                
+                $viewUrl = $this->generateDocumentPageUrl($docId, $pageNumber, $page->file_path, $page->source_url);
+                
+                $groupedDocuments[$docKey] = [
+                    'id' => $docId,
+                    'page_id' => $page->page_id,
+                    'page_number' => $pageNumber,
+                    'title' => $page->document_title ?? 'Документ',
+                    'excerpt' => $this->getBestExcerpt($page->content_text, $searchTerms, 200),
+                    'file_type' => $page->file_type ?? 'pdf',
+                    'total_pages' => $page->total_pages ?? 0,
+                    'source_url' => $page->source_url ?? '',
+                    'file_path' => $page->file_path ?? '',
+                    'detected_system' => $page->detected_system ?? '',
+                    'detected_component' => $page->detected_component ?? '',
+                    'view_count' => $page->view_count ?? 0,
+                    'icon' => $this->getFileIcon($page->file_type ?? 'pdf'),
+                    'relevance_score' => $relevance,
+                    'view_url' => $viewUrl,
+                    'page_title' => $page->section_title ?? '',
+                    'brand' => $brandName,
+                    'model' => $modelName,
+                    'car_model_id' => $page->car_model_id,
+                    'content_preview' => $this->getContentPreview($page->content_text, $searchTerms, 300),
+                    'search_terms_found' => $this->getFoundTerms($page->content_text, $searchTerms),
+                    'is_filtered' => $brandId || $modelId ? true : false,
+                    'preview_image' => $previewImage,
+                    'has_preview' => !empty($previewImage),
+                    'preview_alt' => 'Скриншот страницы ' . $pageNumber . ' документа ' . ($page->document_title ?? $docId)
+                ];
+            }
+        }
+        
+        // Сортируем по релевантности
+        usort($groupedDocuments, function($a, $b) {
+            return $b['relevance_score'] <=> $a['relevance_score'];
+        });
+        
+        $results = array_slice($groupedDocuments, 0, 5);
+        Log::debug('Final document results', ['count' => count($results)]);
+        
+        return $results;
+        
+    } catch (\Exception $e) {
+        Log::error('Error searching document pages: ' . $e->getMessage(), [
+            'trace' => $e->getTraceAsString()
+        ]);
+        return [];
+    }
+}
+
+/**
+ * Получить URL скриншота для страницы документа
+ * Формат: https://service.local/storage/document_images/screenshots/{document_id}/page_{page_number}_full.jpg
+ */
+private function getDocumentScreenshotUrl($documentId, $pageNumber)
+{
+    try {
+        // Базовый URL для скриншотов
+        $baseUrl = url('/storage/document_images/screenshots');
+        
+        // Формируем имя файла: page_{page_number}_full.jpg
+        $filename = 'page_' . $pageNumber . '_full.jpg';
+        
+        // Полный путь к файлу
+        $screenshotUrl = $baseUrl . '/' . $documentId . '/' . $filename;
+        
+        Log::debug('Generated screenshot URL', [
+            'document_id' => $documentId,
+            'page_number' => $pageNumber,
+            'url' => $screenshotUrl
         ]);
         
-        if (!Schema::hasTable('document_pages') || !Schema::hasTable('documents')) {
-            return [];
+        // Проверяем существование файла (опционально)
+        $filePath = public_path('storage/document_images/screenshots/' . $documentId . '/' . $filename);
+        if (file_exists($filePath)) {
+            return $screenshotUrl;
         }
         
-        $searchTerms = $this->extractSearchTerms($query);
+        // Пробуем альтернативные форматы
+        $alternativeFormats = [
+            'page_' . $pageNumber . '.jpg',
+            'page_' . $pageNumber . '_full.png',
+            'screenshot_' . $pageNumber . '.jpg',
+            $pageNumber . '.jpg',
+            $documentId . '_' . $pageNumber . '.jpg'
+        ];
         
-        // Для кодов ошибок добавляем вариации
-        if ($this->isErrorCode($query)) {
-            $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
-            $searchTerms = array_merge($searchTerms, [
-                $query,
-                $cleanErrorCode,
-                strtoupper($query),
-                strtolower($query),
-                str_replace('-', '', $query),
-                str_replace('-', ' ', $query)
-            ]);
+        foreach ($alternativeFormats as $altFormat) {
+            $altPath = public_path('storage/document_images/screenshots/' . $documentId . '/' . $altFormat);
+            if (file_exists($altPath)) {
+                return $baseUrl . '/' . $documentId . '/' . $altFormat;
+            }
         }
         
-        $searchTerms = array_unique(array_filter($searchTerms, function($term) {
-            return !empty($term) && mb_strlen($term) > 1;
-        }));
+        Log::debug('Screenshot file not found', [
+            'path' => $filePath,
+            'document_id' => $documentId,
+            'page' => $pageNumber
+        ]);
         
-        if (empty($searchTerms)) {
-            return [];
-        }
+        return null;
         
-        try {
-            Log::debug('Document search terms', ['terms' => $searchTerms]);
-            
-            // Базовый запрос без фильтров - ищем ВСЕ документы
-            $pagesQuery = DB::table('document_pages')
-                ->select([
-                    'document_pages.id as page_id',
-                    'document_pages.document_id',
-                    'document_pages.page_number',
-                    'document_pages.content_text',
-                    'document_pages.section_title',
-                    'documents.id as doc_id',
-                    'documents.title as document_title',
-                    'documents.file_type',
-                    'documents.source_url',
-                    'documents.view_count',
-                    'documents.total_pages',
-                    'documents.detected_system',
-                    'documents.detected_component',
-                    'documents.car_model_id',
-                    'documents.file_path'
-                ])
-                ->join('documents', 'document_pages.document_id', '=', 'documents.id')
-                ->whereNotNull('document_pages.content_text')
-                ->where('document_pages.content_text', '<>', '')
-                ->where('document_pages.status', 'processed');
-            
-            // Поиск по всем терминам - только это условие ОБЯЗАТЕЛЬНО
-            $pagesQuery->where(function($q) use ($searchTerms) {
+    } catch (\Exception $e) {
+        Log::error('Error getting screenshot URL: ' . $e->getMessage(), [
+            'document_id' => $documentId,
+            'page' => $pageNumber
+        ]);
+        return null;
+    }
+}
+
+
+/**
+ * Поиск всех документов без фильтров - УПРОЩЕННАЯ ВЕРСИЯ
+ */
+private function searchAllDocuments($query)
+{
+    Log::debug('Searching all documents');
+    
+    $searchTerms = $this->extractSearchTerms($query);
+    
+    if ($this->isErrorCode($query)) {
+        $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
+        $searchTerms = array_merge($searchTerms, [$cleanErrorCode]);
+    }
+    
+    try {
+        $pages = DB::table('document_pages')
+            ->select([
+                'document_pages.id as page_id',
+                'document_pages.document_id',
+                'document_pages.page_number',
+                'document_pages.content_text',
+                'document_pages.section_title',
+                'documents.id as doc_id',
+                'documents.title as document_title',
+                'documents.file_type',
+                'documents.source_url',
+                'documents.view_count',
+                'documents.total_pages',
+                'documents.car_model_id',
+                'documents.file_path'
+            ])
+            ->join('documents', 'document_pages.document_id', '=', 'documents.id')
+            ->whereNotNull('document_pages.content_text')
+            ->where('document_pages.content_text', '<>', '')
+            ->where(function($q) use ($searchTerms) {
                 foreach ($searchTerms as $term) {
                     $cleanTerm = $this->cleanSearchTerm($term);
                     if (!empty($cleanTerm)) {
@@ -359,215 +630,276 @@ class EnhancedAISearchController extends Controller
                           ->orWhere('document_pages.section_title', 'like', "%{$cleanTerm}%");
                     }
                 }
-            });
-            
-            // Фильтрация по модели если указана
-            if ($modelId) {
-                Log::debug('Filtering by model_id', ['model_id' => $modelId]);
-                $pagesQuery->where('documents.car_model_id', $modelId);
-            }
-            // Если указан бренд, но нет модели - фильтруем через модели этого бренда
-            elseif ($brand) {
-                Log::debug('Filtering by brand', ['brand_id' => $brand->id, 'brand_name' => $brand->name]);
-                $modelIds = CarModel::where('brand_id', $brand->id)->pluck('id');
-                if ($modelIds->isNotEmpty()) {
-                    $pagesQuery->whereIn('documents.car_model_id', $modelIds);
-                }
-            }
-            
-            $pages = $pagesQuery
-                ->orderByRaw('
-                    CASE 
-                        WHEN document_pages.section_title LIKE "%диагностик%" THEN 1
-                        WHEN document_pages.section_title LIKE "%ремонт%" THEN 2
-                        WHEN document_pages.section_title LIKE "%неисправн%" THEN 3
-                        WHEN document_pages.section_title LIKE "%код ошиб%" THEN 4
-                        WHEN document_pages.section_title LIKE "%error%" THEN 5
-                        ELSE 6
-                    END
-                ')
-                ->orderBy('documents.view_count', 'desc')
-                ->orderBy('document_pages.page_number')
-                ->limit(200) // Большой лимит для лучшего поиска
-                ->get();
-            
-            Log::debug('Document pages found', ['count' => $pages->count()]);
-            
-            if ($pages->isEmpty()) {
-                // Если с фильтрами ничего не найдено, ищем без фильтров
-                Log::debug('Searching without filters');
-                return $this->searchAllDocuments($query);
-            }
-            
-            // Группируем по документам и выбираем лучшую страницу
-            $groupedDocuments = [];
-            foreach ($pages as $page) {
-                $docId = $page->doc_id;
-                $pageNumber = $page->page_number;
-                
-                // Рассчитываем релевантность
-                $relevance = $this->calculateDocumentRelevance($page->content_text, $searchTerms, $page->section_title);
-                
-                // Получаем информацию о бренде и модели
-                $brandName = '';
-                $modelName = '';
-                
-                if ($page->car_model_id) {
-                    $model = CarModel::find($page->car_model_id);
-                    if ($model) {
-                        $modelName = $model->name;
-                        $docBrand = Brand::find($model->brand_id);
-                        if ($docBrand) {
-                            $brandName = $docBrand->name;
-                        }
-                    }
-                }
-                
-                // Создаем уникальный ключ для документа+страницы
-                $docKey = $docId . '_' . $pageNumber;
-                
-                if (!isset($groupedDocuments[$docKey])) {
-                    // Генерируем URL для конкретной страницы
-                    $viewUrl = $this->generateDocumentPageUrl($docId, $pageNumber, $page->file_path, $page->source_url);
-                    
-                    $groupedDocuments[$docKey] = [
-                        'id' => $docId,
-                        'page_id' => $page->page_id,
-                        'page_number' => $pageNumber,
-                        'title' => $page->document_title ?? 'Документ',
-                        'excerpt' => $this->getBestExcerpt($page->content_text, $searchTerms, 200),
-                        'file_type' => $page->file_type ?? 'pdf',
-                        'total_pages' => $page->total_pages ?? 0,
-                        'source_url' => $page->source_url ?? '',
-                        'file_path' => $page->file_path ?? '',
-                        'detected_system' => $page->detected_system ?? '',
-                        'detected_component' => $page->detected_component ?? '',
-                        'view_count' => $page->view_count ?? 0,
-                        'icon' => $this->getFileIcon($page->file_type ?? 'pdf'),
-                        'relevance_score' => $relevance,
-                        'view_url' => $viewUrl,
-                        'page_title' => $page->section_title ?? '',
-                        'brand' => $brandName,
-                        'model' => $modelName,
-                        'car_model_id' => $page->car_model_id,
-                        'content_preview' => $this->getContentPreview($page->content_text, $searchTerms, 500),
-                        'search_terms_found' => $this->getFoundTerms($page->content_text, $searchTerms),
-                        'is_filtered' => $brand || $modelId ? true : false
-                    ];
-                }
-            }
-            
-            // Сортируем по релевантности
-            usort($groupedDocuments, function($a, $b) {
-                return $b['relevance_score'] <=> $a['relevance_score'];
-            });
-            
-            return array_slice($groupedDocuments, 0, 5);
-            
-        } catch (\Exception $e) {
-            Log::error('Error searching document pages: ' . $e->getMessage());
-            return $this->searchAllDocuments($query);
-        }
-    }
-
-    /**
-     * Поиск всех документов без фильтров
-     */
-    private function searchAllDocuments($query)
-    {
-        $searchTerms = $this->extractSearchTerms($query);
+            })
+            ->limit(50)
+            ->get();
         
-        if ($this->isErrorCode($query)) {
-            $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
-            $searchTerms = array_merge($searchTerms, [$cleanErrorCode]);
-        }
+        Log::debug('All documents pages found', ['count' => $pages->count()]);
         
-        try {
-            $pages = DB::table('document_pages')
-                ->select([
-                    'document_pages.id as page_id',
-                    'document_pages.document_id',
-                    'document_pages.page_number',
-                    'document_pages.content_text',
-                    'document_pages.section_title',
-                    'documents.id as doc_id',
-                    'documents.title as document_title',
-                    'documents.file_type',
-                    'documents.source_url',
-                    'documents.view_count',
-                    'documents.total_pages',
-                    'documents.car_model_id',
-                    'documents.file_path'
-                ])
-                ->join('documents', 'document_pages.document_id', '=', 'documents.id')
-                ->whereNotNull('document_pages.content_text')
-                ->where('document_pages.content_text', '<>', '')
-                ->where(function($q) use ($searchTerms) {
-                    foreach ($searchTerms as $term) {
-                        $cleanTerm = $this->cleanSearchTerm($term);
-                        if (!empty($cleanTerm)) {
-                            $q->orWhere('document_pages.content_text', 'like', "%{$cleanTerm}%");
-                        }
-                    }
-                })
-                ->limit(100)
-                ->get();
-            
-            if ($pages->isEmpty()) {
-                return [];
-            }
-            
-            $results = [];
-            foreach ($pages as $page) {
-                $relevance = $this->calculateDocumentRelevance($page->content_text, $searchTerms, $page->section_title);
-                
-                // Получаем бренд и модель
-                $brandName = '';
-                $modelName = '';
-                if ($page->car_model_id) {
-                    $model = CarModel::find($page->car_model_id);
-                    if ($model) {
-                        $modelName = $model->name;
-                        $brand = Brand::find($model->brand_id);
-                        if ($brand) {
-                            $brandName = $brand->name;
-                        }
-                    }
-                }
-                
-                $viewUrl = $this->generateDocumentPageUrl($page->doc_id, $page->page_number, $page->file_path, $page->source_url);
-                
-                $results[] = [
-                    'id' => $page->doc_id,
-                    'page_id' => $page->page_id,
-                    'page_number' => $page->page_number,
-                    'title' => $page->document_title ?? 'Документ',
-                    'excerpt' => $this->getBestExcerpt($page->content_text, $searchTerms, 200),
-                    'relevance_score' => $relevance,
-                    'view_url' => $viewUrl,
-                    'page_title' => $page->section_title ?? '',
-                    'brand' => $brandName,
-                    'model' => $modelName,
-                    'is_filtered' => false
-                ];
-            }
-            
-            usort($results, function($a, $b) {
-                return $b['relevance_score'] <=> $a['relevance_score'];
-            });
-            
-            return array_slice($results, 0, 5);
-            
-        } catch (\Exception $e) {
-            Log::error('Search all documents error: ' . $e->getMessage());
+        if ($pages->isEmpty()) {
             return [];
         }
+        
+        $results = [];
+        foreach ($pages as $page) {
+            $relevance = $this->calculateDocumentRelevance($page->content_text, $searchTerms, $page->section_title);
+            
+            // Получаем бренд и модель
+            $brandName = '';
+            $modelName = '';
+            if ($page->car_model_id) {
+                $model = CarModel::find($page->car_model_id);
+                if ($model) {
+                    $modelName = $model->name;
+                    $brand = Brand::find($model->brand_id);
+                    if ($brand) {
+                        $brandName = $brand->name;
+                    }
+                }
+            }
+            
+            // Получаем URL скриншота
+            $previewImage = $this->getDocumentScreenshotUrl($page->doc_id, $page->page_number);
+            
+            $viewUrl = $this->generateDocumentPageUrl($page->doc_id, $page->page_number, $page->file_path, $page->source_url);
+            
+            $results[] = [
+                'id' => $page->doc_id,
+                'page_id' => $page->page_id,
+                'page_number' => $page->page_number,
+                'title' => $page->document_title ?? 'Документ',
+                'excerpt' => $this->getBestExcerpt($page->content_text, $searchTerms, 200),
+                'relevance_score' => $relevance,
+                'view_url' => $viewUrl,
+                'page_title' => $page->section_title ?? '',
+                'brand' => $brandName,
+                'model' => $modelName,
+                'is_filtered' => false,
+                'preview_image' => $previewImage,
+                'has_preview' => !empty($previewImage),
+                'preview_alt' => 'Скриншот страницы ' . $page->page_number . ' документа ' . ($page->document_title ?? $page->doc_id)
+            ];
+        }
+        
+        usort($results, function($a, $b) {
+            return $b['relevance_score'] <=> $a['relevance_score'];
+        });
+        
+        return array_slice($results, 0, 5);
+        
+    } catch (\Exception $e) {
+        Log::error('Search all documents error: ' . $e->getMessage());
+        return [];
     }
+}
+
+/**
+ * Получить превью изображение для страницы документа
+ */
+private function getPagePreviewImage($page)
+{
+    try {
+        // Если у страницы есть скриншоты, берем главный
+        if ($page->relationLoaded('screenshots') && $page->screenshots->isNotEmpty()) {
+            $screenshot = $page->screenshots->first();
+            
+            // Проверяем разные возможные поля с URL
+            if (!empty($screenshot->url)) {
+                // Проверяем, полный ли это URL или относительный путь
+                if (filter_var($screenshot->url, FILTER_VALIDATE_URL)) {
+                    return $screenshot->url;
+                } elseif (file_exists(public_path($screenshot->url))) {
+                    return asset($screenshot->url);
+                } elseif (file_exists(storage_path('app/public/' . $screenshot->url))) {
+                    return asset('storage/' . $screenshot->url);
+                }
+            }
+            
+            // Пробуем другие поля
+            if (!empty($screenshot->file_path)) {
+                if (file_exists(public_path($screenshot->file_path))) {
+                    return asset($screenshot->file_path);
+                } elseif (file_exists(storage_path('app/public/' . $screenshot->file_path))) {
+                    return asset('storage/' . $screenshot->file_path);
+                }
+            }
+            
+            if (!empty($screenshot->image_path)) {
+                if (file_exists(public_path($screenshot->image_path))) {
+                    return asset($screenshot->image_path);
+                } elseif (file_exists(storage_path('app/public/' . $screenshot->image_path))) {
+                    return asset('storage/' . $screenshot->image_path);
+                }
+            }
+        }
+        
+        // Если нет скриншотов, пытаемся сгенерировать URL по шаблону
+        $previewUrl = $this->generatePreviewUrl($page);
+        if ($previewUrl) {
+            return $previewUrl;
+        }
+        
+    } catch (\Exception $e) {
+        Log::error('Error getting page preview image: ' . $e->getMessage());
+    }
+    
+    return null;
+}
+
+  /**
+ * Генерация URL превью по шаблону
+ */
+private function generatePreviewUrl($page)
+{
+    // Попробуем разные шаблоны URL для скриншотов
+    
+    $templates = [
+        // Шаблон 1: storage/app/public/screenshots/{document_id}/{page_number}.jpg
+        'storage/app/public/screenshots/' . $page->document_id . '/' . $page->page_number . '.jpg',
+        'storage/app/public/screenshots/' . $page->document_id . '/page_' . $page->page_number . '.jpg',
+        'storage/app/public/screenshots/' . $page->document_id . '/' . $page->page_number . '_main.jpg',
+        
+        // Шаблон 2: public/screenshots/{document_id}/{page_number}.jpg
+        'public/screenshots/' . $page->document_id . '/' . $page->page_number . '.jpg',
+        'public/screenshots/' . $page->document_id . '/page_' . $page->page_number . '.jpg',
+        
+        // Шаблон 3: storage/app/public/document-screenshots/{document_id}/{page_id}.jpg
+        'storage/app/public/document-screenshots/' . $page->document_id . '/' . $page->id . '.jpg',
+        
+        // Шаблон 4: если есть file_path в документе, меняем расширение
+        function() use ($page) {
+            if ($page->document && !empty($page->document->file_path)) {
+                $pathInfo = pathinfo($page->document->file_path);
+                $dir = dirname($page->document->file_path);
+                return $dir . '/previews/page_' . $page->page_number . '.jpg';
+            }
+            return null;
+        }
+    ];
+    
+    foreach ($templates as $template) {
+        $path = is_callable($template) ? $template() : $template;
+        if ($path) {
+            // Проверяем полный путь в storage
+            $fullPath = storage_path('app/' . $path);
+            if (file_exists($fullPath)) {
+                return asset('storage/' . str_replace('storage/app/public/', '', $path));
+            }
+            
+            // Проверяем в public
+            $publicPath = public_path($path);
+            if (file_exists($publicPath)) {
+                return asset($path);
+            }
+            
+            // Проверяем напрямую storage/public
+            $storagePublicPath = storage_path('app/public/' . $path);
+            if (file_exists($storagePublicPath)) {
+                return asset('storage/' . $path);
+            }
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Сгенерировать превью из PDF
+ */
+private function generatePdfPreview($filePath, $pageNumber)
+{
+    try {
+        $pdfPath = public_path($filePath);
+        
+        if (!file_exists($pdfPath)) {
+            return null;
+        }
+        
+        // Создаем директорию для превью, если её нет
+        $previewDir = storage_path('app/public/document-previews');
+        if (!file_exists($previewDir)) {
+            mkdir($previewDir, 0755, true);
+        }
+        
+        // Генерируем имя файла превью
+        $pdfHash = md5($filePath . $pageNumber);
+        $previewFilename = $pdfHash . '.jpg';
+        $previewPath = $previewDir . '/' . $previewFilename;
+        
+        // Если превью уже существует, возвращаем его
+        if (file_exists($previewPath)) {
+            return asset('storage/document-previews/' . $previewFilename);
+        }
+        
+        // Пытаемся использовать Imagick для создания превью
+        if (extension_loaded('imagick')) {
+            $imagick = new \Imagick();
+            $imagick->setResolution(150, 150);
+            $imagick->readImage($pdfPath . '[' . ($pageNumber - 1) . ']'); // Нумерация с 0
+            $imagick->setImageFormat('jpg');
+            $imagick->setImageCompressionQuality(85);
+            $imagick->writeImage($previewPath);
+            $imagick->clear();
+            $imagick->destroy();
+            
+            if (file_exists($previewPath)) {
+                return asset('storage/document-previews/' . $previewFilename);
+            }
+        }
+        
+        // Альтернатива: пробуем использовать командную строку с ghostscript
+        if ($this->hasGhostscript()) {
+            $output = shell_exec("gs -dNOPAUSE -sDEVICE=jpeg -dFirstPage={$pageNumber} -dLastPage={$pageNumber} " .
+                                "-dJPEGQ=85 -r150 -sOutputFile=\"{$previewPath}\" \"{$pdfPath}\" 2>&1");
+            
+            if (file_exists($previewPath)) {
+                return asset('storage/document-previews/' . $previewFilename);
+            }
+        }
+        
+    } catch (\Exception $e) {
+        Log::error('Error generating PDF preview: ' . $e->getMessage());
+    }
+    
+    return null;
+}
+
+/**
+ * Проверить наличие ghostscript
+ */
+private function hasGhostscript()
+{
+    $output = shell_exec('gs --version 2>&1');
+    return !empty($output) && strpos($output, 'GPL Ghostscript') !== false;
+}
+
+/**
+ * Получить дефолтное изображение для типа файла
+ */
+private function getDefaultPreviewImage($fileType)
+{
+    $fileType = strtolower($fileType);
+    
+    // Дефолтные иконки Font Awesome для типов файлов
+    $icons = [
+        'pdf' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-pdf.svg',
+        'doc' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-word.svg',
+        'docx' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-word.svg',
+        'xls' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-excel.svg',
+        'xlsx' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-excel.svg',
+        'jpg' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-image.svg',
+        'png' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-image.svg',
+        'jpeg' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-image.svg',
+        'txt' => 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-lines.svg',
+    ];
+    
+    return $icons[$fileType] ?? 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file.svg';
+}
 
     /**
-     * Поиск запчастей
+     * Поиск запчастей с фильтрацией по бренду
      */
-    private function searchParts($query, $brand = null)
+    private function searchParts($query, $brandId = null)
     {
         if (!Schema::hasTable('price_items')) {
             return [];
@@ -586,13 +918,11 @@ class EnhancedAISearchController extends Controller
             $partsQuery = PriceItem::query()
                 ->where('price', '>', 0);
             
-            // Фильтрация по бренду
-            if ($brand) {
-                $partsQuery->where(function($q) use ($brand) {
-                    $q->orWhere('catalog_brand', 'like', "%{$brand->name}%")
-                      ->orWhere('catalog_brand', 'like', "%{$brand->name_cyrillic}%")
-                      ->orWhere('brand_id', $brand->id);
-                });
+            // ФИЛЬТРАЦИЯ ПО БРЕНДУ
+            if ($brandId) {
+                // Ищем по brand_id (прямой ID)
+                $partsQuery->where('brand_id', $brandId);
+                Log::debug('Filtering parts by brand_id', ['brand_id' => $brandId]);
             }
             
             // Поиск по терминам
@@ -609,8 +939,11 @@ class EnhancedAISearchController extends Controller
                     'quantity', 'catalog_brand', 'brand_id'
                 ])
                 ->orderBy('quantity', 'desc')
+                ->orderBy('price')
                 ->limit(5)
                 ->get();
+            
+            Log::debug('Parts found', ['count' => $parts->count(), 'brand_filter' => $brandId ? 'YES' : 'NO']);
             
             return $parts->map(function($item) {
                 return [
@@ -622,6 +955,7 @@ class EnhancedAISearchController extends Controller
                     'formatted_price' => number_format($item->price ?? 0, 2, '.', ' '),
                     'quantity' => $item->quantity ?? 0,
                     'brand' => $item->catalog_brand ?? '',
+                    'brand_id' => $item->brand_id,
                     'availability' => ($item->quantity ?? 0) > 10 ? 'В наличии' : 
                                      (($item->quantity ?? 0) > 0 ? 'Мало' : 'Нет в наличии'),
                 ];
@@ -638,25 +972,14 @@ class EnhancedAISearchController extends Controller
      */
     private function generateAIResponse($query, $results, $documents, $parts, $brand = null)
     {
-        $brandName = 'неизвестной марки';
-        if ($brand) {
-            $brandName = $brand->name_cyrillic ?? $brand->name;
-        }
+        $brandName = $brand ? ($brand->name_cyrillic ?? $brand->name) : 'неизвестной марки';
         
         $response = "🤖 **AI-анализ диагностической проблемы**\n\n";
         $response .= "🔍 **Запрос:** {$query}\n";
         $response .= "🏷️ **Марка:** {$brandName}\n\n";
         
         if (!empty($results)) {
-            $filteredCount = count(array_filter($results, function($item) use ($brand) {
-                return !$brand || $item['brand_id'] === $brand->id;
-            }));
-            
-            $response .= "✅ **Найдено симптомов:** " . count($results) . " ";
-            if ($brand && $filteredCount < count($results)) {
-                $response .= "(" . $filteredCount . " для " . $brandName . ")";
-            }
-            $response .= "\n\n";
+            $response .= "✅ **Найдено симптомов:** " . count($results) . "\n\n";
             
             // Показываем топ-3 результата
             $topResults = array_slice($results, 0, 3);
@@ -683,6 +1006,11 @@ class EnhancedAISearchController extends Controller
                     $response .= "   ⚠️ **Возможные причины:** {$causes}\n";
                 }
                 
+                if ($item['type'] === 'rule' && !empty($item['diagnostic_steps']) && count($item['diagnostic_steps']) > 0) {
+                    $stepsCount = count($item['diagnostic_steps']);
+                    $response .= "   🔧 **Диагностические шаги:** {$stepsCount} шагов\n";
+                }
+                
                 $response .= "\n";
             }
         } else {
@@ -694,15 +1022,7 @@ class EnhancedAISearchController extends Controller
         }
         
         if (!empty($documents)) {
-            $filteredDocs = count(array_filter($documents, function($doc) use ($brand) {
-                return !$brand || ($doc['brand'] && strpos($doc['brand'], $brand->name) !== false);
-            }));
-            
-            $response .= "📄 **Найдено документов:** " . count($documents) . " ";
-            if ($brand && $filteredDocs < count($documents)) {
-                $response .= "(" . $filteredDocs . " для " . $brandName . ")";
-            }
-            $response .= "\n";
+            $response .= "📄 **Найдено документов:** " . count($documents) . "\n";
             
             // Показываем топ документ
             $topDoc = $documents[0] ?? null;
@@ -786,36 +1106,88 @@ class EnhancedAISearchController extends Controller
     
     private function calculateRelevance($title, $description, $query)
     {
+        return $this->calculateRelevanceForSymptom($title, $description, $query, []);
+    }
+    
+    private function calculateRelevanceForSymptom($title, $description, $query, $possibleCauses = [])
+    {
         $score = 0;
         $queryLower = mb_strtolower($query, 'UTF-8');
         $titleLower = mb_strtolower($title, 'UTF-8');
         $descLower = mb_strtolower($description, 'UTF-8');
         
-        if (strpos($titleLower, $queryLower) !== false) {
-            $score += 1.0;
+        // Получаем коды ошибок из возможных причин
+        $causesText = '';
+        if (is_array($possibleCauses) && !empty($possibleCauses)) {
+            $causesText = implode(' ', $possibleCauses);
+        } elseif (is_string($possibleCauses)) {
+            $causesText = $possibleCauses;
         }
+        $causesLower = mb_strtolower($causesText, 'UTF-8');
         
-        if (strpos($descLower, $queryLower) !== false) {
-            $score += 0.5;
+        // Проверяем, является ли запрос кодом ошибки
+        $isErrorCode = $this->isErrorCode($query);
+        
+        if ($isErrorCode) {
+            $cleanErrorCode = preg_replace('/[^a-zA-Z0-9]/', '', $query);
+            
+            // Поиск кода ошибки в возможных причинах (самый высокий приоритет)
+            if (strpos($causesLower, $cleanErrorCode) !== false || 
+                strpos($causesLower, $queryLower) !== false) {
+                $score += 1.5;
+            }
+            
+            // Поиск в описании симптома
+            if (strpos($descLower, $cleanErrorCode) !== false || 
+                strpos($descLower, $queryLower) !== false) {
+                $score += 1.0;
+            }
+            
+            // Поиск в названии
+            if (strpos($titleLower, $cleanErrorCode) !== false || 
+                strpos($titleLower, $queryLower) !== false) {
+                $score += 0.8;
+            }
+        } else {
+            // Обычный поиск
+            if (strpos($titleLower, $queryLower) !== false) {
+                $score += 1.0;
+            }
+            
+            if (strpos($descLower, $queryLower) !== false) {
+                $score += 0.5;
+            }
+            
+            if (strpos($causesLower, $queryLower) !== false) {
+                $score += 0.7;
+            }
         }
         
         $queryWords = $this->extractSearchTerms($queryLower);
         $titleWords = $this->extractSearchTerms($titleLower);
         $descWords = $this->extractSearchTerms($descLower);
+        $causesWords = $this->extractSearchTerms($causesLower);
         
         foreach ($queryWords as $qWord) {
             if (mb_strlen($qWord) < 3) continue;
             
             foreach ($titleWords as $tWord) {
-                if (strpos($tWord, $qWord) !== false) {
+                if (strpos($tWord, $qWord) !== false || strpos($qWord, $tWord) !== false) {
                     $score += 0.3;
                     break;
                 }
             }
             
             foreach ($descWords as $dWord) {
-                if (strpos($dWord, $qWord) !== false) {
+                if (strpos($dWord, $qWord) !== false || strpos($qWord, $dWord) !== false) {
                     $score += 0.1;
+                    break;
+                }
+            }
+            
+            foreach ($causesWords as $cWord) {
+                if (strpos($cWord, $qWord) !== false || strpos($qWord, $cWord) !== false) {
+                    $score += 0.2;
                     break;
                 }
             }
@@ -1000,20 +1372,17 @@ class EnhancedAISearchController extends Controller
         
         // Генерируем URL через маршрут Laravel на конкретную страницу
         try {
-            // Предполагаем, что есть маршрут для просмотра страницы документа
             return route('documents.page.view', [
                 'id' => $documentId,
                 'page' => $pageNumber
             ]);
         } catch (\Exception $e) {
             try {
-                // Или маршрут для документа с параметром страницы
                 return route('documents.view', [
                     'id' => $documentId,
                     'page' => $pageNumber
                 ]);
             } catch (\Exception $e2) {
-                // Последний вариант - ручная генерация URL
                 return '/documents/' . $documentId . '/page/' . $pageNumber;
             }
         }

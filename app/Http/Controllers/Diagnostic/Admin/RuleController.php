@@ -110,7 +110,7 @@ class RuleController extends Controller
     }
 
     public function show($id)
-{
+{ 
     try {
         $rule = Rule::with(['symptom', 'brand', 'model'])
             ->findOrFail($id);

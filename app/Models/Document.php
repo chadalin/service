@@ -504,4 +504,37 @@ private function keywordsToSearchText($keywords): string
         
         return [];
     }
+
+    /**
+ * Связь с таблицей страниц документа
+ */
+public function pages()
+{
+    return $this->hasMany(DocumentPage::class, 'document_id', 'id');
+}
+
+/**
+ * Связь с конкретной страницей по номеру
+ */
+public function page($number)
+{
+    return $this->hasOne(DocumentPage::class, 'document_id', 'id')
+        ->where('page_number', $number);
+}
+
+/**
+ * Связь со скриншотами документа
+ */
+public function screenshots()
+{
+    return $this->hasMany(DocumentScreenshot::class, 'document_id', 'id');
+}
+
+/**
+ * Связь с изображениями документа
+ */
+public function images()
+{
+    return $this->hasMany(DocumentImage::class, 'document_id', 'id');
+}
 }

@@ -855,3 +855,6 @@ Route::get('/documents/pages/{pageId}', [DocumentViewController::class, 'showPag
 Route::get('/documents/{id}/pages/{pageNumber}/search', [DocumentViewController::class, 'showPageWithHighlight'])
     ->name('documents.pages.show-with-highlight')
     ->where(['id' => '[0-9]+', 'pageNumber' => '[0-9]+']);
+
+    Route::get('/documents/{id}/page/{pageNumber}', [DocumentController::class, 'showPage'])
+    ->name('documents.pages.show');
