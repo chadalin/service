@@ -858,3 +858,10 @@ Route::get('/documents/{id}/pages/{pageNumber}/search', [DocumentViewController:
 
     Route::get('/documents/{id}/page/{pageNumber}', [DocumentController::class, 'showPage'])
     ->name('documents.pages.show');
+
+// Маршрут для формы консультации
+Route::get('/diagnostic/consultation/form', [App\Http\Controllers\Diagnostic\ConsultationController::class, 'form'])
+    ->name('diagnostic.consultation.form');
+
+    Route::post('/diagnostic/ai/create-case-from-search', [EnhancedAISearchController::class, 'createCaseFromSearch'])
+    ->name('diagnostic.ai.create-case');

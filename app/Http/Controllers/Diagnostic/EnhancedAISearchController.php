@@ -10,12 +10,14 @@ use App\Models\Brand;
 use App\Models\CarModel;
 use App\Models\PriceItem;
 use App\Models\Document;
+use App\Models\User;
 use App\Models\DocumentPage;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
+use Illuminate\Support\Facades\Auth;
 
 class EnhancedAISearchController extends Controller
 {
@@ -39,8 +41,11 @@ class EnhancedAISearchController extends Controller
             'brands_count' => Brand::count(),
             'models_count' => CarModel::count(),
         ];
+
+        // Получаем текущего пользователя
+        $user = Auth::user();
         
-        return view('diagnostic.ai-search.enhanced', compact('brands', 'models', 'stats'));
+        return view('diagnostic.ai-search.enhanced', compact('brands', 'models', 'stats','user'));
     }
 
     /**
@@ -1386,5 +1391,207 @@ private function getDefaultPreviewImage($fileType)
                 return '/documents/' . $documentId . '/page/' . $pageNumber;
             }
         }
+    }  
+
+     /**
+     * Создать диагностический случай из пустого поиска
+     */
+    public function createCaseFromSearch(Request $request)
+    {
+        Log::info('=== CREATE CASE FROM SEARCH START ===', [
+            'user' => Auth::id(),
+            'data' => $request->except(['_token'])
+        ]);
+
+        try {
+            // Валидация
+            $validator = Validator::make($request->all(), [
+                'query' => 'required|string|max:1000',
+                'brand_id' => 'required|string|max:255',
+                'model_id' => 'nullable|integer',
+                'year' => 'nullable|integer|min:1990|max:' . date('Y'),
+                'vin' => 'nullable|string|max:17',
+                'mileage' => 'nullable|integer|min:0|max:1000000',
+                'engine_type' => 'nullable|string|max:50',
+                'description' => 'required|string|min:10|max:2000',
+                'additional_info' => 'nullable|string|max:1000',
+                'contact_phone' => 'nullable|string|max:20',
+                'contact_email' => 'nullable|email',
+                'symptom_photos' => 'nullable|array',
+                'symptom_photos.*' => 'image|mimes:jpeg,png,jpg,gif|max:10240',
+                'symptom_videos' => 'nullable|array',
+                'symptom_videos.*' => 'mimes:mp4,mov,avi|max:51200',
+            ]);
+
+            if ($validator->fails()) {
+                return response()->json([
+                    'success' => false,
+                    'errors' => $validator->errors(),
+                    'message' => 'Пожалуйста, исправьте ошибки в форме'
+                ], 422);
+            }
+
+            $validated = $validator->validated();
+
+            DB::beginTransaction();
+
+            // Получаем или создаем правило для "неизвестной проблемы"
+            $rule = $this->getOrCreateUnknownRule($validated['query']);
+            
+            // Получаем информацию о пользователе
+            $user = Auth::user();
+            
+            // Создаем диагностический случай
+            $case = new DiagnosticCase();
+            $case->user_id = Auth::id();
+            $case->rule_id = $rule->id;
+            $case->brand_id = $validated['brand_id'];
+            $case->model_id = $validated['model_id'] ?? null;
+            $case->year = $validated['year'] ?? null;
+            $case->vin = $validated['vin'] ?? null;
+            $case->mileage = $validated['mileage'] ?? null;
+            $case->engine_type = $validated['engine_type'] ?? null;
+            $case->symptoms = json_encode([]);
+            $case->description = $validated['description'] ?? $validated['query'];
+            $case->status = 'consultation_pending';
+            $case->step = 5;
+            $case->price_estimate = 3000; // Базовая цена консультации
+            $case->contact_name = $user ? ($user->name ?? $user->email) : null;
+            $case->contact_phone = $validated['contact_phone'] ?? ($user->phone ?? null);
+            $case->contact_email = $validated['contact_email'] ?? ($user->email ?? null);
+            $case->contacted_at = now();
+            $case->save();
+
+            Log::info('Case created from search', ['case_id' => $case->id]);
+
+            // Обработка файлов
+            $files = [];
+            if ($request->hasFile('symptom_photos')) {
+                foreach ($request->file('symptom_photos') as $photo) {
+                    $path = $photo->store('diagnostic/cases/' . $case->id . '/photos', 'public');
+                    $files[] = [
+                        'type' => 'photo',
+                        'path' => $path,
+                        'original_name' => $photo->getClientOriginalName()
+                    ];
+                }
+            }
+
+            if ($request->hasFile('symptom_videos')) {
+                foreach ($request->file('symptom_videos') as $video) {
+                    $path = $video->store('diagnostic/cases/' . $case->id . '/videos', 'public');
+                    $files[] = [
+                        'type' => 'video',
+                        'path' => $path,
+                        'original_name' => $video->getClientOriginalName()
+                    ];
+                }
+            }
+
+            // Сохраняем информацию о файлах в дополнительном поле
+            if (!empty($files)) {
+                $case->additional_data = json_encode([
+                    'files' => $files,
+                    'additional_info' => $validated['additional_info'] ?? null,
+                    'created_from' => 'search_no_results'
+                ]);
+                $case->save();
+            } elseif (!empty($validated['additional_info'])) {
+                $case->additional_data = json_encode([
+                    'additional_info' => $validated['additional_info'],
+                    'created_from' => 'search_no_results'
+                ]);
+                $case->save();
+            }
+
+            DB::commit();
+
+            // Получаем бренд для отображения
+            $brand = Brand::find($validated['brand_id']);
+            
+            return response()->json([
+                'success' => true,
+                'message' => '✅ Диагностический случай создан! Наши специалисты свяжутся с вами в ближайшее время.',
+                'case_id' => $case->id,
+                'redirect_url' => route('diagnostic.consultation.order', ['case_id' => $case->id]),
+                'case_data' => [
+                    'id' => $case->id,
+                    'brand' => $brand ? $brand->name : 'Неизвестная марка',
+                    'model' => $validated['model_id'] ? CarModel::find($validated['model_id'])?->name : null,
+                    'created_at' => $case->created_at->format('d.m.Y H:i'),
+                    'status' => 'Ожидает консультации'
+                ]
+            ]);
+
+        } catch (\Exception $e) {
+            DB::rollBack();
+            Log::error('Error creating case from search: ' . $e->getMessage(), [
+                'trace' => $e->getTraceAsString()
+            ]);
+
+            return response()->json([
+                'success' => false,
+                'message' => '❌ Ошибка при создании диагностического случая: ' . $e->getMessage()
+            ], 500);
+        }
+    }
+
+    /**
+     * Получить или создать правило для неизвестной проблемы
+     */
+    private function getOrCreateUnknownRule($query)
+    {
+        // Ищем существующее правило для неизвестных случаев
+        $rule = Rule::where('is_active', true)
+            ->where('is_default', true)
+            ->where('name', 'like', '%неизвестная проблема%')
+            ->first();
+
+        if (!$rule) {
+            // Создаем новое правило
+            $rule = new Rule();
+            $rule->name = 'Неизвестная диагностическая проблема';
+            $rule->symptom_id = $this->getOrCreateUnknownSymptom();
+            $rule->possible_causes = ['Требуется диагностика специалистом'];
+            $rule->diagnostic_steps = [
+                'Подробное описание проблемы',
+                'Сбор дополнительной информации',
+                'Консультация с экспертом'
+            ];
+            $rule->required_data = [
+                'Марка автомобиля',
+                'Модель автомобиля',
+                'Описание проблемы'
+            ];
+            $rule->complexity_level = 5;
+            $rule->estimated_time = 60;
+            $rule->base_consultation_price = 3000;
+            $rule->is_active = true;
+            $rule->is_default = true;
+            $rule->save();
+        }
+
+        return $rule;
+    }
+
+    /**
+     * Получить или создать симптом для неизвестной проблемы
+     */
+    private function getOrCreateUnknownSymptom()
+    {
+        $symptom = Symptom::where('is_active', true)
+            ->where('name', 'like', '%неизвестная неисправность%')
+            ->first();
+
+        if (!$symptom) {
+            $symptom = new Symptom();
+            $symptom->name = 'Неизвестная неисправность';
+            $symptom->description = 'Проблема не найдена в базе данных. Требуется дополнительная диагностика.';
+            $symptom->category = 'diagnostic';
+            $symptom->is_active = true;
+            $symptom->save();
+        }
+
+        return $symptom->id;
     }
 }

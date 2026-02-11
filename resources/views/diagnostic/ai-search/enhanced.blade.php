@@ -410,6 +410,185 @@ mark.bg-warning {
         0%, 80%, 100% { transform: translateY(0); }
         40% { transform: translateY(-10px); }
     }
+
+     /* ========== НОВЫЕ СТИЛИ ========== */
+    
+    /* Блок "Ничего не найдено" */
+    .no-results-card {
+        border: 2px dashed #ffc107;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #fff9e6 0%, #ffffff 100%);
+        margin-bottom: 2rem;
+        animation: pulse-border 2s infinite;
+    }
+    
+    @keyframes pulse-border {
+        0% { border-color: #ffc107; }
+        50% { border-color: #ff9800; }
+        100% { border-color: #ffc107; }
+    }
+    
+    .no-results-header {
+        background: linear-gradient(135deg, #ff9800 0%, #f57c00 100%);
+        color: white;
+        padding: 1.25rem;
+        border-radius: 16px 16px 0 0;
+    }
+    
+    /* Кнопка консультации - улучшенная */
+    .btn-consultation-glow {
+        background: linear-gradient(45deg, #667eea, #764ba2);
+        color: white;
+        border: none;
+        padding: 0.75rem 1.5rem;
+        border-radius: 50px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+        transition: all 0.3s ease;
+        position: relative;
+        overflow: hidden;
+    }
+    
+    .btn-consultation-glow:hover {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+        color: white;
+    }
+    
+    .btn-consultation-glow::after {
+        content: '';
+        position: absolute;
+        top: -50%;
+        left: -60%;
+        width: 200%;
+        height: 200%;
+        background: rgba(255, 255, 255, 0.1);
+        transform: rotate(45deg);
+        transition: all 0.5s;
+    }
+    
+    .btn-consultation-glow:hover::after {
+        left: 100%;
+    }
+    
+    .btn-consultation-large {
+        font-size: 1.2rem;
+        padding: 1rem 2rem;
+        width: 100%;
+        margin-bottom: 0.5rem;
+    }
+    
+    /* Форма создания случая */
+    .case-form-section {
+        background: #f8f9fa;
+        border-radius: 12px;
+        padding: 1.5rem;
+        margin-top: 1rem;
+        border-left: 4px solid #667eea;
+        transition: all 0.3s;
+    }
+    
+    .case-form-section:hover {
+        box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+        background: #ffffff;
+    }
+    
+    .form-label-required::after {
+        content: '*';
+        color: #dc3545;
+        margin-left: 4px;
+        font-weight: bold;
+    }
+    
+    /* Превью файлов */
+    .file-preview-container {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 10px;
+        margin-top: 10px;
+    }
+    
+    .file-preview-item {
+        position: relative;
+        width: 100px;
+        height: 100px;
+        border-radius: 8px;
+        overflow: hidden;
+        border: 2px solid #dee2e6;
+    }
+    
+    .file-preview-item img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+    }
+    
+    .file-preview-remove {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        background: rgba(220, 53, 69, 0.9);
+        color: white;
+        border: none;
+        border-radius: 50%;
+        width: 24px;
+        height: 24px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        font-size: 12px;
+        transition: all 0.2s;
+    }
+    
+    .file-preview-remove:hover {
+        background: #dc3545;
+        transform: scale(1.1);
+    }
+    
+    /* Прогресс-бар */
+    .case-creation-progress {
+        height: 4px;
+        width: 100%;
+        background: #e9ecef;
+        border-radius: 4px;
+        overflow: hidden;
+        margin: 10px 0;
+    }
+    
+    .case-creation-progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, #667eea, #764ba2);
+        width: 0%;
+        transition: width 0.3s ease;
+        border-radius: 4px;
+    }
+    
+    /* Индикатор VIN */
+    .vin-valid {
+        border-color: #28a745 !important;
+    }
+    
+    .vin-invalid {
+        border-color: #dc3545 !important;
+    }
+    
+    /* Анимация появления */
+    @keyframes slideInRight {
+        from {
+            opacity: 0;
+            transform: translateX(30px);
+        }
+        to {
+            opacity: 1;
+            transform: translateX(0);
+        }
+    }
+    
+    .slide-in-right {
+        animation: slideInRight 0.5s ease forwards;
+    }
 </style>
 @endpush
 
@@ -539,22 +718,49 @@ mark.bg-warning {
 
 @push('scripts')
 <script>
-// Глобальные переменные
-// Глобальные переменные
-let allModels = @json($models);
+// ============================================
+// ГЛОБАЛЬНЫЕ ПЕРЕМЕННЫЕ
+// ============================================
+let allModels = @json($models ?? []);
 let currentSearchData = null;
 let isLoading = false;
 let currentResults = [];
+let currentUser = @json($user ?? null);
+let currentUserEmail = currentUser?.email || '';
+let currentUserPhone = currentUser?.phone || '';
+let currentUserName = currentUser?.name || currentUser?.email?.split('@')[0] || '';
 
+// ============================================
+// ИНИЦИАЛИЗАЦИЯ
+// ============================================
 document.addEventListener('DOMContentLoaded', function() {
     console.log('AI Search page loaded');
     
     // Инициализация
     initBrandModelSelect();
     initEventListeners();
+    initFileUploads();
+    initVinValidation();
+    
+    // Делаем функцию toggleCaseForm глобально доступной
+    window.toggleCaseForm = toggleCaseForm;
+    window.showConsultationForm = showConsultationForm;
+    window.showTelegramSupport = showTelegramSupport;
+    window.showWhatsAppSupport = showWhatsAppSupport;
+    window.createCaseFromSearch = createCaseFromSearch;
+    window.removeFile = removeFile;
+    window.togglePreview = togglePreview;
+    window.viewDocumentDetails = viewDocumentDetails;
+    window.viewRuleDetails = viewRuleDetails;
+    window.viewSymptomDetails = viewSymptomDetails;
+    window.orderConsultation = orderConsultation;
+    window.viewPartDetails = viewPartDetails;
+    window.addToCart = addToCart;
 });
 
-// Инициализация выбора марки/модели
+// ============================================
+// ФУНКЦИИ ДЛЯ РАБОТЫ С МАРКАМИ/МОДЕЛЯМИ
+// ============================================
 function initBrandModelSelect() {
     const brandSelect = document.getElementById('brand_id');
     const modelSelect = document.getElementById('model_id');
@@ -574,7 +780,6 @@ function initBrandModelSelect() {
     }
 }
 
-// Загрузка моделей для выбранной марки
 function loadModelsForBrand(brandId) {
     const modelSelect = document.getElementById('model_id');
     const models = allModels[brandId] || [];
@@ -613,14 +818,124 @@ function loadModelsForBrand(brandId) {
     }, 10);
 }
 
-// Сброс выбора модели
 function resetModelSelect() {
     const modelSelect = document.getElementById('model_id');
     modelSelect.innerHTML = '<option value="">Сначала выберите марку</option>';
     modelSelect.disabled = true;
 }
 
-// Инициализация обработчиков событий
+// ============================================
+// ФУНКЦИИ ДЛЯ РАБОТЫ С ФАЙЛАМИ
+// ============================================
+function initFileUploads() {
+    const photoInput = document.getElementById('symptom_photos');
+    const videoInput = document.getElementById('symptom_videos');
+    
+    if (photoInput) {
+        // Удаляем старый обработчик и добавляем новый
+        photoInput.removeEventListener('change', handlePhotoPreview);
+        photoInput.addEventListener('change', handlePhotoPreview);
+    }
+    
+    if (videoInput) {
+        // Удаляем старый обработчик и добавляем новый
+        videoInput.removeEventListener('change', handleVideoPreview);
+        videoInput.addEventListener('change', handleVideoPreview);
+    }
+}
+
+function handlePhotoPreview(e) {
+    previewFiles(e.target, 'photo-preview-container');
+}
+
+function handleVideoPreview(e) {
+    previewFiles(e.target, 'video-preview-container');
+}
+
+function previewFiles(input, containerId) {
+    const container = document.getElementById(containerId);
+    if (!container) return;
+    
+    container.innerHTML = '';
+    container.style.display = 'flex';
+    
+    if (input.files && input.files.length > 0) {
+        Array.from(input.files).forEach((file, index) => {
+            const previewItem = document.createElement('div');
+            previewItem.className = 'file-preview-item';
+            
+            if (file.type.startsWith('image/')) {
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    previewItem.innerHTML = `
+                        <img src="${e.target.result}" alt="Preview">
+                        <button type="button" class="file-preview-remove" onclick="removeFile(this, '${input.id}', ${index})">
+                            <i class="bi bi-x"></i>
+                        </button>
+                    `;
+                };
+                reader.readAsDataURL(file);
+            } else {
+                previewItem.innerHTML = `
+                    <div style="display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; background: #f8f9fa; padding: 10px;">
+                        <i class="bi bi-file-play" style="font-size: 2rem; color: #6c757d;"></i>
+                        <small style="font-size: 0.7rem;">${file.name.substring(0, 10)}...</small>
+                    </div>
+                    <button type="button" class="file-preview-remove" onclick="removeFile(this, '${input.id}', ${index})">
+                        <i class="bi bi-x"></i>
+                    </button>
+                `;
+            }
+            
+            container.appendChild(previewItem);
+        });
+    } else {
+        container.style.display = 'none';
+    }
+}
+
+function removeFile(button, inputId, fileIndex) {
+    const input = document.getElementById(inputId);
+    if (input && input.files) {
+        const dt = new DataTransfer();
+        const files = Array.from(input.files);
+        files.splice(fileIndex, 1);
+        files.forEach(file => dt.items.add(file));
+        input.files = dt.files;
+        
+        // Обновить предпросмотр
+        previewFiles(input, inputId === 'symptom_photos' ? 'photo-preview-container' : 'video-preview-container');
+    }
+}
+
+// ============================================
+// ВАЛИДАЦИЯ VIN
+// ============================================
+function initVinValidation() {
+    const vinInput = document.getElementById('vin');
+    if (vinInput) {
+        vinInput.addEventListener('input', function() {
+            const vin = this.value.toUpperCase();
+            this.value = vin;
+            
+            if (vin.length === 17) {
+                if (/^[A-HJ-NPR-Z0-9]{17}$/.test(vin)) {
+                    this.classList.add('vin-valid');
+                    this.classList.remove('vin-invalid');
+                } else {
+                    this.classList.add('vin-invalid');
+                    this.classList.remove('vin-valid');
+                }
+            } else {
+                this.classList.remove('vin-valid', 'vin-invalid');
+            }
+        });
+    }
+}
+
+// ============================================
+// ИНИЦИАЛИЗАЦИЯ ОБРАБОТЧИКОВ СОБЫТИЙ
+// ============================================
 function initEventListeners() {
     const searchForm = document.getElementById('aiSearchForm');
     if (searchForm) {
@@ -639,6 +954,9 @@ function initEventListeners() {
     });
 }
 
+// ============================================
+// ОСНОВНОЙ ПОИСК
+// ============================================
 async function performEnhancedSearch() {
     if (isLoading) return;
     
@@ -653,41 +971,31 @@ async function performEnhancedSearch() {
         return;
     }
     
-    // Настройка UI
     isLoading = true;
     searchBtn.disabled = true;
     searchSpinner.classList.remove('d-none');
     
-    // Показываем состояние загрузки
     showLoadingState();
     
     try {
-        // Используем FormData для корректной отправки данных
         const formData = new FormData(form);
-        
-        // Получаем значения - НЕ конвертируем brand_id в число, оставляем строку
         const brandIdValue = formData.get('brand_id');
         const modelIdValue = document.getElementById('model_id').disabled ? null : formData.get('model_id');
         
-        // Создаем объект с данными
         const searchData = {
             query: formData.get('query'),
-            brand_id: brandIdValue && brandIdValue !== '' ? brandIdValue : null, // НЕ parseInt!
-            model_id: modelIdValue && modelIdValue !== '' ? parseInt(modelIdValue) : null, // model_id может быть числом
+            brand_id: brandIdValue && brandIdValue !== '' ? brandIdValue : null,
+            model_id: modelIdValue && modelIdValue !== '' ? parseInt(modelIdValue) : null,
             search_type: formData.get('search_type'),
         };
         
-        // Проверяем валидность числовых значений (только для model_id)
         if (searchData.model_id !== null && isNaN(searchData.model_id)) {
             searchData.model_id = null;
         }
         
         console.log('Sending search data:', searchData);
-        
-        // Сохраняем текущие параметры
         currentSearchData = searchData;
         
-        // Отправляем запрос с правильными заголовками
         const response = await fetch('{{ route("diagnostic.ai.enhanced.search") }}', {
             method: 'POST',
             headers: {
@@ -699,14 +1007,9 @@ async function performEnhancedSearch() {
             body: JSON.stringify(searchData)
         });
         
-        // Проверяем статус ответа
         if (!response.ok) {
-            // Если ошибка валидации (422)
             if (response.status === 422) {
                 const errorData = await response.json();
-                console.error('Validation error:', errorData);
-                
-                // Формируем сообщение об ошибке
                 let errorMessage = 'Ошибка валидации: ';
                 if (errorData.errors) {
                     Object.values(errorData.errors).forEach(errors => {
@@ -715,7 +1018,6 @@ async function performEnhancedSearch() {
                 } else {
                     errorMessage += errorData.message || 'Неизвестная ошибка';
                 }
-                
                 throw new Error(errorMessage.trim());
             } else {
                 throw new Error(`HTTP error ${response.status}`);
@@ -731,14 +1033,12 @@ async function performEnhancedSearch() {
         currentResults = data.results || [];
         displayStructuredResults(data);
         
-        // Показываем уведомление
         const totalResults = data.results.length + (data.parts?.length || 0) + (data.documents?.length || 0);
         showToast(`Найдено ${totalResults} результатов`, 'success');
         
     } catch (error) {
         console.error('Search error:', error);
         
-        // Проверяем если это CSRF ошибка
         if (error.message.includes('419') || error.message.includes('CSRF')) {
             showErrorState('Ошибка безопасности. Пожалуйста, обновите страницу и попробуйте снова.');
             showToast('Ошибка безопасности. Обновите страницу.', 'danger');
@@ -773,7 +1073,6 @@ function showLoadingState() {
         </div>
     `;
     
-    // Обновляем счетчик
     document.getElementById('resultsCounter').textContent = 'Поиск...';
     document.getElementById('resultsCounter').className = 'badge bg-warning';
 }
@@ -784,7 +1083,7 @@ function showErrorState(errorMessage) {
         <div class="text-center py-5">
             <i class="bi bi-exclamation-triangle display-1 text-danger mb-3"></i>
             <h4 class="text-danger mb-3">Ошибка поиска</h4>
-            <p class="text-muted mb-4">${errorMessage}</p>
+            <p class="text-muted mb-4">${escapeHtml(errorMessage)}</p>
             <button class="btn btn-primary" onclick="performEnhancedSearch()">
                 <i class="bi bi-arrow-clockwise me-1"></i>Повторить
             </button>
@@ -795,56 +1094,67 @@ function showErrorState(errorMessage) {
     document.getElementById('resultsCounter').className = 'badge bg-danger';
 }
 
+// ============================================
+// ОТОБРАЖЕНИЕ РЕЗУЛЬТАТОВ
+// ============================================
 function displayStructuredResults(data) {
     console.log('Displaying results:', data);
     
     const container = document.getElementById('resultsContainer');
     const counter = document.getElementById('resultsCounter');
     
-    // Обновляем счетчик
-    const totalResults = data.results?.length || 0;
-    counter.textContent = `Найдено: ${totalResults}`;
-    counter.className = totalResults > 0 ? 'badge bg-success' : 'badge bg-secondary';
+    const totalSymptoms = data.results?.length || 0;
+    const totalDocs = data.documents?.length || 0;
+    const totalParts = data.parts?.length || 0;
+    const totalResults = totalSymptoms + totalDocs + totalParts;
     
-    // Очищаем контейнер
+    counter.textContent = totalResults > 0 ? `Найдено: ${totalResults}` : 'Нет совпадений';
+    counter.className = totalResults > 0 ? 'badge bg-success' : 'badge bg-warning';
+    
     container.innerHTML = '';
     
-    // Постепенно добавляем контент
-    setTimeout(() => {
-        addAIResponse(data.ai_response, container);
-        
+    if (totalResults > 0) {
         setTimeout(() => {
-            if (data.results && data.results.length > 0) {
-                addSymptomsResults(data.results, container);
+            addAIResponse(data.ai_response, container);
+            
+            setTimeout(() => {
+                if (data.results && data.results.length > 0) {
+                    addSymptomsResults(data.results, container);
+                }
                 
                 setTimeout(() => {
-                    if (data.parts && data.parts.length > 0) {
-                        addPartsResults(data.parts, container);
+                    if (data.documents && data.documents.length > 0) {
+                        addDocumentsResults(data.documents, container);
                     }
                     
                     setTimeout(() => {
-                        console.log('Trying to add documents:', data.documents);
-                        if (data.documents && data.documents.length > 0) {
-                            console.log('Documents exist, calling addDocumentsResults');
-                            addDocumentsResults(data.documents, container);
-                        } else {
-                            console.log('No documents to display');
+                        if (data.parts && data.parts.length > 0) {
+                            addPartsResults(data.parts, container);
                         }
+                        
+                        setTimeout(() => {
+                            addConsultationButton(data, container);
+                        }, 300);
                     }, 300);
                 }, 300);
-            } else {
-                console.log('No symptoms found');
-            }
-        }, 500);
-    }, 300);
+            }, 500);
+        }, 300);
+    } else {
+        setTimeout(() => {
+            addAIResponse(data.ai_response, container);
+            
+            setTimeout(() => {
+                addNoResultsWithCaseForm(data, container);
+            }, 500);
+        }, 300);
+    }
 }
 
 function addAIResponse(response, container) {
     const responseDiv = document.createElement('div');
     responseDiv.className = 'ai-response-box fade-in-up';
     
-    // Форматируем ответ
-    const formattedResponse = formatAIResponse(response);
+    const formattedResponse = formatAIResponse(response || '');
     
     responseDiv.innerHTML = `
         <div class="ai-response-content">
@@ -856,7 +1166,6 @@ function addAIResponse(response, container) {
 }
 
 function addSymptomsResults(results, container) {
-    // Показываем только топ-5 результатов
     const topResults = results.slice(0, 5);
     
     topResults.forEach((result, index) => {
@@ -868,7 +1177,6 @@ function addSymptomsResults(results, container) {
             resultDiv.innerHTML = createSymptomCardHTML(result, index);
             container.appendChild(resultDiv);
             
-            // Плавное появление
             setTimeout(() => {
                 resultDiv.style.opacity = '1';
             }, 100);
@@ -906,10 +1214,7 @@ function addPartsResults(parts, container) {
 }
 
 function addDocumentsResults(docs, container) {
-    console.log('addDocumentsResults called with:', docs);
-    
     if (!docs || !Array.isArray(docs) || docs.length === 0) {
-        console.log('No valid docs array');
         return;
     }
     
@@ -928,12 +1233,10 @@ function addDocumentsResults(docs, container) {
     `;
     
     docs.forEach((doc, index) => {
-        console.log(`Document ${index}:`, doc);
         try {
             docsHTML += createDocumentCardHTML(doc, index);
         } catch (error) {
-            console.error('Error creating document card:', error, doc);
-            docsHTML += `<div class="alert alert-danger">Ошибка отображения документа</div>`;
+            console.error('Error creating document card:', error);
         }
     });
     
@@ -942,6 +1245,512 @@ function addDocumentsResults(docs, container) {
     container.appendChild(docsDiv);
 }
 
+// ============================================
+// ГЛАВНАЯ ФУНКЦИЯ - ФОРМА КОГДА НИЧЕГО НЕ НАЙДЕНО
+// ============================================
+function addNoResultsWithCaseForm(data, container) {
+    const formDiv = document.createElement('div');
+    formDiv.className = 'main-result-card no-results-card fade-in-up slide-in-right';
+    
+    const brandSelect = document.getElementById('brand_id');
+    const modelSelect = document.getElementById('model_id');
+    const selectedBrand = brandSelect.options[brandSelect.selectedIndex];
+    const selectedModel = modelSelect.options[modelSelect.selectedIndex];
+    
+    const brandValue = brandSelect.value || '';
+    const modelValue = modelSelect.value || '';
+    
+    const yearOptions = generateYearOptions();
+    
+    // Создаем HTML с явными ID для элементов
+    formDiv.innerHTML = `
+        <div class="no-results-header">
+            <div class="d-flex align-items-center justify-content-between">
+                <div>
+                    <h4 class="mb-1">
+                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                        Совпадений не найдено
+                    </h4>
+                    <p class="mb-0 opacity-75">
+                        Мы не нашли готовое решение в нашей базе. Опишите проблему подробнее — 
+                        наши эксперты проведут индивидуальную диагностику.
+                    </p>
+                </div>
+                <span class="badge bg-warning text-dark fs-6">
+                    Требуется консультация
+                </span>
+            </div>
+        </div>
+        
+        <div class="result-content">
+            <!-- УЛУЧШЕННАЯ КНОПКА КОНСУЛЬТАЦИИ -->
+            <div class="text-center mb-4 p-4 bg-light rounded">
+                <div class="mb-3">
+                    <i class="bi bi-headset display-3 text-primary"></i>
+                </div>
+                <h5 class="text-primary mb-2">Получите консультацию эксперта прямо сейчас!</h5>
+                <p class="text-muted mb-3">
+                    Наши специалисты проанализируют вашу проблему и предложат точное решение
+                </p>
+                <button class="btn btn-consultation-glow btn-consultation-large btn-pulse" 
+                        onclick="toggleCaseForm()">
+                    <i class="bi bi-chat-dots-fill me-2"></i>
+                    ЗАКАЗАТЬ ИНДИВИДУАЛЬНУЮ ДИАГНОСТИКУ
+                    <span class="badge bg-light text-dark ms-2">от 3000 ₽</span>
+                </button>
+                <div class="mt-2">
+                    <small class="text-muted">
+                        <i class="bi bi-clock-history me-1"></i> Среднее время ответа: 15 минут
+                    </small>
+                </div>
+            </div>
+            
+            <!-- ФОРМА СОЗДАНИЯ ДИАГНОСТИЧЕСКОГО СЛУЧАЯ -->
+            <div id="caseFormContainer" style="display: none;" class="case-form-section">
+                <form id="createCaseForm" enctype="multipart/form-data">
+                    <input type="hidden" name="_token" value="{{ csrf_token() }}">
+                    
+                    <div class="d-flex align-items-center mb-3">
+                        <i class="bi bi-tools fs-4 text-primary me-2"></i>
+                        <h5 class="mb-0">Создание диагностического случая</h5>
+                        <span class="badge bg-primary ms-2">Новый</span>
+                    </div>
+                    
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label form-label-required">Марка</label>
+                            <input type="text" class="form-control" name="brand_id" 
+                                   value="${brandValue}" readonly>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Модель</label>
+                            <input type="text" class="form-control" name="model_id" 
+                                   value="${modelValue}" readonly>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label">Год выпуска</label>
+                            <select class="form-select" name="year">
+                                <option value="">Выберите год</option>
+                                ${yearOptions}
+                            </select>
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label">Двигатель</label>
+                            <input type="text" class="form-control" name="engine_type" 
+                                   placeholder="1.6 MPI, 2.0 TDI...">
+                        </div>
+                        
+                        <div class="col-md-4">
+                            <label class="form-label">VIN номер</label>
+                            <input type="text" class="form-control" name="vin" id="vin"
+                                   placeholder="17 символов" maxlength="17">
+                            <div class="form-text text-muted small">
+                                <i class="bi bi-info-circle"></i> Последние 17 символов СТС
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Пробег (км)</label>
+                            <input type="number" class="form-control" name="mileage" 
+                                   placeholder="0" min="0" max="1000000">
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Телефон</label>
+                            <input type="tel" class="form-control" name="contact_phone" 
+                                   value="${currentUserPhone}" placeholder="+7 (999) 123-45-67">
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">Email</label>
+                            <input type="email" class="form-control" name="contact_email" 
+                                   value="${currentUserEmail}" placeholder="email@example.com">
+                        </div>
+                        
+                        <div class="col-12">
+                            <label class="form-label form-label-required">Описание проблемы</label>
+                            <textarea class="form-control" name="description" rows="4" 
+                                      placeholder="Подробно опишите, что происходит, когда проявляется проблема, какие звуки, запахи, ошибки...">${escapeHtml(data.query || '')}</textarea>
+                        </div>
+                        
+                        <div class="col-12">
+                            <label class="form-label">Дополнительная информация</label>
+                            <textarea class="form-control" name="additional_info" rows="2" 
+                                      placeholder="Что уже проверяли, что меняли, какие были ремонты..."></textarea>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">
+                                <i class="bi bi-camera me-1"></i> Фото неисправности
+                            </label>
+                            <input type="file" class="form-control" name="symptom_photos[]" 
+                                   id="symptom_photos" multiple accept="image/*">
+                            <div id="photo-preview-container" class="file-preview-container" style="display: none;"></div>
+                            <div class="form-text">
+                                Макс. 10MB, формат: JPG, PNG
+                            </div>
+                        </div>
+                        
+                        <div class="col-md-6">
+                            <label class="form-label">
+                                <i class="bi bi-camera-video me-1"></i> Видео неисправности
+                            </label>
+                            <input type="file" class="form-control" name="symptom_videos[]" 
+                                   id="symptom_videos" multiple accept="video/*">
+                            <div id="video-preview-container" class="file-preview-container" style="display: none;"></div>
+                            <div class="form-text">
+                                Макс. 50MB, формат: MP4, MOV
+                            </div>
+                        </div>
+                        
+                        <div class="col-12 mt-4">
+                            <div class="d-grid gap-2">
+                                <button type="submit" class="btn btn-consultation-glow btn-lg">
+                                    <i class="bi bi-check-circle me-2"></i>
+                                    СОЗДАТЬ ДИАГНОСТИЧЕСКИЙ СЛУЧАЙ
+                                </button>
+                                <button type="button" class="btn btn-outline-secondary" 
+                                        onclick="toggleCaseForm()">
+                                    <i class="bi bi-x-lg me-1"></i>Отмена
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </form>
+            </div>
+            
+            <div class="mt-4 pt-3 border-top text-center">
+                <p class="text-muted mb-2">Другие способы решения:</p>
+                <div class="d-flex justify-content-center gap-3 flex-wrap">
+                    <a href="tel:+78001234567" class="btn btn-outline-secondary">
+                        <i class="bi bi-telephone me-1"></i>Позвонить
+                    </a>
+                    <button class="btn btn-outline-primary" onclick="showTelegramSupport()">
+                        <i class="bi bi-telegram me-1"></i>Telegram
+                    </button>
+                    <button class="btn btn-outline-success" onclick="showWhatsAppSupport()">
+                        <i class="bi bi-whatsapp me-1"></i>WhatsApp
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    container.appendChild(formDiv);
+    
+    // Инициализируем обработчики для новой формы
+    setTimeout(() => {
+        initFileUploads();
+        initVinValidation();
+        
+        const caseForm = document.getElementById('createCaseForm');
+        if (caseForm) {
+            caseForm.addEventListener('submit', async function(e) {
+                e.preventDefault();
+                await createCaseFromSearch();
+            });
+        }
+    }, 100);
+}
+
+// ============================================
+// ФУНКЦИЯ ПЕРЕКЛЮЧЕНИЯ ФОРМЫ - ИСПРАВЛЕННАЯ!
+// ============================================
+function toggleCaseForm() {
+    console.log('toggleCaseForm called');
+    const container = document.getElementById('caseFormContainer');
+    if (container) {
+        if (container.style.display === 'none' || container.style.display === '') {
+            container.style.display = 'block';
+            console.log('Form shown');
+            setTimeout(() => {
+                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }, 100);
+        } else {
+            container.style.display = 'none';
+            console.log('Form hidden');
+        }
+    } else {
+        console.error('caseFormContainer not found!');
+    }
+}
+
+// ============================================
+// ФУНКЦИЯ ДЛЯ КНОПКИ КОНСУЛЬТАЦИИ
+// ============================================
+function addConsultationButton(data, container) {
+    const consultationDiv = document.createElement('div');
+    consultationDiv.className = 'main-result-card fade-in-up slide-in-right';
+    consultationDiv.style.marginTop = '1.5rem';
+    consultationDiv.style.border = '2px solid #667eea';
+    consultationDiv.style.background = 'linear-gradient(135deg, #f5f7ff 0%, #ffffff 100%)';
+    
+    consultationDiv.innerHTML = `
+        <div class="result-content text-center p-4">
+            <div class="d-flex align-items-center justify-content-center mb-3">
+                <div class="bg-primary rounded-circle p-3 me-3" style="width: 70px; height: 70px; display: flex; align-items: center; justify-content: center;">
+                    <i class="bi bi-headset text-white fs-1"></i>
+                </div>
+                <div class="text-start">
+                    <h4 class="mb-1 text-primary">Нужна помощь эксперта?</h4>
+                    <p class="text-muted mb-0">Получите консультацию профессионального диагноста</p>
+                </div>
+            </div>
+            
+            <div class="row g-3 mb-4">
+                <div class="col-md-4">
+                    <div class="bg-light p-3 rounded">
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        <span class="ms-2">Разбор вашей ситуации</span>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="bg-light p-3 rounded">
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        <span class="ms-2">Точный план действий</span>
+                    </div>
+                </div>
+                <div class="col-md-4">
+                    <div class="bg-light p-3 rounded">
+                        <i class="bi bi-check-circle-fill text-success"></i>
+                        <span class="ms-2">Смета на ремонт</span>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="d-flex justify-content-center gap-3">
+                <button class="btn btn-consultation-glow btn-lg btn-pulse" onclick="showConsultationForm()">
+                    <i class="bi bi-chat-dots-fill me-2"></i>
+                    ЗАКАЗАТЬ КОНСУЛЬТАЦИЮ
+                    <span class="badge bg-light text-dark ms-2">от 3000 ₽</span>
+                </button>
+                <button class="btn btn-outline-secondary btn-lg" onclick="toggleCaseForm()">
+                    <i class="bi bi-file-earmark-plus me-1"></i>
+                    Детальный случай
+                </button>
+            </div>
+        </div>
+    `;
+    
+    container.appendChild(consultationDiv);
+}
+
+// ============================================
+// ГЕНЕРАЦИЯ ОПЦИЙ ДЛЯ ГОДА
+// ============================================
+function generateYearOptions() {
+    const currentYear = new Date().getFullYear();
+    let options = '';
+    for (let year = currentYear; year >= 1990; year--) {
+        options += `<option value="${year}">${year}</option>`;
+    }
+    return options;
+}
+
+// ============================================
+// ПОКАЗАТЬ ФОРМУ КОНСУЛЬТАЦИИ
+// ============================================
+function showConsultationForm() {
+    const brandSelect = document.getElementById('brand_id');
+    const selectedBrand = brandSelect.options[brandSelect.selectedIndex];
+    
+    const consultationData = {
+        brand_id: brandSelect.value,
+        brand_name: selectedBrand ? selectedBrand.text : 'Не выбрана',
+        model_id: document.getElementById('model_id').value,
+        description: document.getElementById('query').value
+    };
+    
+    localStorage.setItem('consultation_data', JSON.stringify(consultationData));
+    window.location.href = '/diagnostic/consultation/order?from=search';
+}
+
+// ============================================
+// СОЗДАНИЕ ДИАГНОСТИЧЕСКОГО СЛУЧАЯ
+// ============================================
+async function createCaseFromSearch() {
+    if (isLoading) return;
+    
+    const form = document.getElementById('createCaseForm');
+    const formData = new FormData(form);
+    
+    const query = document.getElementById('query').value;
+    formData.append('query', query);
+    
+    isLoading = true;
+    const submitBtn = form.querySelector('button[type="submit"]');
+    const originalText = submitBtn.innerHTML;
+    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Создание...';
+    submitBtn.disabled = true;
+    
+    showCaseCreationProgress();
+    
+    try {
+        const response = await fetch('{{ route("diagnostic.ai.create-case") }}', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                'Accept': 'application/json',
+            },
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            showCaseCreationSuccess(data);
+            
+            const caseCreatedDiv = document.createElement('div');
+            caseCreatedDiv.className = 'alert alert-success mt-3 slide-in-right';
+            caseCreatedDiv.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <div class="me-3">
+                        <i class="bi bi-check-circle-fill fs-3"></i>
+                    </div>
+                    <div>
+                        <h5 class="alert-heading mb-1">✅ Диагностический случай #${data.case_id} создан!</h5>
+                        <p class="mb-1">${data.message}</p>
+                        <div class="mt-2">
+                            <strong>Автомобиль:</strong> ${data.case_data?.brand || 'Не указан'} ${data.case_data?.model || ''}<br>
+                            <strong>Дата:</strong> ${data.case_data?.created_at || new Date().toLocaleString()}
+                        </div>
+                        <hr class="my-2">
+                        <div class="d-flex gap-2">
+                            <a href="${data.redirect_url}" class="btn btn-success btn-sm">
+                                <i class="bi bi-chat-dots me-1"></i>Перейти к консультации
+                            </a>
+                            <button class="btn btn-outline-primary btn-sm" onclick="location.reload()">
+                                <i class="bi bi-search me-1"></i>Новый поиск
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            `;
+            
+            const caseFormSection = document.querySelector('.case-form-section');
+            if (caseFormSection) {
+                caseFormSection.innerHTML = '';
+                caseFormSection.appendChild(caseCreatedDiv);
+            }
+            
+            showToast(data.message, 'success');
+        } else {
+            if (data.errors) {
+                Object.keys(data.errors).forEach(field => {
+                    const input = document.querySelector(`[name="${field}"]`);
+                    if (input) {
+                        input.classList.add('is-invalid');
+                        const feedback = document.createElement('div');
+                        feedback.className = 'invalid-feedback';
+                        feedback.innerHTML = data.errors[field].join('<br>');
+                        input.parentNode.appendChild(feedback);
+                    }
+                });
+            }
+            showToast(data.message || 'Ошибка создания случая', 'danger');
+        }
+        
+    } catch (error) {
+        console.error('Create case error:', error);
+        showToast('Ошибка при создании диагностического случая: ' + error.message, 'danger');
+    } finally {
+        isLoading = false;
+        submitBtn.innerHTML = originalText;
+        submitBtn.disabled = false;
+        hideCaseCreationProgress();
+    }
+}
+
+function showCaseCreationProgress() {
+    let progressBar = document.querySelector('.case-creation-progress');
+    if (!progressBar) {
+        const form = document.getElementById('createCaseForm');
+        if (form) {
+            const progressDiv = document.createElement('div');
+            progressDiv.className = 'case-creation-progress mt-3';
+            progressDiv.innerHTML = '<div class="case-creation-progress-bar" style="width: 0%"></div>';
+            form.appendChild(progressDiv);
+            progressBar = progressDiv.querySelector('.case-creation-progress-bar');
+        }
+    }
+    
+    let width = 0;
+    const interval = setInterval(() => {
+        if (width >= 90) {
+            clearInterval(interval);
+        } else {
+            width += 10;
+            if (progressBar) {
+                progressBar.style.width = width + '%';
+            }
+        }
+    }, 200);
+    
+    window.caseCreationInterval = interval;
+}
+
+function hideCaseCreationProgress() {
+    if (window.caseCreationInterval) {
+        clearInterval(window.caseCreationInterval);
+    }
+    const progressBar = document.querySelector('.case-creation-progress-bar');
+    if (progressBar) {
+        progressBar.style.width = '100%';
+        setTimeout(() => {
+            const progressDiv = document.querySelector('.case-creation-progress');
+            if (progressDiv) {
+                progressDiv.remove();
+            }
+        }, 500);
+    }
+}
+
+function showCaseCreationSuccess(data) {
+    const counter = document.getElementById('resultsCounter');
+    if (counter) {
+        counter.textContent = 'Случай создан';
+        counter.className = 'badge bg-success';
+    }
+    
+    const container = document.getElementById('resultsContainer');
+    if (container) {
+        const systemMsg = document.createElement('div');
+        systemMsg.className = 'alert alert-success slide-in-right';
+        systemMsg.style.marginTop = '1rem';
+        systemMsg.innerHTML = `
+            <div class="d-flex">
+                <div class="flex-shrink-0">
+                    <i class="bi bi-check-circle-fill fs-4"></i>
+                </div>
+                <div class="flex-grow-1 ms-3">
+                    <strong>✅ Диагностический случай #${data.case_id} создан!</strong><br>
+                    <small>Эксперт ответит в течение 15 минут</small>
+                </div>
+            </div>
+        `;
+        container.appendChild(systemMsg);
+    }
+}
+
+// ============================================
+// КАНАЛЫ ПОДДЕРЖКИ
+// ============================================
+function showTelegramSupport() {
+    window.open('https://t.me/your_bot', '_blank');
+    showToast('Открываем Telegram...', 'info');
+}
+
+function showWhatsAppSupport() {
+    window.open('https://wa.me/78001234567', '_blank');
+    showToast('Открываем WhatsApp...', 'success');
+}
+
+// ============================================
+// ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
+// ============================================
 function createSymptomCardHTML(result, index) {
     const relevancePercent = Math.round((result.relevance_score || 0.5) * 100);
     const matchTypeBadge = result.match_type === 'exact' ? 'success' : 
@@ -983,7 +1792,6 @@ function createSymptomCardHTML(result, index) {
         <div class="result-content">
     `;
     
-    // Описание
     if (result.description) {
         html += `
             <div class="result-section">
@@ -995,7 +1803,6 @@ function createSymptomCardHTML(result, index) {
         `;
     }
     
-    // Шаги диагностики (только для правил)
     if (result.type === 'rule' && result.diagnostic_steps && result.diagnostic_steps.length > 0) {
         html += `
             <div class="result-section">
@@ -1017,7 +1824,6 @@ function createSymptomCardHTML(result, index) {
         html += `</ol></div>`;
     }
     
-    // Возможные причины
     if (result.possible_causes && result.possible_causes.length > 0) {
         html += `
             <div class="result-section">
@@ -1034,7 +1840,6 @@ function createSymptomCardHTML(result, index) {
         html += `</div></div>`;
     }
     
-    // Кнопки действий
     html += `
         <div class="d-flex justify-content-between align-items-center mt-3">
             <div>
@@ -1114,16 +1919,13 @@ function createDocumentCardHTML(doc, index) {
     const icon = doc.icon || 'bi-file-earmark';
     const fileType = doc.file_type || 'документ';
     
-    // Используем публичный URL
     const pageUrl = doc.page_url || 
                    doc.view_url || 
                    doc.source_url || 
                    '/documents/' + doc.id + '/pages/' + doc.page_number;
     
-    const pageNumberText = doc.page_number ? ` (стр. ${doc.page_number})` : '';
     const highlightParam = doc.highlight_term ? `?highlight=${encodeURIComponent(doc.highlight_term)}` : '';
     
-    // HTML для превью изображения (справа)
     let previewHTML = '';
     if (doc.preview_image) {
         previewHTML = `
@@ -1133,7 +1935,7 @@ function createDocumentCardHTML(doc, index) {
                      style="max-width: 150px; max-height: 150px; 
                             border: 1px solid #ddd; border-radius: 4px;
                             object-fit: cover;"
-                     onerror="this.onerror=null; this.src='${this.getDefaultDocumentIcon(doc.file_type)}'; this.style.padding='20px'; this.style.backgroundColor='#f8f9fa'">
+                     onerror="this.onerror=null; this.src='${getDefaultDocumentIcon(doc.file_type)}'; this.style.padding='20px'; this.style.backgroundColor='#f8f9fa'">
                 <div class="text-center small text-muted mt-1">
                     <i class="bi bi-camera"></i> Страница ${doc.page_number}
                 </div>
@@ -1182,7 +1984,7 @@ function createDocumentCardHTML(doc, index) {
                 ${doc.content_preview ? `
                     <div class="document-preview">
                         <div class="preview-content" style="max-height: 100px; overflow: hidden;">
-                            ${this.highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}
+                            ${highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}
                         </div>
                         <a href="#" class="small text-primary" onclick="togglePreview(this)">Показать больше</a>
                     </div>
@@ -1218,7 +2020,6 @@ function createDocumentCardHTML(doc, index) {
     `;
 }
 
-// Добавим вспомогательную функцию для дефолтных иконок
 function getDefaultDocumentIcon(fileType) {
     const icons = {
         'pdf': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-pdf.svg',
@@ -1231,7 +2032,6 @@ function getDefaultDocumentIcon(fileType) {
     return icons[fileType?.toLowerCase()] || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file.svg';
 }
 
-// Функция для переключения превью
 function togglePreview(button) {
     const previewContent = button.previousElementSibling;
     if (previewContent.style.maxHeight === '100px') {
@@ -1243,7 +2043,6 @@ function togglePreview(button) {
     }
 }
 
-// Функция для просмотра деталей документа
 function viewDocumentDetails(documentId, pageId) {
     if (pageId) {
         window.open(`/documents/${documentId}/pages/${pageId}/details`, '_blank');
@@ -1252,7 +2051,6 @@ function viewDocumentDetails(documentId, pageId) {
     }
 }
 
-// Функция для подсветки найденных терминов
 function highlightSearchTerms(text, terms) {
     if (!text || !terms || terms.length === 0) {
         return escapeHtml(text || '');
@@ -1275,6 +2073,8 @@ function escapeRegex(string) {
 }
 
 function formatAIResponse(text) {
+    if (!text) return '';
+    
     return text
         .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
         .replace(/🤖/g, '<i class="bi bi-robot text-primary"></i>')
@@ -1292,7 +2092,6 @@ function formatAIResponse(text) {
         .replace(/\n/g, '<br>');
 }
 
-// Вспомогательные функции
 function viewRuleDetails(ruleId) {
     window.open(`/admin/diagnostic/rules/${ruleId}`, '_blank');
 }
@@ -1332,23 +2131,39 @@ function escapeHtml(text) {
 }
 
 function showToast(message, type = 'info') {
-    // Используйте существующую систему нотаций или Bootstrap Toast
-    const toast = new bootstrap.Toast(document.getElementById('liveToast'));
-    const toastBody = document.querySelector('.toast-body');
-    if (toastBody) {
-        toastBody.textContent = message;
-        document.querySelector('.toast').className = `toast align-items-center text-bg-${type}`;
-        toast.show();
+    if (typeof bootstrap === 'undefined') {
+        alert(message);
+        return;
+    }
+    
+    const toastEl = document.getElementById('liveToast');
+    if (toastEl) {
+        const toastBody = toastEl.querySelector('.toast-body span') || toastEl.querySelector('.toast-body');
+        if (toastBody) {
+            toastBody.textContent = message;
+        }
+        toastEl.className = `toast align-items-center text-bg-${type} border-0`;
+        
+        try {
+            const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
+            toast.show();
+        } catch (e) {
+            console.log('Toast error:', e);
+            alert(message);
+        }
     }
 }
 
 </script>
 
-<!-- Добавьте в layout если нет -->
-<div class="toast-container position-fixed bottom-0 end-0 p-3">
+<!-- Toast контейнер -->
+<div class="toast-container position-fixed bottom-0 end-0 p-3" style="z-index: 9999;">
     <div id="liveToast" class="toast" role="alert" aria-live="assertive" aria-atomic="true">
-        <div class="toast-body"></div>
-        <button type="button" class="btn-close me-2 m-auto" data-bs-dismiss="toast"></button>
+        <div class="toast-body d-flex justify-content-between align-items-center">
+            <span></span>
+            <button type="button" class="btn-close" data-bs-dismiss="toast"></button>
+        </div>
     </div>
 </div>
+
 @endpush
