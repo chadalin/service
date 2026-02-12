@@ -424,6 +424,305 @@
             padding: 1rem;
         }
     }
+
+    /* Стили для консультаций */
+.consultations-feed {
+    display: flex;
+    flex-direction: column;
+    gap: 1.25rem;
+}
+
+.consultation-preview {
+    background: white;
+    border-radius: 12px;
+    border: 1px solid #e5e7eb;
+    overflow: hidden;
+    transition: all 0.2s;
+}
+
+.consultation-preview:hover {
+    border-color: #3b82f6;
+    box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+    transform: translateY(-2px);
+}
+
+.consultation-preview-header {
+    padding: 0.875rem 1.25rem;
+    background: linear-gradient(to right, #f8fafc, #f1f5f9);
+    border-bottom: 1px solid #e5e7eb;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+}
+
+.consultation-meta {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    flex-wrap: wrap;
+}
+
+.consultation-id {
+    font-size: 0.85rem;
+    font-weight: 600;
+    color: #1e293b;
+    background: #e2e8f0;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+}
+
+.consultation-date {
+    font-size: 0.8rem;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 0.25rem;
+}
+
+.consultation-status {
+    font-size: 0.75rem;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.consultation-status.status-completed {
+    background: #dcfce7;
+    color: #166534;
+}
+
+.consultation-status.status-in_progress {
+    background: #fef9c3;
+    color: #854d0e;
+}
+
+.consultation-status.status-pending {
+    background: #fee2e2;
+    color: #991b1b;
+}
+
+.consultation-expert {
+    font-size: 0.85rem;
+    color: #3b82f6;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: #dbeafe;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+}
+
+.consultation-preview-body {
+    padding: 1.25rem;
+    display: flex;
+    gap: 1.25rem;
+}
+
+@media (max-width: 768px) {
+    .consultation-preview-body {
+        flex-direction: column;
+    }
+}
+
+.consultation-images {
+    display: flex;
+    gap: 0.5rem;
+    flex-shrink: 0;
+}
+
+.consultation-image-wrapper {
+    position: relative;
+    width: 80px;
+    height: 80px;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 1px solid #e5e7eb;
+    cursor: pointer;
+    transition: transform 0.2s;
+}
+
+.consultation-image-wrapper:hover {
+    transform: scale(1.05);
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.1);
+}
+
+.consultation-image {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.more-images-badge {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.6);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.no-images-placeholder {
+    width: 80px;
+    height: 80px;
+    background: #f1f5f9;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    color: #94a3b8;
+    border: 1px dashed #cbd5e1;
+}
+
+.no-images-placeholder i {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+}
+
+.no-images-placeholder span {
+    font-size: 0.7rem;
+}
+
+.consultation-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+.consultation-description {
+    font-size: 0.95rem;
+    color: #1e293b;
+    line-height: 1.5;
+}
+
+.consultation-feedback {
+    font-size: 0.85rem;
+    color: #64748b;
+    background: #f8fafc;
+    padding: 0.75rem 1rem;
+    border-radius: 8px;
+    border-left: 3px solid #f59e0b;
+    font-style: italic;
+}
+
+.consultation-feedback i {
+    color: #f59e0b;
+    margin-right: 0.5rem;
+    opacity: 0.7;
+}
+
+.consultation-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-top: 0.5rem;
+}
+
+.consultation-car-info {
+    font-size: 0.8rem;
+    color: #64748b;
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+    background: #f1f5f9;
+    padding: 0.25rem 0.75rem;
+    border-radius: 20px;
+}
+
+.btn-view-consultation {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: #3b82f6;
+    text-decoration: none;
+    padding: 0.375rem 0.75rem;
+    border-radius: 6px;
+    background: #eff6ff;
+    transition: all 0.2s;
+}
+
+.btn-view-consultation:hover {
+    background: #3b82f6;
+    color: white;
+}
+
+.btn-view-consultation i {
+    transition: transform 0.2s;
+}
+
+.btn-view-consultation:hover i {
+    transform: translateX(4px);
+}
+
+/* Пустое состояние */
+.no-consultations {
+    text-align: center;
+    padding: 2.5rem;
+    background: #f8fafc;
+    border-radius: 12px;
+    border: 2px dashed #cbd5e1;
+}
+
+.no-consultations i {
+    font-size: 3rem;
+    color: #94a3b8;
+    margin-bottom: 1rem;
+}
+
+.no-consultations h5 {
+    color: #334155;
+    margin-bottom: 0.5rem;
+}
+
+.no-consultations p {
+    max-width: 400px;
+    margin: 0 auto;
+}
+
+/* Адаптивность */
+@media (max-width: 768px) {
+    .consultation-preview-header {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+    
+    .consultation-meta {
+        width: 100%;
+    }
+    
+    .consultation-expert {
+        width: 100%;
+    }
+    
+    .consultation-images {
+        width: 100%;
+        justify-content: flex-start;
+    }
+    
+    .consultation-footer {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.75rem;
+    }
+    
+    .btn-view-consultation {
+        width: 100%;
+        justify-content: center;
+    }
+}
 </style>
 @endpush
 
@@ -632,6 +931,148 @@
             </div>
         </div>
         
+                    <!-- СВЯЗАННЫЕ КОНСУЛЬТАЦИИ -->
+<div class="info-card mt-4">
+    <div class="info-card-header">
+        <h6 class="mb-0">
+            <i class="bi bi-chat-dots me-2"></i>
+            Консультации по данному симптому
+        </h6>
+    </div>
+    <div class="info-card-body">
+        @if($consultations && $consultations->count() > 0)
+            <div class="consultations-feed">
+                @foreach($consultations as $consultation)
+                    <div class="consultation-preview">
+                        <div class="consultation-preview-header">
+                            <div class="consultation-meta">
+                                <span class="consultation-id">
+                                    <i class="bi bi-hash"></i> Консультация #{{ $consultation->id }}
+                                </span>
+                                <span class="consultation-date">
+                                    <i class="bi bi-calendar3"></i> {{ $consultation->created_at->format('d.m.Y') }}
+                                </span>
+                                <span class="consultation-status status-{{ $consultation->status }}">
+                                    {{ $consultation->status == 'completed' ? 'Завершена' : ($consultation->status == 'in_progress' ? 'В работе' : 'Ожидает') }}
+                                </span>
+                            </div>
+                            @if($consultation->expert)
+                                <div class="consultation-expert">
+                                    <i class="bi bi-person-badge"></i>
+                                    Эксперт: {{ $consultation->expert->name ?? 'Специалист' }}
+                                </div>
+                            @endif
+                        </div>
+                        
+                        <div class="consultation-preview-body">
+                            @if($consultation->preview_images && count($consultation->preview_images) > 0)
+                                <div class="consultation-images">
+                                    @foreach(array_slice($consultation->preview_images, 0, 3) as $index => $image)
+                                        <div class="consultation-image-wrapper">
+                                            <img src="{{ Storage::url($image) }}" 
+                                                 alt="Фото консультации"
+                                                 class="consultation-image"
+                                                 onclick="openImageModal('{{ Storage::url($image) }}')">
+                                            @if($index === 2 && count($consultation->preview_images) > 3)
+                                                <div class="more-images-badge">
+                                                    +{{ count($consultation->preview_images) - 3 }}
+                                                </div>
+                                            @endif
+                                        </div>
+                                    @endforeach
+                                </div>
+                            @else
+                                <div class="no-images-placeholder">
+                                    <i class="bi bi-card-image"></i>
+                                    <span>Нет фото</span>
+                                </div>
+                            @endif
+                            
+                            <div class="consultation-content">
+                                <div class="consultation-description">
+                                    {{ $consultation->short_description }}
+                                </div>
+                                
+                                @if($consultation->customer_feedback)
+                                    <div class="consultation-feedback">
+                                        <i class="bi bi-quote"></i>
+                                        {{ Str::limit($consultation->customer_feedback, 100) }}
+                                    </div>
+                                @endif
+                                
+                                <div class="consultation-footer">
+                                    @if($consultation->case)
+                                        <div class="consultation-car-info">
+                                            <i class="bi bi-car-front"></i>
+                                            @if($consultation->case->brand)
+                                                {{ $consultation->case->brand->name ?? '' }}
+                                            @endif
+                                            @if($consultation->case->model)
+                                                {{ $consultation->case->model->name ?? '' }}
+                                            @endif
+                                            @if($consultation->case->year)
+                                                {{ $consultation->case->year }}
+                                            @endif
+                                        </div>
+                                    @endif
+                                    
+                                    <a href="{{ route('admin.diagnostic.consultations.show', $consultation->id) }}" 
+                                       class="btn-view-consultation">
+                                        Подробнее
+                                        <i class="bi bi-arrow-right"></i>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+                
+                @if($consultations->count() >= 6)
+                    <div class="text-center mt-4">
+                        <a href="{{ route('admin.diagnostic.consultations.index', ['rule_id' => $rule->id]) }}" 
+                           class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-arrow-right-circle me-1"></i>
+                            Все консультации по данному симптому
+                        </a>
+                    </div>
+                @endif
+            </div>
+        @else
+            <div class="no-consultations">
+                <i class="bi bi-chat-square-text"></i>
+                <h5>Пока нет консультаций</h5>
+                <p class="text-muted">
+                    По данному симптому еще не было консультаций. 
+                    Будьте первым, кто закажет консультацию эксперта!
+                </p>
+                <div class="mt-3">
+                    <button type="button" 
+                            class="btn btn-primary btn-sm"
+                            onclick="document.querySelector('.consultation-form').scrollIntoView({ behavior: 'smooth' })">
+                        <i class="bi bi-plus-circle me-1"></i>
+                        Заказать консультацию
+                    </button>
+                </div>
+            </div>
+        @endif
+    </div>
+</div>
+
+<!-- Модальное окно для просмотра изображений -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center p-0">
+                <img src="" id="modalImage" class="img-fluid" alt="Просмотр изображения">
+            </div>
+        </div>
+    </div>
+</div>
+
+
         <!-- Правая колонка: Форма заказа консультации -->
         <div class="col-lg-4">
             <div class="consultation-form sticky-top" style="top: 1rem;">
@@ -1247,5 +1688,36 @@ function formatFileSize(bytes) {
     const i = Math.floor(Math.log(bytes) / Math.log(k));
     return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
 }
+
+
+// Функция для открытия модального окна с изображением
+function openImageModal(imageUrl) {
+    const modal = new bootstrap.Modal(document.getElementById('imageModal'));
+    const modalImage = document.getElementById('modalImage');
+    modalImage.src = imageUrl;
+    modal.show();
+}
+
+// Инициализация модального окна при загрузке страницы
+document.addEventListener('DOMContentLoaded', function() {
+    // Добавляем модальное окно в DOM, если его нет
+    if (!document.getElementById('imageModal')) {
+        const modalHTML = `
+            <div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+                <div class="modal-dialog modal-lg modal-dialog-centered">
+                    <div class="modal-content">
+                        <div class="modal-header border-0">
+                            <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+                        </div>
+                        <div class="modal-body text-center p-0">
+                            <img src="" id="modalImage" class="img-fluid" alt="Просмотр изображения">
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+        document.body.insertAdjacentHTML('beforeend', modalHTML);
+    }
+});
 </script>
 @endpush

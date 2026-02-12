@@ -21,6 +21,7 @@ use App\Http\Controllers\Admin\PriceItemController;
 use App\Http\Controllers\Admin\PriceImportController;
 use App\Http\Controllers\SearchTestController;
 use App\Http\Controllers\Diagnostic\DocumentViewController;
+use App\Http\Controllers\LinkController;
 
 
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
@@ -865,3 +866,18 @@ Route::get('/diagnostic/consultation/form', [App\Http\Controllers\Diagnostic\Con
 
     Route::post('/diagnostic/ai/create-case-from-search', [EnhancedAISearchController::class, 'createCaseFromSearch'])
     ->name('diagnostic.ai.create-case');
+
+
+    Route::resource('links', LinkController::class);
+Route::get('redirect/{link}', [LinkController::class, 'redirect'])->name('links.redirect');
+
+// Корневой маршрут
+Route::get('/', function () {
+    return redirect()->route('links.index');
+});
+
+Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () {
+    Route::prefix('diagnostic')->name('diagnostic.')->group(function () {
+        Route::resource('consultations', ConsultationController::class);
+    });
+});

@@ -819,6 +819,9 @@
                             <a class="nav-link" href="/project-info">
                                 <i class="bi bi-info-circle me-1"></i> Информация
                             </a>
+                            <a class="nav-link" href="/links">
+                                <i class="bi bi-info-circle me-1"></i> Ссылки
+                            </a>
                         </div>
                     </div>
                 </div>

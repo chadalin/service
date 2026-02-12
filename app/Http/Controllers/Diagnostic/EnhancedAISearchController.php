@@ -6,18 +6,22 @@ use App\Http\Controllers\Controller;
 use Illuminate\Http\Request;
 use App\Models\Diagnostic\Symptom;
 use App\Models\Diagnostic\Rule;
+use App\Models\Diagnostic\Consultation;
+use App\Models\Diagnostic\ConsultationMessage;
 use App\Models\Brand;
 use App\Models\CarModel;
 use App\Models\PriceItem;
 use App\Models\Document;
 use App\Models\User;
 use App\Models\DocumentPage;
+use App\Models\Diagnostic\DiagnosticCase;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
 use Illuminate\Support\Facades\Auth;
+ use Illuminate\Support\Facades\Storage;
 
 class EnhancedAISearchController extends Controller
 {
@@ -1396,179 +1400,305 @@ private function getDefaultPreviewImage($fileType)
      /**
      * Создать диагностический случай из пустого поиска
      */
-    public function createCaseFromSearch(Request $request)
-    {
-        Log::info('=== CREATE CASE FROM SEARCH START ===', [
-            'user' => Auth::id(),
-            'data' => $request->except(['_token'])
+ /**
+ * Создать диагностический случай из пустого поиска - ИСПРАВЛЕНО
+ */
+/**
+ * Создать диагностический случай из пустого поиска - ИСПРАВЛЕНО с UUID
+ */
+/**
+ * Создать диагностический случай из пустого поиска - ИСПРАВЛЕНО
+ */
+/**
+ * Создать диагностический случай из пустого поиска - ИСПРАВЛЕНО
+ */
+/**
+ * Создать диагностический случай из пустого поиска - 100% РАБОЧАЯ ВЕРСИЯ
+ */
+/**
+ * Создать диагностический случай из пустого поиска - 100% РАБОЧАЯ ВЕРСИЯ
+ */
+public function createCaseFromSearch(Request $request)
+{
+    Log::info('=== CREATE CASE FROM SEARCH START ===');
+
+    try {
+        // ВАЛИДАЦИЯ
+        $validator = Validator::make($request->all(), [
+            'query' => 'required|string|max:1000',
+            'brand_id' => 'required|string|max:255',
+            'model_id' => 'nullable|string|max:255',
+            'year' => 'nullable|integer|min:1990|max:' . date('Y'),
+            'vin' => 'nullable|string|max:17',
+            'mileage' => 'nullable|integer|min:0|max:1000000',
+            'engine_type' => 'nullable|string|max:50',
+            'description' => 'required|string|min:10|max:2000',
         ]);
 
-        try {
-            // Валидация
-            $validator = Validator::make($request->all(), [
-                'query' => 'required|string|max:1000',
-                'brand_id' => 'required|string|max:255',
-                'model_id' => 'nullable|integer',
-                'year' => 'nullable|integer|min:1990|max:' . date('Y'),
-                'vin' => 'nullable|string|max:17',
-                'mileage' => 'nullable|integer|min:0|max:1000000',
-                'engine_type' => 'nullable|string|max:50',
-                'description' => 'required|string|min:10|max:2000',
-                'additional_info' => 'nullable|string|max:1000',
-                'contact_phone' => 'nullable|string|max:20',
-                'contact_email' => 'nullable|email',
-                'symptom_photos' => 'nullable|array',
-                'symptom_photos.*' => 'image|mimes:jpeg,png,jpg,gif|max:10240',
-                'symptom_videos' => 'nullable|array',
-                'symptom_videos.*' => 'mimes:mp4,mov,avi|max:51200',
-            ]);
+        if ($validator->fails()) {
+            return response()->json([
+                'success' => false,
+                'errors' => $validator->errors(),
+                'message' => 'Пожалуйста, исправьте ошибки в форме'
+            ], 422);
+        }
 
-            if ($validator->fails()) {
-                return response()->json([
-                    'success' => false,
-                    'errors' => $validator->errors(),
-                    'message' => 'Пожалуйста, исправьте ошибки в форме'
-                ], 422);
-            }
+        $validated = $validator->validated();
+        $user = Auth::user();
 
-            $validated = $validator->validated();
+        DB::beginTransaction();
 
-            DB::beginTransaction();
+        // ========== 1. ГЕНЕРИРУЕМ UUID ==========
+        $caseId = (string) Str::uuid();
+        Log::info('Generated UUID', ['case_id' => $caseId]);
 
-            // Получаем или создаем правило для "неизвестной проблемы"
-            $rule = $this->getOrCreateUnknownRule($validated['query']);
-            
-            // Получаем информацию о пользователе
-            $user = Auth::user();
-            
-            // Создаем диагностический случай
-            $case = new DiagnosticCase();
-            $case->user_id = Auth::id();
-            $case->rule_id = $rule->id;
-            $case->brand_id = $validated['brand_id'];
-            $case->model_id = $validated['model_id'] ?? null;
-            $case->year = $validated['year'] ?? null;
-            $case->vin = $validated['vin'] ?? null;
-            $case->mileage = $validated['mileage'] ?? null;
-            $case->engine_type = $validated['engine_type'] ?? null;
-            $case->symptoms = json_encode([]);
-            $case->description = $validated['description'] ?? $validated['query'];
-            $case->status = 'consultation_pending';
-            $case->step = 5;
-            $case->price_estimate = 3000; // Базовая цена консультации
-            $case->contact_name = $user ? ($user->name ?? $user->email) : null;
-            $case->contact_phone = $validated['contact_phone'] ?? ($user->phone ?? null);
-            $case->contact_email = $validated['contact_email'] ?? ($user->email ?? null);
-            $case->contacted_at = now();
-            $case->save();
+        // ========== 2. СОЗДАЕМ СИМПТОМ ==========
+        $symptom = Symptom::create([
+            'name' => mb_substr($validated['description'], 0, 100) . (mb_strlen($validated['description']) > 100 ? '...' : ''),
+            'slug' => Str::slug(mb_substr($validated['description'], 0, 50)) . '-' . time(),
+            'description' => $validated['description'],
+            'category' => 'user_case',
+            'is_active' => true,
+        ]);
 
-            Log::info('Case created from search', ['case_id' => $case->id]);
+        // ========== 3. СОЗДАЕМ ДИАГНОСТИЧЕСКИЙ СЛУЧАЙ (ЧЕРЕЗ RAW SQL) ==========
+        DB::insert("
+            INSERT INTO diagnostic_cases (
+                id, user_id, rule_id, brand_id, model_id, year, vin, mileage, 
+                engine_type, symptoms, description, status, step, 
+                contact_name, contact_phone, contact_email, contacted_at,
+                uploaded_files, created_at, updated_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ", [
+            $caseId,
+            Auth::id(),
+            null,
+            $validated['brand_id'],
+            $validated['model_id'] ?? null,
+            $validated['year'] ?? null,
+            $validated['vin'] ?? null,
+            $validated['mileage'] ?? null,
+            $validated['engine_type'] ?? null,
+            json_encode([$symptom->id]),
+            $validated['description'],
+            'consultation_pending',
+            1,
+            $user ? ($user->name ?? $user->email) : 'Не указано',
+            $validated['contact_phone'] ?? ($user->phone ?? null),
+            $validated['contact_email'] ?? ($user->email ?? null),
+            now(),
+            json_encode([]),
+            now(),
+            now()
+        ]);
 
-            // Обработка файлов
-            $files = [];
-            if ($request->hasFile('symptom_photos')) {
-                foreach ($request->file('symptom_photos') as $photo) {
-                    $path = $photo->store('diagnostic/cases/' . $case->id . '/photos', 'public');
+        // ========== 4. ПОЛУЧАЕМ МОДЕЛЬ КЕЙСА ==========
+        $case = DiagnosticCase::find($caseId);
+        
+        // ========== 5. СОЗДАЕМ КОНСУЛЬТАЦИЮ ==========
+        $consultation = Consultation::create([
+            'case_id' => $case->id,
+            'user_id' => Auth::id(),
+            'expert_id' => null,
+            'type' => 'expert',
+            'price' => 0,
+            'status' => 'pending',
+            'payment_status' => 'pending',
+        ]);
+
+        // ========== 6. ОБРАБОТКА ФАЙЛОВ ==========
+        $files = [];
+        
+        // ВАЖНО: используем $caseId, а не $case->id
+        $caseDirectory = 'diagnostic/cases/' . $caseId;
+        
+        // СОЗДАЕМ ДИРЕКТОРИИ
+        Storage::disk('public')->makeDirectory($caseDirectory . '/photos');
+        Storage::disk('public')->makeDirectory($caseDirectory . '/videos');
+        
+        // ОБРАБОТКА ФОТО
+        if ($request->hasFile('symptom_photos')) {
+            foreach ($request->file('symptom_photos') as $photo) {
+                try {
+                    $path = $photo->store($caseDirectory . '/photos', 'public');
+                    
                     $files[] = [
                         'type' => 'photo',
                         'path' => $path,
-                        'original_name' => $photo->getClientOriginalName()
+                        'original_name' => $photo->getClientOriginalName(),
+                        'size' => $photo->getSize(),
+                        'mime' => $photo->getMimeType()
                     ];
+                    
+                    Log::info('Photo uploaded', ['path' => $path]);
+                    
+                } catch (\Exception $e) {
+                    Log::error('Error uploading photo: ' . $e->getMessage());
                 }
             }
+        }
 
-            if ($request->hasFile('symptom_videos')) {
-                foreach ($request->file('symptom_videos') as $video) {
-                    $path = $video->store('diagnostic/cases/' . $case->id . '/videos', 'public');
+        // ОБРАБОТКА ВИДЕО
+        if ($request->hasFile('symptom_videos')) {
+            foreach ($request->file('symptom_videos') as $video) {
+                try {
+                    $path = $video->store($caseDirectory . '/videos', 'public');
+                    
                     $files[] = [
                         'type' => 'video',
                         'path' => $path,
-                        'original_name' => $video->getClientOriginalName()
+                        'original_name' => $video->getClientOriginalName(),
+                        'size' => $video->getSize(),
+                        'mime' => $video->getMimeType()
                     ];
+                    
+                    Log::info('Video uploaded', ['path' => $path]);
+                    
+                } catch (\Exception $e) {
+                    Log::error('Error uploading video: ' . $e->getMessage());
                 }
             }
-
-            // Сохраняем информацию о файлах в дополнительном поле
-            if (!empty($files)) {
-                $case->additional_data = json_encode([
-                    'files' => $files,
-                    'additional_info' => $validated['additional_info'] ?? null,
-                    'created_from' => 'search_no_results'
-                ]);
-                $case->save();
-            } elseif (!empty($validated['additional_info'])) {
-                $case->additional_data = json_encode([
-                    'additional_info' => $validated['additional_info'],
-                    'created_from' => 'search_no_results'
-                ]);
-                $case->save();
-            }
-
-            DB::commit();
-
-            // Получаем бренд для отображения
-            $brand = Brand::find($validated['brand_id']);
-            
-            return response()->json([
-                'success' => true,
-                'message' => '✅ Диагностический случай создан! Наши специалисты свяжутся с вами в ближайшее время.',
-                'case_id' => $case->id,
-                'redirect_url' => route('diagnostic.consultation.order', ['case_id' => $case->id]),
-                'case_data' => [
-                    'id' => $case->id,
-                    'brand' => $brand ? $brand->name : 'Неизвестная марка',
-                    'model' => $validated['model_id'] ? CarModel::find($validated['model_id'])?->name : null,
-                    'created_at' => $case->created_at->format('d.m.Y H:i'),
-                    'status' => 'Ожидает консультации'
-                ]
-            ]);
-
-        } catch (\Exception $e) {
-            DB::rollBack();
-            Log::error('Error creating case from search: ' . $e->getMessage(), [
-                'trace' => $e->getTraceAsString()
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => '❌ Ошибка при создании диагностического случая: ' . $e->getMessage()
-            ], 500);
         }
-    }
 
+        // ========== 7. ОБНОВЛЯЕМ КЕЙС С ФАЙЛАМИ (ЧЕРЕЗ RAW SQL) ==========
+        if (!empty($files)) {
+            DB::update("
+                UPDATE diagnostic_cases 
+                SET uploaded_files = ?, updated_at = ? 
+                WHERE id = ?
+            ", [
+                json_encode($files, JSON_UNESCAPED_UNICODE),
+                now(),
+                $caseId
+            ]);
+            
+            Log::info('Files saved to case', ['count' => count($files)]);
+        }
+
+        // ========== 8. СОЗДАЕМ ПРИВЕТСТВЕННОЕ СООБЩЕНИЕ ==========
+        $brand = Brand::find($validated['brand_id']);
+        $brandName = $brand ? ($brand->name_cyrillic ?? $brand->name) : $validated['brand_id'];
+        
+        $model = null;
+        $modelName = '';
+        if (!empty($validated['model_id'])) {
+            $model = CarModel::find($validated['model_id']);
+            $modelName = $model ? ($model->name_cyrillic ?? $model->name) : $validated['model_id'];
+        }
+        
+        $message = "🆕 **НОВЫЙ ДИАГНОСТИЧЕСКИЙ СЛУЧАЙ**\n\n";
+        $message .= "🚗 **Автомобиль:** {$brandName}";
+        if ($modelName) $message .= " {$modelName}";
+        $message .= "\n";
+        
+        if (!empty($validated['year'])) $message .= "📅 **Год:** {$validated['year']}\n";
+        if (!empty($validated['engine_type'])) $message .= "⚙️ **Двигатель:** {$validated['engine_type']}\n";
+        if (!empty($validated['mileage'])) $message .= "🛣️ **Пробег:** " . number_format($validated['mileage'], 0, '', ' ') . " км\n";
+        if (!empty($validated['vin'])) $message .= "🔢 **VIN:** {$validated['vin']}\n";
+        
+        $message .= "\n📝 **Описание проблемы:**\n{$validated['description']}\n";
+        
+        if (!empty($files)) {
+            $message .= "\n📎 **Прикреплено файлов:** " . count($files) . " шт.\n";
+        }
+
+        ConsultationMessage::create([
+            'consultation_id' => $consultation->id,
+            'user_id' => Auth::id(),
+            'message' => $message,
+            'type' => 'system',
+        ]);
+
+        // ========== 9. СООБЩЕНИЯ ДЛЯ ФАЙЛОВ ==========
+        foreach ($files as $file) {
+            ConsultationMessage::create([
+                'consultation_id' => $consultation->id,
+                'user_id' => Auth::id(),
+                'message' => ($file['type'] === 'photo' ? '📷' : '🎬') . " **Загружено:** {$file['original_name']}",
+                'type' => 'file',
+                'metadata' => json_encode([
+                    'path' => $file['path'],
+                    'filename' => $file['original_name'],
+                    'size' => $file['size'],
+                    'type' => $file['type']
+                ], JSON_UNESCAPED_UNICODE),
+            ]);
+        }
+
+        DB::commit();
+
+        return response()->json([
+            'success' => true,
+            'message' => '✅ Диагностический случай создан!',
+            'case_id' => $caseId,
+            'consultation_id' => $consultation->id,
+            'redirect_url' => route('diagnostic.consultation.show', $consultation->id),
+        ]);
+
+    } catch (\Exception $e) {
+        DB::rollBack();
+        Log::error('Error: ' . $e->getMessage(), [
+            'trace' => $e->getTraceAsString(),
+            'line' => $e->getLine()
+        ]);
+
+        return response()->json([
+            'success' => false,
+            'message' => '❌ Ошибка: ' . $e->getMessage()
+        ], 500);
+    }
+}
     /**
      * Получить или создать правило для неизвестной проблемы
      */
-    private function getOrCreateUnknownRule($query)
+     private function getOrCreateUnknownRule($query)
     {
+        // Проверяем таблицу на наличие поля is_default
+        $hasIsDefault = Schema::hasColumn('diagnostic_rules', 'is_default');
+        
         // Ищем существующее правило для неизвестных случаев
-        $rule = Rule::where('is_active', true)
-            ->where('is_default', true)
+        $ruleQuery = Rule::where('is_active', true)
             ->where('name', 'like', '%неизвестная проблема%')
-            ->first();
+            ->orWhere('name', 'like', '%не найдено%')
+            ->orWhere('name', 'like', '%default%');
+            
+        if ($hasIsDefault) {
+            $ruleQuery->orWhere('is_default', true);
+        }
+        
+        $rule = $ruleQuery->first();
 
         if (!$rule) {
+            // Создаем симптом для неизвестной проблемы
+            $symptomId = $this->getOrCreateUnknownSymptom();
+            
             // Создаем новое правило
             $rule = new Rule();
             $rule->name = 'Неизвестная диагностическая проблема';
-            $rule->symptom_id = $this->getOrCreateUnknownSymptom();
-            $rule->possible_causes = ['Требуется диагностика специалистом'];
-            $rule->diagnostic_steps = [
+            $rule->symptom_id = $symptomId;
+            $rule->possible_causes = json_encode(['Требуется диагностика специалистом'], JSON_UNESCAPED_UNICODE);
+            $rule->diagnostic_steps = json_encode([
                 'Подробное описание проблемы',
                 'Сбор дополнительной информации',
                 'Консультация с экспертом'
-            ];
-            $rule->required_data = [
+            ], JSON_UNESCAPED_UNICODE);
+            $rule->required_data = json_encode([
                 'Марка автомобиля',
                 'Модель автомобиля',
                 'Описание проблемы'
-            ];
+            ], JSON_UNESCAPED_UNICODE);
             $rule->complexity_level = 5;
             $rule->estimated_time = 60;
             $rule->base_consultation_price = 3000;
             $rule->is_active = true;
-            $rule->is_default = true;
+            
+            if ($hasIsDefault) {
+                $rule->is_default = true;
+            }
+            
             $rule->save();
+            
+            Log::info('Created unknown rule', ['rule_id' => $rule->id]);
         }
 
         return $rule;
@@ -1581,6 +1711,8 @@ private function getDefaultPreviewImage($fileType)
     {
         $symptom = Symptom::where('is_active', true)
             ->where('name', 'like', '%неизвестная неисправность%')
+            ->orWhere('name', 'like', '%не найдено%')
+            ->orWhere('name', 'like', '%unknown%')
             ->first();
 
         if (!$symptom) {
@@ -1590,8 +1722,12 @@ private function getDefaultPreviewImage($fileType)
             $symptom->category = 'diagnostic';
             $symptom->is_active = true;
             $symptom->save();
+            
+            Log::info('Created unknown symptom', ['symptom_id' => $symptom->id]);
         }
 
         return $symptom->id;
     }
+
+   
 }

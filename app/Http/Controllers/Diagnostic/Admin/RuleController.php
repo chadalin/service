@@ -9,6 +9,8 @@ use App\Models\Diagnostic\Symptom;
 use App\Models\Diagnostic\Rule;
 use App\Models\PriceItem;
 use Illuminate\Http\Request;
+use App\Models\Diagnostic\DiagnosticCase;
+use App\Models\Diagnostic\Consultation;
 use Illuminate\Support\Facades\Log;
 
 class RuleController extends Controller
@@ -109,30 +111,161 @@ class RuleController extends Controller
         return response()->json($models);
     }
 
-    public function show($id)
-{ 
-    try {
-        $rule = Rule::with(['symptom', 'brand', 'model'])
-            ->findOrFail($id);
+      public function show($id)
+    { 
+        try {
+            $rule = Rule::with(['symptom', 'brand', 'model'])
+                ->findOrFail($id);
 
-        $brands = Brand::orderBy('name')->get();
-        
-        // Поиск связанных запчастей (с защитой от ошибок)
-        $matchedPriceItems = $this->findMatchingPriceItemsSafely($rule);
-        
-        return view('admin.diagnostic.rules.show', [
-            'rule' => $rule,
-            'brands' => $brands,
-            'matchedPriceItems' => $matchedPriceItems,
-            'title' => 'Код ошибки или симптом OBD: ' . ($rule->symptom->name ?? 'Unknown')
-        ]);
-    } catch (\Exception $e) {
-        Log::error('Error showing rule', ['rule_id' => $id, 'error' => $e->getMessage()]);
-        
-        return redirect()->route('admin.diagnostic.rules.index')
-            ->with('error', 'Код ошибки или симптом OBD: ' . $e->getMessage());
+            $brands = Brand::orderBy('name')->get();
+            
+            // Поиск связанных запчастей (с защитой от ошибок)
+            $matchedPriceItems = $this->findMatchingPriceItemsSafely($rule);
+            
+            // Получаем консультации, связанные с этим правилом
+            $consultations = $this->getRelatedConsultations($rule);
+            
+            return view('admin.diagnostic.rules.show', [
+                'rule' => $rule,
+                'brands' => $brands,
+                'matchedPriceItems' => $matchedPriceItems,
+                'consultations' => $consultations,
+                'title' => 'Код ошибки или симптом OBD: ' . ($rule->symptom->name ?? 'Unknown')
+            ]);
+        } catch (\Exception $e) {
+            Log::error('Error showing rule', ['rule_id' => $id, 'error' => $e->getMessage()]);
+            
+            return redirect()->route('admin.diagnostic.rules.index')
+                ->with('error', 'Код ошибки или симптом OBD: ' . $e->getMessage());
+        }
     }
-}
+
+    /**
+     * Получить консультации, связанные с правилом
+     */
+    private function getRelatedConsultations(Rule $rule)
+    {
+        try {
+            // Находим кейсы, созданные по этому правилу
+            $caseIds = DiagnosticCase::where('rule_id', $rule->id)
+                ->pluck('id')
+                ->toArray();
+            
+            if (empty($caseIds)) {
+                return collect();
+            }
+            
+            // Получаем консультации с связанными данными
+            $consultations = Consultation::with(['case', 'expert', 'user'])
+                ->whereIn('case_id', $caseIds)
+                ->where('status', 'completed') // Только завершенные консультации
+                ->orWhere('status', 'in_progress') // Или в процессе
+                ->orderBy('created_at', 'desc')
+                ->limit(6) // Показываем не более 6 консультаций
+                ->get();
+            
+            // Для каждой консультации пытаемся получить файлы из кейса
+            foreach ($consultations as $consultation) {
+                if ($consultation->case && !empty($consultation->case->uploaded_files)) {
+                    $files = is_string($consultation->case->uploaded_files) 
+                        ? json_decode($consultation->case->uploaded_files, true) 
+                        : $consultation->case->uploaded_files;
+                    
+                    $consultation->preview_images = $this->extractPreviewImages($files);
+                } else {
+                    $consultation->preview_images = [];
+                }
+                
+                // Сокращаем описание симптомов для превью
+                if ($consultation->case && !empty($consultation->case->description)) {
+                    $consultation->short_description = Str::limit($consultation->case->description, 120);
+                } elseif ($consultation->case && !empty($consultation->case->symptoms)) {
+                    $symptoms = is_string($consultation->case->symptoms) 
+                        ? json_decode($consultation->case->symptoms, true) 
+                        : $consultation->case->symptoms;
+                    
+                    if (is_array($symptoms) && !empty($symptoms)) {
+                        $consultation->short_description = 'Симптомы: ' . implode(', ', array_slice($symptoms, 0, 3));
+                    } else {
+                        $consultation->short_description = 'Консультация эксперта';
+                    }
+                } else {
+                    $consultation->short_description = 'Консультация по диагностике';
+                }
+            }
+            
+            return $consultations;
+            
+        } catch (\Exception $e) {
+            Log::error('Error getting related consultations', [
+                'rule_id' => $rule->id,
+                'error' => $e->getMessage()
+            ]);
+            
+            return collect();
+        }
+    }
+
+    /**
+     * Извлечь изображения для превью из загруженных файлов
+     */
+    private function extractPreviewImages($files)
+    {
+        $images = [];
+        
+        if (empty($files)) {
+            return $images;
+        }
+        
+        try {
+            // Если files это массив
+            if (is_array($files)) {
+                foreach ($files as $key => $fileGroup) {
+                    if (is_array($fileGroup)) {
+                        foreach ($fileGroup as $file) {
+                            if ($this->isImageFile($file)) {
+                                $images[] = $file;
+                                if (count($images) >= 3) break; // Не более 3 изображений
+                            }
+                        }
+                    }
+                }
+            }
+            
+            // Также проверяем отдельные поля для фото симптомов
+            if (isset($files['symptom_photos']) && is_array($files['symptom_photos'])) {
+                foreach ($files['symptom_photos'] as $photo) {
+                    if ($this->isImageFile($photo)) {
+                        $images[] = $photo;
+                        if (count($images) >= 3) break;
+                    }
+                }
+            }
+            
+        } catch (\Exception $e) {
+            Log::warning('Error extracting preview images', ['error' => $e->getMessage()]);
+        }
+        
+        return $images;
+    }
+
+    /**
+     * Проверить, является ли файл изображением
+     */
+    private function isImageFile($file)
+    {
+        if (is_string($file)) {
+            $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
+            return in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp']);
+        }
+        
+        if (is_array($file) && isset($file['name'])) {
+            $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
+            return in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp']);
+        }
+        
+        return false;
+    }
 
 /**
  * Безопасный поиск связанных запчастей

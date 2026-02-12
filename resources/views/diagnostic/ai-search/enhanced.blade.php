@@ -734,7 +734,7 @@ let currentUserName = currentUser?.name || currentUser?.email?.split('@')[0] || 
 // ИНИЦИАЛИЗАЦИЯ
 // ============================================
 document.addEventListener('DOMContentLoaded', function() {
-    console.log('AI Search page loaded');
+    console.log('✅ AI Search page loaded');
     
     // Инициализация
     initBrandModelSelect();
@@ -742,21 +742,36 @@ document.addEventListener('DOMContentLoaded', function() {
     initFileUploads();
     initVinValidation();
     
-    // Делаем функцию toggleCaseForm глобально доступной
-    window.toggleCaseForm = toggleCaseForm;
-    window.showConsultationForm = showConsultationForm;
-    window.showTelegramSupport = showTelegramSupport;
-    window.showWhatsAppSupport = showWhatsAppSupport;
-    window.createCaseFromSearch = createCaseFromSearch;
-    window.removeFile = removeFile;
-    window.togglePreview = togglePreview;
-    window.viewDocumentDetails = viewDocumentDetails;
-    window.viewRuleDetails = viewRuleDetails;
-    window.viewSymptomDetails = viewSymptomDetails;
-    window.orderConsultation = orderConsultation;
-    window.viewPartDetails = viewPartDetails;
-    window.addToCart = addToCart;
+    // Регистрируем ВСЕ функции глобально
+    registerGlobalFunctions();
 });
+
+function registerGlobalFunctions() {
+    const functions = {
+        toggleCaseForm,
+        showConsultationForm,
+        showTelegramSupport,
+        showWhatsAppSupport,
+        createCaseFromSearch,
+        removeFile,
+        togglePreview,
+        viewDocumentDetails,
+        viewRuleDetails,
+        viewSymptomDetails,
+        orderConsultation,
+        viewPartDetails,
+        addToCart,
+        debugCaseForm,
+        testRoute,
+        showCaseCreationProgress,
+        hideCaseCreationProgress,
+        showCaseCreationSuccess,
+        validateCaseForm
+    };
+    
+    Object.assign(window, functions);
+    console.log('✅ Все функции зарегистрированы глобально');
+}
 
 // ============================================
 // ФУНКЦИИ ДЛЯ РАБОТЫ С МАРКАМИ/МОДЕЛЯМИ
@@ -810,7 +825,6 @@ function loadModelsForBrand(brandId) {
     modelSelect.innerHTML = options;
     modelSelect.disabled = false;
     
-    // Анимация
     modelSelect.style.opacity = '0';
     setTimeout(() => {
         modelSelect.style.transition = 'opacity 0.3s';
@@ -832,13 +846,11 @@ function initFileUploads() {
     const videoInput = document.getElementById('symptom_videos');
     
     if (photoInput) {
-        // Удаляем старый обработчик и добавляем новый
         photoInput.removeEventListener('change', handlePhotoPreview);
         photoInput.addEventListener('change', handlePhotoPreview);
     }
     
     if (videoInput) {
-        // Удаляем старый обработчик и добавляем новый
         videoInput.removeEventListener('change', handleVideoPreview);
         videoInput.addEventListener('change', handleVideoPreview);
     }
@@ -902,8 +914,6 @@ function removeFile(button, inputId, fileIndex) {
         files.splice(fileIndex, 1);
         files.forEach(file => dt.items.add(file));
         input.files = dt.files;
-        
-        // Обновить предпросмотр
         previewFiles(input, inputId === 'symptom_photos' ? 'photo-preview-container' : 'video-preview-container');
     }
 }
@@ -945,7 +955,6 @@ function initEventListeners() {
         });
     }
     
-    // Горячие клавиши
     document.getElementById('query')?.addEventListener('keydown', function(e) {
         if (e.ctrlKey && e.key === 'Enter') {
             e.preventDefault();
@@ -974,7 +983,6 @@ async function performEnhancedSearch() {
     isLoading = true;
     searchBtn.disabled = true;
     searchSpinner.classList.remove('d-none');
-    
     showLoadingState();
     
     try {
@@ -1116,25 +1124,13 @@ function displayStructuredResults(data) {
     if (totalResults > 0) {
         setTimeout(() => {
             addAIResponse(data.ai_response, container);
-            
             setTimeout(() => {
-                if (data.results && data.results.length > 0) {
-                    addSymptomsResults(data.results, container);
-                }
-                
+                if (data.results?.length) addSymptomsResults(data.results, container);
                 setTimeout(() => {
-                    if (data.documents && data.documents.length > 0) {
-                        addDocumentsResults(data.documents, container);
-                    }
-                    
+                    if (data.documents?.length) addDocumentsResults(data.documents, container);
                     setTimeout(() => {
-                        if (data.parts && data.parts.length > 0) {
-                            addPartsResults(data.parts, container);
-                        }
-                        
-                        setTimeout(() => {
-                            addConsultationButton(data, container);
-                        }, 300);
+                        if (data.parts?.length) addPartsResults(data.parts, container);
+                        setTimeout(() => addConsultationButton(data, container), 300);
                     }, 300);
                 }, 300);
             }, 500);
@@ -1142,10 +1138,7 @@ function displayStructuredResults(data) {
     } else {
         setTimeout(() => {
             addAIResponse(data.ai_response, container);
-            
-            setTimeout(() => {
-                addNoResultsWithCaseForm(data, container);
-            }, 500);
+            setTimeout(() => addNoResultsWithCaseForm(data, container), 500);
         }, 300);
     }
 }
@@ -1153,33 +1146,19 @@ function displayStructuredResults(data) {
 function addAIResponse(response, container) {
     const responseDiv = document.createElement('div');
     responseDiv.className = 'ai-response-box fade-in-up';
-    
-    const formattedResponse = formatAIResponse(response || '');
-    
-    responseDiv.innerHTML = `
-        <div class="ai-response-content">
-            ${formattedResponse}
-        </div>
-    `;
-    
+    responseDiv.innerHTML = `<div class="ai-response-content">${formatAIResponse(response || '')}</div>`;
     container.appendChild(responseDiv);
 }
 
 function addSymptomsResults(results, container) {
-    const topResults = results.slice(0, 5);
-    
-    topResults.forEach((result, index) => {
+    results.slice(0, 5).forEach((result, index) => {
         setTimeout(() => {
             const resultDiv = document.createElement('div');
             resultDiv.className = 'main-result-card fade-in-up';
             resultDiv.style.animationDelay = `${index * 0.2}s`;
-            
             resultDiv.innerHTML = createSymptomCardHTML(result, index);
             container.appendChild(resultDiv);
-            
-            setTimeout(() => {
-                resultDiv.style.opacity = '1';
-            }, 100);
+            setTimeout(() => resultDiv.style.opacity = '1', 100);
         }, index * 200);
     });
 }
@@ -1200,23 +1179,14 @@ function addPartsResults(parts, container) {
             <div class="parts-grid">
     `;
     
-    parts.forEach((part, index) => {
-        partsHTML += createPartCardHTML(part, index);
-    });
-    
-    partsHTML += `
-            </div>
-        </div>
-    `;
-    
+    parts.forEach((part, index) => partsHTML += createPartCardHTML(part, index));
+    partsHTML += `</div></div>`;
     partsDiv.innerHTML = partsHTML;
     container.appendChild(partsDiv);
 }
 
 function addDocumentsResults(docs, container) {
-    if (!docs || !Array.isArray(docs) || docs.length === 0) {
-        return;
-    }
+    if (!docs?.length) return;
     
     const docsDiv = document.createElement('div');
     docsDiv.className = 'main-result-card fade-in-up';
@@ -1254,58 +1224,33 @@ function addNoResultsWithCaseForm(data, container) {
     
     const brandSelect = document.getElementById('brand_id');
     const modelSelect = document.getElementById('model_id');
-    const selectedBrand = brandSelect.options[brandSelect.selectedIndex];
-    const selectedModel = modelSelect.options[modelSelect.selectedIndex];
-    
-    const brandValue = brandSelect.value || '';
-    const modelValue = modelSelect.value || '';
-    
+    const brandValue = brandSelect?.value || '';
+    const modelValue = modelSelect?.value || '';
     const yearOptions = generateYearOptions();
     
-    // Создаем HTML с явными ID для элементов
     formDiv.innerHTML = `
         <div class="no-results-header">
             <div class="d-flex align-items-center justify-content-between">
                 <div>
-                    <h4 class="mb-1">
-                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                        Совпадений не найдено
-                    </h4>
-                    <p class="mb-0 opacity-75">
-                        Мы не нашли готовое решение в нашей базе. Опишите проблему подробнее — 
-                        наши эксперты проведут индивидуальную диагностику.
-                    </p>
+                    <h4 class="mb-1"><i class="bi bi-exclamation-triangle-fill me-2"></i>Совпадений не найдено</h4>
+                    <p class="mb-0 opacity-75">Мы не нашли готовое решение в нашей базе. Опишите проблему подробнее — наши эксперты проведут индивидуальную диагностику.</p>
                 </div>
-                <span class="badge bg-warning text-dark fs-6">
-                    Требуется консультация
-                </span>
+                <span class="badge bg-warning text-dark fs-6">Требуется консультация</span>
             </div>
         </div>
         
         <div class="result-content">
-            <!-- УЛУЧШЕННАЯ КНОПКА КОНСУЛЬТАЦИИ -->
             <div class="text-center mb-4 p-4 bg-light rounded">
-                <div class="mb-3">
-                    <i class="bi bi-headset display-3 text-primary"></i>
-                </div>
+                <div class="mb-3"><i class="bi bi-headset display-3 text-primary"></i></div>
                 <h5 class="text-primary mb-2">Получите консультацию эксперта прямо сейчас!</h5>
-                <p class="text-muted mb-3">
-                    Наши специалисты проанализируют вашу проблему и предложат точное решение
-                </p>
-                <button class="btn btn-consultation-glow btn-consultation-large btn-pulse" 
-                        onclick="toggleCaseForm()">
-                    <i class="bi bi-chat-dots-fill me-2"></i>
-                    ЗАКАЗАТЬ ИНДИВИДУАЛЬНУЮ ДИАГНОСТИКУ
+                <p class="text-muted mb-3">Наши специалисты проанализируют вашу проблему и предложат точное решение</p>
+                <button class="btn btn-consultation-glow btn-consultation-large btn-pulse" onclick="toggleCaseForm()">
+                    <i class="bi bi-chat-dots-fill me-2"></i>ЗАКАЗАТЬ ИНДИВИДУАЛЬНУЮ ДИАГНОСТИКУ
                     <span class="badge bg-light text-dark ms-2">от 3000 ₽</span>
                 </button>
-                <div class="mt-2">
-                    <small class="text-muted">
-                        <i class="bi bi-clock-history me-1"></i> Среднее время ответа: 15 минут
-                    </small>
-                </div>
+                <div class="mt-2"><small class="text-muted"><i class="bi bi-clock-history me-1"></i>Среднее время ответа: 15 минут</small></div>
             </div>
             
-            <!-- ФОРМА СОЗДАНИЯ ДИАГНОСТИЧЕСКОГО СЛУЧАЯ -->
             <div id="caseFormContainer" style="display: none;" class="case-form-section">
                 <form id="createCaseForm" enctype="multipart/form-data">
                     <input type="hidden" name="_token" value="{{ csrf_token() }}">
@@ -1319,14 +1264,12 @@ function addNoResultsWithCaseForm(data, container) {
                     <div class="row g-3">
                         <div class="col-md-6">
                             <label class="form-label form-label-required">Марка</label>
-                            <input type="text" class="form-control" name="brand_id" 
-                                   value="${brandValue}" readonly>
+                            <input type="text" class="form-control" name="brand_id" value="${brandValue}" readonly>
                         </div>
                         
                         <div class="col-md-6">
                             <label class="form-label">Модель</label>
-                            <input type="text" class="form-control" name="model_id" 
-                                   value="${modelValue}" readonly>
+                            <input type="text" class="form-control" name="model_id" value="${modelValue}" readonly>
                         </div>
                         
                         <div class="col-md-4">
@@ -1339,81 +1282,60 @@ function addNoResultsWithCaseForm(data, container) {
                         
                         <div class="col-md-4">
                             <label class="form-label">Двигатель</label>
-                            <input type="text" class="form-control" name="engine_type" 
-                                   placeholder="1.6 MPI, 2.0 TDI...">
+                            <input type="text" class="form-control" name="engine_type" placeholder="1.6 MPI, 2.0 TDI...">
                         </div>
                         
                         <div class="col-md-4">
                             <label class="form-label">VIN номер</label>
-                            <input type="text" class="form-control" name="vin" id="vin"
-                                   placeholder="17 символов" maxlength="17">
-                            <div class="form-text text-muted small">
-                                <i class="bi bi-info-circle"></i> Последние 17 символов СТС
-                            </div>
+                            <input type="text" class="form-control" name="vin" id="vin" placeholder="17 символов" maxlength="17">
+                            <div class="form-text text-muted small"><i class="bi bi-info-circle"></i> Последние 17 символов СТС</div>
                         </div>
                         
                         <div class="col-md-6">
                             <label class="form-label">Пробег (км)</label>
-                            <input type="number" class="form-control" name="mileage" 
-                                   placeholder="0" min="0" max="1000000">
+                            <input type="number" class="form-control" name="mileage" placeholder="0" min="0" max="1000000">
                         </div>
                         
                         <div class="col-md-6">
                             <label class="form-label">Телефон</label>
-                            <input type="tel" class="form-control" name="contact_phone" 
-                                   value="${currentUserPhone}" placeholder="+7 (999) 123-45-67">
+                            <input type="tel" class="form-control" name="contact_phone" value="${currentUserPhone}" placeholder="+7 (999) 123-45-67">
                         </div>
                         
                         <div class="col-md-6">
                             <label class="form-label">Email</label>
-                            <input type="email" class="form-control" name="contact_email" 
-                                   value="${currentUserEmail}" placeholder="email@example.com">
+                            <input type="email" class="form-control" name="contact_email" value="${currentUserEmail}" placeholder="email@example.com">
                         </div>
                         
                         <div class="col-12">
                             <label class="form-label form-label-required">Описание проблемы</label>
-                            <textarea class="form-control" name="description" rows="4" 
-                                      placeholder="Подробно опишите, что происходит, когда проявляется проблема, какие звуки, запахи, ошибки...">${escapeHtml(data.query || '')}</textarea>
+                            <textarea class="form-control" name="description" rows="4" placeholder="Подробно опишите проблему...">${escapeHtml(data.query || '')}</textarea>
                         </div>
                         
                         <div class="col-12">
                             <label class="form-label">Дополнительная информация</label>
-                            <textarea class="form-control" name="additional_info" rows="2" 
-                                      placeholder="Что уже проверяли, что меняли, какие были ремонты..."></textarea>
+                            <textarea class="form-control" name="additional_info" rows="2" placeholder="Что уже проверяли, что меняли..."></textarea>
                         </div>
                         
                         <div class="col-md-6">
-                            <label class="form-label">
-                                <i class="bi bi-camera me-1"></i> Фото неисправности
-                            </label>
-                            <input type="file" class="form-control" name="symptom_photos[]" 
-                                   id="symptom_photos" multiple accept="image/*">
+                            <label class="form-label"><i class="bi bi-camera me-1"></i> Фото неисправности</label>
+                            <input type="file" class="form-control" name="symptom_photos[]" id="symptom_photos" multiple accept="image/*">
                             <div id="photo-preview-container" class="file-preview-container" style="display: none;"></div>
-                            <div class="form-text">
-                                Макс. 10MB, формат: JPG, PNG
-                            </div>
+                            <div class="form-text">Макс. 10MB, формат: JPG, PNG</div>
                         </div>
                         
                         <div class="col-md-6">
-                            <label class="form-label">
-                                <i class="bi bi-camera-video me-1"></i> Видео неисправности
-                            </label>
-                            <input type="file" class="form-control" name="symptom_videos[]" 
-                                   id="symptom_videos" multiple accept="video/*">
+                            <label class="form-label"><i class="bi bi-camera-video me-1"></i> Видео неисправности</label>
+                            <input type="file" class="form-control" name="symptom_videos[]" id="symptom_videos" multiple accept="video/*">
                             <div id="video-preview-container" class="file-preview-container" style="display: none;"></div>
-                            <div class="form-text">
-                                Макс. 50MB, формат: MP4, MOV
-                            </div>
+                            <div class="form-text">Макс. 50MB, формат: MP4, MOV</div>
                         </div>
                         
                         <div class="col-12 mt-4">
                             <div class="d-grid gap-2">
                                 <button type="submit" class="btn btn-consultation-glow btn-lg">
-                                    <i class="bi bi-check-circle me-2"></i>
-                                    СОЗДАТЬ ДИАГНОСТИЧЕСКИЙ СЛУЧАЙ
+                                    <i class="bi bi-check-circle me-2"></i>СОЗДАТЬ ДИАГНОСТИЧЕСКИЙ СЛУЧАЙ
                                 </button>
-                                <button type="button" class="btn btn-outline-secondary" 
-                                        onclick="toggleCaseForm()">
+                                <button type="button" class="btn btn-outline-secondary" onclick="toggleCaseForm()">
                                     <i class="bi bi-x-lg me-1"></i>Отмена
                                 </button>
                             </div>
@@ -1425,15 +1347,9 @@ function addNoResultsWithCaseForm(data, container) {
             <div class="mt-4 pt-3 border-top text-center">
                 <p class="text-muted mb-2">Другие способы решения:</p>
                 <div class="d-flex justify-content-center gap-3 flex-wrap">
-                    <a href="tel:+78001234567" class="btn btn-outline-secondary">
-                        <i class="bi bi-telephone me-1"></i>Позвонить
-                    </a>
-                    <button class="btn btn-outline-primary" onclick="showTelegramSupport()">
-                        <i class="bi bi-telegram me-1"></i>Telegram
-                    </button>
-                    <button class="btn btn-outline-success" onclick="showWhatsAppSupport()">
-                        <i class="bi bi-whatsapp me-1"></i>WhatsApp
-                    </button>
+                    <a href="tel:+78001234567" class="btn btn-outline-secondary"><i class="bi bi-telephone me-1"></i>Позвонить</a>
+                    <button class="btn btn-outline-primary" onclick="showTelegramSupport()"><i class="bi bi-telegram me-1"></i>Telegram</button>
+                    <button class="btn btn-outline-success" onclick="showWhatsAppSupport()"><i class="bi bi-whatsapp me-1"></i>WhatsApp</button>
                 </div>
             </div>
         </div>
@@ -1441,40 +1357,45 @@ function addNoResultsWithCaseForm(data, container) {
     
     container.appendChild(formDiv);
     
-    // Инициализируем обработчики для новой формы
     setTimeout(() => {
         initFileUploads();
         initVinValidation();
         
         const caseForm = document.getElementById('createCaseForm');
         if (caseForm) {
-            caseForm.addEventListener('submit', async function(e) {
+            caseForm.removeEventListener('submit', window.createCaseFromSearchHandler);
+            window.createCaseFromSearchHandler = async (e) => {
                 e.preventDefault();
                 await createCaseFromSearch();
-            });
+            };
+            caseForm.addEventListener('submit', window.createCaseFromSearchHandler);
         }
     }, 100);
 }
 
 // ============================================
-// ФУНКЦИЯ ПЕРЕКЛЮЧЕНИЯ ФОРМЫ - ИСПРАВЛЕННАЯ!
+// ФУНКЦИЯ ПЕРЕКЛЮЧЕНИЯ ФОРМЫ - ИСПРАВЛЕННАЯ
 // ============================================
 function toggleCaseForm() {
-    console.log('toggleCaseForm called');
-    const container = document.getElementById('caseFormContainer');
-    if (container) {
-        if (container.style.display === 'none' || container.style.display === '') {
-            container.style.display = 'block';
-            console.log('Form shown');
-            setTimeout(() => {
-                container.scrollIntoView({ behavior: 'smooth', block: 'center' });
-            }, 100);
-        } else {
-            container.style.display = 'none';
-            console.log('Form hidden');
-        }
+    console.log('🔵 toggleCaseForm вызвана');
+    
+    const form = document.querySelector('#caseFormContainer, .case-form-section');
+    
+    if (!form) {
+        console.error('❌ Форма не найдена!');
+        showToast('Форма не найдена. Выполните поиск, при котором нет результатов.', 'warning');
+        return;
+    }
+    
+    const isHidden = form.style.display === 'none' || getComputedStyle(form).display === 'none';
+    
+    if (isHidden) {
+        form.style.display = 'block';
+        console.log('✅ Форма показана');
+        setTimeout(() => form.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
     } else {
-        console.error('caseFormContainer not found!');
+        form.style.display = 'none';
+        console.log('❌ Форма скрыта');
     }
 }
 
@@ -1484,14 +1405,12 @@ function toggleCaseForm() {
 function addConsultationButton(data, container) {
     const consultationDiv = document.createElement('div');
     consultationDiv.className = 'main-result-card fade-in-up slide-in-right';
-    consultationDiv.style.marginTop = '1.5rem';
-    consultationDiv.style.border = '2px solid #667eea';
-    consultationDiv.style.background = 'linear-gradient(135deg, #f5f7ff 0%, #ffffff 100%)';
+    consultationDiv.style.cssText = 'margin-top:1.5rem;border:2px solid #667eea;background:linear-gradient(135deg, #f5f7ff 0%, #ffffff 100%)';
     
     consultationDiv.innerHTML = `
         <div class="result-content text-center p-4">
             <div class="d-flex align-items-center justify-content-center mb-3">
-                <div class="bg-primary rounded-circle p-3 me-3" style="width: 70px; height: 70px; display: flex; align-items: center; justify-content: center;">
+                <div class="bg-primary rounded-circle p-3 me-3" style="width:70px;height:70px;display:flex;align-items:center;justify-content:center">
                     <i class="bi bi-headset text-white fs-1"></i>
                 </div>
                 <div class="text-start">
@@ -1501,35 +1420,18 @@ function addConsultationButton(data, container) {
             </div>
             
             <div class="row g-3 mb-4">
-                <div class="col-md-4">
-                    <div class="bg-light p-3 rounded">
-                        <i class="bi bi-check-circle-fill text-success"></i>
-                        <span class="ms-2">Разбор вашей ситуации</span>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="bg-light p-3 rounded">
-                        <i class="bi bi-check-circle-fill text-success"></i>
-                        <span class="ms-2">Точный план действий</span>
-                    </div>
-                </div>
-                <div class="col-md-4">
-                    <div class="bg-light p-3 rounded">
-                        <i class="bi bi-check-circle-fill text-success"></i>
-                        <span class="ms-2">Смета на ремонт</span>
-                    </div>
-                </div>
+                <div class="col-md-4"><div class="bg-light p-3 rounded"><i class="bi bi-check-circle-fill text-success"></i><span class="ms-2">Разбор вашей ситуации</span></div></div>
+                <div class="col-md-4"><div class="bg-light p-3 rounded"><i class="bi bi-check-circle-fill text-success"></i><span class="ms-2">Точный план действий</span></div></div>
+                <div class="col-md-4"><div class="bg-light p-3 rounded"><i class="bi bi-check-circle-fill text-success"></i><span class="ms-2">Смета на ремонт</span></div></div>
             </div>
             
             <div class="d-flex justify-content-center gap-3">
                 <button class="btn btn-consultation-glow btn-lg btn-pulse" onclick="showConsultationForm()">
-                    <i class="bi bi-chat-dots-fill me-2"></i>
-                    ЗАКАЗАТЬ КОНСУЛЬТАЦИЮ
+                    <i class="bi bi-chat-dots-fill me-2"></i>ЗАКАЗАТЬ КОНСУЛЬТАЦИЮ
                     <span class="badge bg-light text-dark ms-2">от 3000 ₽</span>
                 </button>
                 <button class="btn btn-outline-secondary btn-lg" onclick="toggleCaseForm()">
-                    <i class="bi bi-file-earmark-plus me-1"></i>
-                    Детальный случай
+                    <i class="bi bi-file-earmark-plus me-1"></i>Детальный случай
                 </button>
             </div>
         </div>
@@ -1543,11 +1445,10 @@ function addConsultationButton(data, container) {
 // ============================================
 function generateYearOptions() {
     const currentYear = new Date().getFullYear();
-    let options = '';
-    for (let year = currentYear; year >= 1990; year--) {
-        options += `<option value="${year}">${year}</option>`;
-    }
-    return options;
+    return Array.from({length: currentYear - 1989}, (_, i) => {
+        const year = currentYear - i;
+        return `<option value="${year}">${year}</option>`;
+    }).join('');
 }
 
 // ============================================
@@ -1555,13 +1456,13 @@ function generateYearOptions() {
 // ============================================
 function showConsultationForm() {
     const brandSelect = document.getElementById('brand_id');
-    const selectedBrand = brandSelect.options[brandSelect.selectedIndex];
+    const selectedBrand = brandSelect?.options[brandSelect.selectedIndex];
     
     const consultationData = {
-        brand_id: brandSelect.value,
-        brand_name: selectedBrand ? selectedBrand.text : 'Не выбрана',
-        model_id: document.getElementById('model_id').value,
-        description: document.getElementById('query').value
+        brand_id: brandSelect?.value || '',
+        brand_name: selectedBrand?.text || 'Не выбрана',
+        model_id: document.getElementById('model_id')?.value || '',
+        description: document.getElementById('query')?.value || ''
     };
     
     localStorage.setItem('consultation_data', JSON.stringify(consultationData));
@@ -1569,36 +1470,94 @@ function showConsultationForm() {
 }
 
 // ============================================
-// СОЗДАНИЕ ДИАГНОСТИЧЕСКОГО СЛУЧАЯ
+// ПРОВЕРКА ФОРМЫ
+// ============================================
+function validateCaseForm(form) {
+    const errors = [];
+    const description = form.querySelector('[name="description"]')?.value;
+    const brandId = form.querySelector('[name="brand_id"]')?.value;
+    const phone = form.querySelector('[name="contact_phone"]')?.value;
+    const email = form.querySelector('[name="contact_email"]')?.value;
+    
+    if (!description || description.length < 10) errors.push('Описание должно содержать минимум 10 символов');
+    if (!brandId) errors.push('Не выбрана марка автомобиля');
+    if (phone && phone.replace(/\D/g, '').length < 10) errors.push('Телефон должен содержать минимум 10 цифр');
+    if (email && !email.includes('@')) errors.push('Введите корректный email адрес');
+    
+    return errors;
+}
+
+// ============================================
+// СОЗДАНИЕ ДИАГНОСТИЧЕСКОГО СЛУЧАЯ - ИСПРАВЛЕННАЯ
 // ============================================
 async function createCaseFromSearch() {
-    if (isLoading) return;
+    if (isLoading) {
+        showToast('Пожалуйста, подождите...', 'warning');
+        return;
+    }
     
     const form = document.getElementById('createCaseForm');
-    const formData = new FormData(form);
+    if (!form) {
+        showToast('Форма не найдена', 'danger');
+        return;
+    }
     
-    const query = document.getElementById('query').value;
+    const formData = new FormData(form);
+    const query = document.getElementById('query')?.value;
+    
+    if (!query) {
+        showToast('Не удалось получить описание проблемы', 'warning');
+        return;
+    }
+    
     formData.append('query', query);
+    
+    if (!formData.has('brand_id')) {
+        const brandSelect = document.getElementById('brand_id');
+        if (brandSelect?.value) {
+            formData.append('brand_id', brandSelect.value);
+        } else {
+            showToast('Не выбрана марка автомобиля', 'warning');
+            return;
+        }
+    }
+    
+    if (!formData.has('model_id')) {
+        const modelSelect = document.getElementById('model_id');
+        if (modelSelect?.value && !modelSelect.disabled) {
+            formData.append('model_id', modelSelect.value);
+        }
+    }
+    
+    const token = document.querySelector('input[name="_token"]')?.value || '{{ csrf_token() }}';
+    formData.append('_token', token);
     
     isLoading = true;
     const submitBtn = form.querySelector('button[type="submit"]');
-    const originalText = submitBtn.innerHTML;
-    submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Создание...';
-    submitBtn.disabled = true;
+    const originalText = submitBtn?.innerHTML || 'Создать';
+    
+    if (submitBtn) {
+        submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Создание...';
+        submitBtn.disabled = true;
+    }
     
     showCaseCreationProgress();
     
     try {
-        const response = await fetch('{{ route("diagnostic.ai.create-case") }}', {
+        console.log('📤 Отправка данных...');
+        
+        const response = await fetch('/diagnostic/ai/create-case-from-search', {
             method: 'POST',
             headers: {
-                'X-CSRF-TOKEN': '{{ csrf_token() }}',
+                'X-CSRF-TOKEN': token,
                 'Accept': 'application/json',
+                'X-Requested-With': 'XMLHttpRequest'
             },
             body: formData
         });
         
         const data = await response.json();
+        console.log('📥 Ответ:', data);
         
         if (data.success) {
             showCaseCreationSuccess(data);
@@ -1607,63 +1566,79 @@ async function createCaseFromSearch() {
             caseCreatedDiv.className = 'alert alert-success mt-3 slide-in-right';
             caseCreatedDiv.innerHTML = `
                 <div class="d-flex align-items-center">
-                    <div class="me-3">
-                        <i class="bi bi-check-circle-fill fs-3"></i>
-                    </div>
+                    <div class="me-3"><i class="bi bi-check-circle-fill fs-3"></i></div>
                     <div>
                         <h5 class="alert-heading mb-1">✅ Диагностический случай #${data.case_id} создан!</h5>
-                        <p class="mb-1">${data.message}</p>
+                        <p class="mb-1">${data.message || 'Спасибо! Наш специалист свяжется с вами.'}</p>
                         <div class="mt-2">
                             <strong>Автомобиль:</strong> ${data.case_data?.brand || 'Не указан'} ${data.case_data?.model || ''}<br>
                             <strong>Дата:</strong> ${data.case_data?.created_at || new Date().toLocaleString()}
                         </div>
                         <hr class="my-2">
                         <div class="d-flex gap-2">
-                            <a href="${data.redirect_url}" class="btn btn-success btn-sm">
-                                <i class="bi bi-chat-dots me-1"></i>Перейти к консультации
-                            </a>
-                            <button class="btn btn-outline-primary btn-sm" onclick="location.reload()">
-                                <i class="bi bi-search me-1"></i>Новый поиск
-                            </button>
+                            <a href="${data.redirect_url}" class="btn btn-success btn-sm"><i class="bi bi-chat-dots me-1"></i>Перейти к консультации</a>
+                            <button class="btn btn-outline-primary btn-sm" onclick="location.reload()"><i class="bi bi-search me-1"></i>Новый поиск</button>
                         </div>
                     </div>
                 </div>
             `;
             
-            const caseFormSection = document.querySelector('.case-form-section');
+            const caseFormSection = form.closest('.case-form-section');
             if (caseFormSection) {
                 caseFormSection.innerHTML = '';
                 caseFormSection.appendChild(caseCreatedDiv);
+            } else {
+                form.parentNode?.replaceChild(caseCreatedDiv, form);
             }
             
-            showToast(data.message, 'success');
+            showToast(data.message || 'Диагностический случай успешно создан!', 'success');
+            
+            const counter = document.getElementById('resultsCounter');
+            if (counter) {
+                counter.textContent = 'Случай создан';
+                counter.className = 'badge bg-success';
+            }
         } else {
             if (data.errors) {
+                document.querySelectorAll('.invalid-feedback').forEach(el => el.remove());
+                document.querySelectorAll('.is-invalid').forEach(el => el.classList.remove('is-invalid'));
+                
                 Object.keys(data.errors).forEach(field => {
-                    const input = document.querySelector(`[name="${field}"]`);
+                    const input = form.querySelector(`[name="${field}"]`);
                     if (input) {
                         input.classList.add('is-invalid');
-                        const feedback = document.createElement('div');
-                        feedback.className = 'invalid-feedback';
+                        let feedback = input.nextElementSibling;
+                        if (!feedback?.classList.contains('invalid-feedback')) {
+                            feedback = document.createElement('div');
+                            feedback.className = 'invalid-feedback';
+                            input.parentNode.appendChild(feedback);
+                        }
                         feedback.innerHTML = data.errors[field].join('<br>');
-                        input.parentNode.appendChild(feedback);
                     }
                 });
+                
+                const firstError = Object.values(data.errors)[0];
+                showToast(firstError?.[0] || 'Пожалуйста, исправьте ошибки', 'danger');
+            } else {
+                showToast(data.message || 'Ошибка создания случая', 'danger');
             }
-            showToast(data.message || 'Ошибка создания случая', 'danger');
         }
-        
     } catch (error) {
-        console.error('Create case error:', error);
-        showToast('Ошибка при создании диагностического случая: ' + error.message, 'danger');
+        console.error('❌ Ошибка:', error);
+        showToast('Ошибка: ' + error.message, 'danger');
     } finally {
         isLoading = false;
-        submitBtn.innerHTML = originalText;
-        submitBtn.disabled = false;
+        if (submitBtn) {
+            submitBtn.innerHTML = originalText;
+            submitBtn.disabled = false;
+        }
         hideCaseCreationProgress();
     }
 }
 
+// ============================================
+// ПРОГРЕСС-БАР
+// ============================================
 function showCaseCreationProgress() {
     let progressBar = document.querySelector('.case-creation-progress');
     if (!progressBar) {
@@ -1671,39 +1646,33 @@ function showCaseCreationProgress() {
         if (form) {
             const progressDiv = document.createElement('div');
             progressDiv.className = 'case-creation-progress mt-3';
-            progressDiv.innerHTML = '<div class="case-creation-progress-bar" style="width: 0%"></div>';
+            progressDiv.innerHTML = '<div class="case-creation-progress-bar" style="width:0%"></div>';
             form.appendChild(progressDiv);
             progressBar = progressDiv.querySelector('.case-creation-progress-bar');
         }
     }
     
-    let width = 0;
-    const interval = setInterval(() => {
-        if (width >= 90) {
-            clearInterval(interval);
-        } else {
-            width += 10;
-            if (progressBar) {
+    if (progressBar) {
+        let width = 0;
+        window.caseCreationInterval = setInterval(() => {
+            if (width < 90) {
+                width += 10;
                 progressBar.style.width = width + '%';
             }
-        }
-    }, 200);
-    
-    window.caseCreationInterval = interval;
+        }, 200);
+    }
 }
 
 function hideCaseCreationProgress() {
     if (window.caseCreationInterval) {
         clearInterval(window.caseCreationInterval);
     }
+    
     const progressBar = document.querySelector('.case-creation-progress-bar');
     if (progressBar) {
         progressBar.style.width = '100%';
         setTimeout(() => {
-            const progressDiv = document.querySelector('.case-creation-progress');
-            if (progressDiv) {
-                progressDiv.remove();
-            }
+            document.querySelector('.case-creation-progress')?.remove();
         }, 500);
     }
 }
@@ -1722,9 +1691,7 @@ function showCaseCreationSuccess(data) {
         systemMsg.style.marginTop = '1rem';
         systemMsg.innerHTML = `
             <div class="d-flex">
-                <div class="flex-shrink-0">
-                    <i class="bi bi-check-circle-fill fs-4"></i>
-                </div>
+                <div class="flex-shrink-0"><i class="bi bi-check-circle-fill fs-4"></i></div>
                 <div class="flex-grow-1 ms-3">
                     <strong>✅ Диагностический случай #${data.case_id} создан!</strong><br>
                     <small>Эксперт ответит в течение 15 минут</small>
@@ -1749,16 +1716,63 @@ function showWhatsAppSupport() {
 }
 
 // ============================================
+// ФУНКЦИИ ДЛЯ ОТЛАДКИ
+// ============================================
+window.debugCaseForm = function() {
+    console.log('=== 🐞 ОТЛАДКА ФОРМЫ ===');
+    
+    const form = document.getElementById('createCaseForm');
+    if (!form) {
+        console.error('❌ Форма не найдена!');
+        return;
+    }
+    
+    console.log('✅ Форма найдена');
+    
+    const fields = ['brand_id', 'model_id', 'year', 'vin', 'mileage', 'engine_type', 'description', 'contact_phone', 'contact_email'];
+    fields.forEach(field => {
+        const input = form.querySelector(`[name="${field}"]`);
+        console.log(`📝 ${field}:`, input?.value || '[пусто]');
+    });
+    
+    const photos = form.querySelector('[name="symptom_photos[]"]');
+    console.log('🖼️ Фото:', photos?.files?.length || 0);
+    
+    const videos = form.querySelector('[name="symptom_videos[]"]');
+    console.log('🎬 Видео:', videos?.files?.length || 0);
+    
+    const token = form.querySelector('[name="_token"]')?.value;
+    console.log('🔑 CSRF:', token ? '✅' : '❌');
+    
+    console.log('=== 🐞 КОНЕЦ ===');
+};
+
+window.testRoute = async function() {
+    try {
+        const response = await fetch('/diagnostic/ai/create-case-from-search', {
+            method: 'POST',
+            headers: {
+                'X-CSRF-TOKEN': document.querySelector('input[name="_token"]')?.value || '{{ csrf_token() }}',
+                'Accept': 'application/json'
+            },
+            body: new FormData()
+        });
+        console.log('📥 Статус:', response.status);
+        console.log('✅ Маршрут доступен');
+    } catch (error) {
+        console.error('❌ Ошибка:', error);
+    }
+};
+
+// ============================================
 // ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ
 // ============================================
 function createSymptomCardHTML(result, index) {
     const relevancePercent = Math.round((result.relevance_score || 0.5) * 100);
-    const matchTypeBadge = result.match_type === 'exact' ? 'success' : 
-                          result.match_type === 'keyword' ? 'primary' : 'secondary';
-    const matchTypeText = result.match_type === 'exact' ? 'Точное совпадение' :
-                         result.match_type === 'keyword' ? 'По ключевым словам' : 'Похожий симптом';
+    const matchTypeBadge = result.match_type === 'exact' ? 'success' : result.match_type === 'keyword' ? 'primary' : 'secondary';
+    const matchTypeText = result.match_type === 'exact' ? 'Точное совпадение' : result.match_type === 'keyword' ? 'По ключевым словам' : 'Похожий симптом';
     
-    let html = `
+    return `
         <div class="result-header">
             <div class="result-title">
                 <span>${index + 1}. ${escapeHtml(result.title || '')}</span>
@@ -1767,111 +1781,40 @@ function createSymptomCardHTML(result, index) {
                     <span class="badge bg-info">${relevancePercent}%</span>
                 </div>
             </div>
-            
             <div class="result-meta">
-                ${result.type === 'rule' && result.brand ? `
-                    <span class="meta-badge">
-                        <i class="bi bi-car-front me-1"></i>${escapeHtml(result.brand)} ${escapeHtml(result.model || '')}
-                    </span>
-                ` : ''}
-                
-                ${result.complexity_level ? `
-                    <span class="meta-badge">
-                        <i class="bi bi-speedometer2 me-1"></i>Сложность: ${result.complexity_level}/10
-                    </span>
-                ` : ''}
-                
-                ${result.estimated_time ? `
-                    <span class="meta-badge">
-                        <i class="bi bi-clock me-1"></i>${result.estimated_time} мин.
-                    </span>
-                ` : ''}
+                ${result.type === 'rule' && result.brand ? `<span class="meta-badge"><i class="bi bi-car-front me-1"></i>${escapeHtml(result.brand)} ${escapeHtml(result.model || '')}</span>` : ''}
+                ${result.complexity_level ? `<span class="meta-badge"><i class="bi bi-speedometer2 me-1"></i>Сложность: ${result.complexity_level}/10</span>` : ''}
+                ${result.estimated_time ? `<span class="meta-badge"><i class="bi bi-clock me-1"></i>${result.estimated_time} мин.</span>` : ''}
             </div>
         </div>
-        
         <div class="result-content">
-    `;
-    
-    if (result.description) {
-        html += `
-            <div class="result-section">
-                <div class="section-title">
-                    <i class="bi bi-card-text"></i>Описание
+            ${result.description ? `<div class="result-section"><div class="section-title"><i class="bi bi-card-text"></i>Описание</div><p>${escapeHtml(result.description)}</p></div>` : ''}
+            ${result.type === 'rule' && result.diagnostic_steps?.length ? `
+                <div class="result-section">
+                    <div class="section-title"><i class="bi bi-list-check"></i>Шаги диагностики</div>
+                    <ol class="step-list">
+                        ${result.diagnostic_steps.map((step, i) => `<li><div class="step-number">${i + 1}</div><div>${escapeHtml(step)}</div></li>`).join('')}
+                    </ol>
                 </div>
-                <p>${escapeHtml(result.description)}</p>
-            </div>
-        `;
-    }
-    
-    if (result.type === 'rule' && result.diagnostic_steps && result.diagnostic_steps.length > 0) {
-        html += `
-            <div class="result-section">
-                <div class="section-title">
-                    <i class="bi bi-list-check"></i>Шаги диагностики
+            ` : ''}
+            ${result.possible_causes?.length ? `
+                <div class="result-section">
+                    <div class="section-title"><i class="bi bi-exclamation-triangle"></i>Возможные причины</div>
+                    <div class="cause-list">${result.possible_causes.map(cause => `<span class="cause-tag">${escapeHtml(cause)}</span>`).join('')}</div>
                 </div>
-                <ol class="step-list">
-        `;
-        
-        result.diagnostic_steps.forEach((step, stepIndex) => {
-            html += `
-                <li>
-                    <div class="step-number">${stepIndex + 1}</div>
-                    <div>${escapeHtml(step)}</div>
-                </li>
-            `;
-        });
-        
-        html += `</ol></div>`;
-    }
-    
-    if (result.possible_causes && result.possible_causes.length > 0) {
-        html += `
-            <div class="result-section">
-                <div class="section-title">
-                    <i class="bi bi-exclamation-triangle"></i>Возможные причины
+            ` : ''}
+            <div class="d-flex justify-content-between align-items-center mt-3">
+                <div>${result.type === 'rule' ? `<small class="text-muted"><i class="bi bi-currency-ruble"></i>Консультация: <strong>${result.consultation_price?.toLocaleString() || '0'} ₽</strong></small>` : 'Симптом требует дополнительной диагностики'}</div>
+                <div class="btn-group">
+                    ${result.type === 'rule' 
+                        ? `<button class="btn btn-sm btn-primary" onclick="viewRuleDetails(${result.id})"><i class="bi bi-eye me-1"></i>Подробнее</button>
+                           <button class="btn btn-sm btn-success" onclick="orderConsultation(${result.id})"><i class="bi bi-chat-dots me-1"></i>Консультация</button>`
+                        : `<button class="btn btn-sm btn-warning" onclick="viewSymptomDetails(${result.symptom_id || result.id})"><i class="bi bi-info-circle me-1"></i>Подробнее о симптоме</button>`
+                    }
                 </div>
-                <div class="cause-list">
-        `;
-        
-        result.possible_causes.forEach(cause => {
-            html += `<span class="cause-tag">${escapeHtml(cause)}</span>`;
-        });
-        
-        html += `</div></div>`;
-    }
-    
-    html += `
-        <div class="d-flex justify-content-between align-items-center mt-3">
-            <div>
-                ${result.type === 'rule' ? `
-                    <small class="text-muted">
-                        <i class="bi bi-currency-ruble"></i>
-                        Консультация: <strong>${result.consultation_price?.toLocaleString() || '0'} ₽</strong>
-                    </small>
-                ` : 'Симптом требует дополнительной диагностики'}
-            </div>
-            <div class="btn-group">
-                ${result.type === 'rule' ? `
-                    <button class="btn btn-sm btn-primary" 
-                            onclick="viewRuleDetails(${result.id})">
-                        <i class="bi bi-eye me-1"></i>Подробнее
-                    </button>
-                    <button class="btn btn-sm btn-success" 
-                            onclick="orderConsultation(${result.id})">
-                        <i class="bi bi-chat-dots me-1"></i>Консультация
-                    </button>
-                ` : `
-                    <button class="btn btn-sm btn-warning" 
-                            onclick="viewSymptomDetails(${result.symptom_id || result.id})">
-                        <i class="bi bi-info-circle me-1"></i>Подробнее о симптоме
-                    </button>
-                `}
             </div>
         </div>
     `;
-    
-    html += `</div>`;
-    return html;
 }
 
 function createPartCardHTML(part, index) {
@@ -1881,34 +1824,16 @@ function createPartCardHTML(part, index) {
                 <span class="part-sku">${escapeHtml(part.sku || '')}</span>
                 <div class="part-price">${escapeHtml(part.formatted_price || '0')} ₽</div>
             </div>
-            
             <div class="part-name">${escapeHtml(part.name || '')}</div>
-            
-            ${part.description ? `
-                <div class="text-muted small mb-2" style="font-size: 0.85rem;">
-                    ${escapeHtml(part.description.substring(0, 80))}${part.description.length > 80 ? '...' : ''}
-                </div>
-            ` : ''}
-            
+            ${part.description ? `<div class="text-muted small mb-2">${escapeHtml(part.description.substring(0, 80))}${part.description.length > 80 ? '...' : ''}</div>` : ''}
             <div class="part-footer">
                 <div>
-                    ${part.brand ? `
-                        <span class="badge bg-light text-dark me-2">${escapeHtml(part.brand)}</span>
-                    ` : ''}
-                    <span class="badge ${part.availability === 'В наличии' ? 'bg-success' : 
-                                      part.availability === 'Мало' ? 'bg-warning' : 'bg-danger'}">
-                        ${escapeHtml(part.availability || '')}
-                    </span>
+                    ${part.brand ? `<span class="badge bg-light text-dark me-2">${escapeHtml(part.brand)}</span>` : ''}
+                    <span class="badge ${part.availability === 'В наличии' ? 'bg-success' : part.availability === 'Мало' ? 'bg-warning' : 'bg-danger'}">${escapeHtml(part.availability || '')}</span>
                 </div>
                 <div class="btn-group">
-                    <button class="btn btn-sm btn-outline-primary" 
-                            onclick="viewPartDetails(${part.id})">
-                        <i class="bi bi-eye"></i>
-                    </button>
-                    <button class="btn btn-sm btn-success" 
-                            onclick="addToCart(${part.id})">
-                        <i class="bi bi-cart-plus"></i>
-                    </button>
+                    <button class="btn btn-sm btn-outline-primary" onclick="viewPartDetails(${part.id})"><i class="bi bi-eye"></i></button>
+                    <button class="btn btn-sm btn-success" onclick="addToCart(${part.id})"><i class="bi bi-cart-plus"></i></button>
                 </div>
             </div>
         </div>
@@ -1918,102 +1843,44 @@ function createPartCardHTML(part, index) {
 function createDocumentCardHTML(doc, index) {
     const icon = doc.icon || 'bi-file-earmark';
     const fileType = doc.file_type || 'документ';
-    
-    const pageUrl = doc.page_url || 
-                   doc.view_url || 
-                   doc.source_url || 
-                   '/documents/' + doc.id + '/pages/' + doc.page_number;
-    
+    const pageUrl = doc.page_url || doc.view_url || doc.source_url || `/documents/${doc.id}/pages/${doc.page_number}`;
     const highlightParam = doc.highlight_term ? `?highlight=${encodeURIComponent(doc.highlight_term)}` : '';
-    
-    let previewHTML = '';
-    if (doc.preview_image) {
-        previewHTML = `
-            <div class="document-preview-image" style="float: right; margin-left: 1rem; margin-bottom: 0.5rem; width: 150px;">
-                <img src="${doc.preview_image}" 
-                     alt="${doc.preview_alt || 'Превью страницы'}" 
-                     style="max-width: 150px; max-height: 150px; 
-                            border: 1px solid #ddd; border-radius: 4px;
-                            object-fit: cover;"
-                     onerror="this.onerror=null; this.src='${getDefaultDocumentIcon(doc.file_type)}'; this.style.padding='20px'; this.style.backgroundColor='#f8f9fa'">
-                <div class="text-center small text-muted mt-1">
-                    <i class="bi bi-camera"></i> Страница ${doc.page_number}
-                </div>
-            </div>
-        `;
-    }
     
     return `
         <div class="document-result fade-in-up" style="animation-delay: ${index * 0.1}s">
             <div class="document-header">
-                <div class="document-icon">
-                    <i class="bi ${icon}"></i>
-                </div>
+                <div class="document-icon"><i class="bi ${icon}"></i></div>
                 <div class="document-title">
-                    <a href="${pageUrl}${highlightParam}" 
-                       target="_blank" 
-                       class="document-link">
-                        ${escapeHtml(doc.title || 'Документ')}
-                    </a>
-                    <div class="document-page-title">
-                        Страница ${doc.page_number || ''}
-                        ${doc.brand ? ` • ${escapeHtml(doc.brand)}` : ''}
-                        ${doc.model ? ` ${escapeHtml(doc.model)}` : ''}
-                    </div>
+                    <a href="${pageUrl}${highlightParam}" target="_blank" class="document-link">${escapeHtml(doc.title || 'Документ')}</a>
+                    <div class="document-page-title">Страница ${doc.page_number || ''}${doc.brand ? ` • ${escapeHtml(doc.brand)}` : ''}${doc.model ? ` ${escapeHtml(doc.model)}` : ''}</div>
                 </div>
                 <div class="document-meta">
-                    <span class="badge bg-light text-dark">
-                        <i class="bi bi-file-earmark"></i> ${fileType}
-                    </span>
-                    <span class="badge bg-secondary ms-1">
-                        <i class="bi bi-eye"></i> ${doc.view_count || 0}
-                    </span>
+                    <span class="badge bg-light text-dark"><i class="bi bi-file-earmark"></i> ${fileType}</span>
+                    <span class="badge bg-secondary ms-1"><i class="bi bi-eye"></i> ${doc.view_count || 0}</span>
                 </div>
             </div>
-            
-            <div style="overflow: hidden; position: relative;">
-                ${previewHTML}
-                
-                ${doc.excerpt ? `
-                    <div class="document-excerpt">
-                        <i class="bi bi-quote text-muted me-1"></i>
-                        ${escapeHtml(doc.excerpt)}
+            <div style="overflow:hidden;position:relative;">
+                ${doc.preview_image ? `
+                    <div class="document-preview-image" style="float:right;margin-left:1rem;margin-bottom:0.5rem;width:150px;">
+                        <img src="${doc.preview_image}" alt="${doc.preview_alt || 'Превью'}" style="max-width:150px;max-height:150px;border:1px solid #ddd;border-radius:4px;object-fit:cover;"
+                             onerror="this.onerror=null;this.src='${getDefaultDocumentIcon(doc.file_type)}';this.style.padding='20px';this.style.backgroundColor='#f8f9fa'">
+                        <div class="text-center small text-muted mt-1"><i class="bi bi-camera"></i> Страница ${doc.page_number}</div>
                     </div>
                 ` : ''}
-                
+                ${doc.excerpt ? `<div class="document-excerpt"><i class="bi bi-quote text-muted me-1"></i>${escapeHtml(doc.excerpt)}</div>` : ''}
                 ${doc.content_preview ? `
                     <div class="document-preview">
-                        <div class="preview-content" style="max-height: 100px; overflow: hidden;">
-                            ${highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}
-                        </div>
+                        <div class="preview-content" style="max-height:100px;overflow:hidden;">${highlightSearchTerms(doc.content_preview, doc.search_terms_found || [])}</div>
                         <a href="#" class="small text-primary" onclick="togglePreview(this)">Показать больше</a>
                     </div>
                 ` : ''}
             </div>
-            
             <div class="document-tags">
-                ${doc.detected_system ? `
-                    <span class="badge bg-info me-1">
-                        <i class="bi bi-gear"></i> ${escapeHtml(doc.detected_system)}
-                    </span>
-                ` : ''}
-                
-                ${doc.detected_component ? `
-                    <span class="badge bg-secondary me-1">
-                        <i class="bi bi-cpu"></i> ${escapeHtml(doc.detected_component)}
-                    </span>
-                ` : ''}
-                
+                ${doc.detected_system ? `<span class="badge bg-info me-1"><i class="bi bi-gear"></i> ${escapeHtml(doc.detected_system)}</span>` : ''}
+                ${doc.detected_component ? `<span class="badge bg-secondary me-1"><i class="bi bi-cpu"></i> ${escapeHtml(doc.detected_component)}</span>` : ''}
                 <div class="float-end">
-                    <a href="${pageUrl}${highlightParam}" 
-                       target="_blank" 
-                       class="btn btn-sm btn-primary">
-                        <i class="bi bi-arrow-up-right me-1"></i> Открыть
-                    </a>
-                    <button class="btn btn-sm btn-outline-secondary ms-1" 
-                            onclick="viewDocumentDetails(${doc.id}, ${doc.page_id})">
-                        <i class="bi bi-info-circle"></i>
-                    </button>
+                    <a href="${pageUrl}${highlightParam}" target="_blank" class="btn btn-sm btn-primary"><i class="bi bi-arrow-up-right me-1"></i> Открыть</a>
+                    <button class="btn btn-sm btn-outline-secondary ms-1" onclick="viewDocumentDetails(${doc.id}, ${doc.page_id})"><i class="bi bi-info-circle"></i></button>
                 </div>
             </div>
         </div>
@@ -2028,7 +1895,6 @@ function getDefaultDocumentIcon(fileType) {
         'xls': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-excel.svg',
         'xlsx': 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file-excel.svg',
     };
-    
     return icons[fileType?.toLowerCase()] || 'https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/svgs/solid/file.svg';
 }
 
@@ -2044,27 +1910,17 @@ function togglePreview(button) {
 }
 
 function viewDocumentDetails(documentId, pageId) {
-    if (pageId) {
-        window.open(`/documents/${documentId}/pages/${pageId}/details`, '_blank');
-    } else {
-        window.open(`/documents/${documentId}`, '_blank');
-    }
+    window.open(pageId ? `/documents/${documentId}/pages/${pageId}/details` : `/documents/${documentId}`, '_blank');
 }
 
 function highlightSearchTerms(text, terms) {
-    if (!text || !terms || terms.length === 0) {
-        return escapeHtml(text || '');
-    }
+    if (!text || !terms?.length) return escapeHtml(text || '');
     
     let highlighted = escapeHtml(text);
-    
-    terms.forEach(term => {
-        if (term && term.length > 2) {
-            const regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
-            highlighted = highlighted.replace(regex, '<mark class="bg-warning">$1</mark>');
-        }
+    terms.filter(t => t?.length > 2).forEach(term => {
+        const regex = new RegExp(`(${escapeRegex(term)})`, 'gi');
+        highlighted = highlighted.replace(regex, '<mark class="bg-warning">$1</mark>');
     });
-    
     return highlighted;
 }
 
@@ -2075,21 +1931,27 @@ function escapeRegex(string) {
 function formatAIResponse(text) {
     if (!text) return '';
     
-    return text
-        .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
-        .replace(/🤖/g, '<i class="bi bi-robot text-primary"></i>')
-        .replace(/🔍/g, '<i class="bi bi-search text-info"></i>')
-        .replace(/🎯/g, '<i class="bi bi-bullseye text-danger"></i>')
-        .replace(/🛒/g, '<i class="bi bi-cart text-success"></i>')
-        .replace(/📄/g, '<i class="bi bi-file-earmark-text text-info"></i>')
-        .replace(/🔧/g, '<i class="bi bi-tools text-primary"></i>')
-        .replace(/⚠️/g, '<i class="bi bi-exclamation-triangle text-warning"></i>')
-        .replace(/⏱️/g, '<i class="bi bi-clock text-secondary"></i>')
-        .replace(/💰/g, '<i class="bi bi-currency-ruble text-success"></i>')
-        .replace(/✅/g, '<i class="bi bi-check-circle text-success"></i>')
-        .replace(/🔗/g, '<i class="bi bi-link text-info"></i>')
-        .replace(/💡/g, '<i class="bi bi-lightbulb text-warning"></i>')
-        .replace(/\n/g, '<br>');
+    const icons = {
+        '🤖': '<i class="bi bi-robot text-primary"></i>',
+        '🔍': '<i class="bi bi-search text-info"></i>',
+        '🎯': '<i class="bi bi-bullseye text-danger"></i>',
+        '🛒': '<i class="bi bi-cart text-success"></i>',
+        '📄': '<i class="bi bi-file-earmark-text text-info"></i>',
+        '🔧': '<i class="bi bi-tools text-primary"></i>',
+        '⚠️': '<i class="bi bi-exclamation-triangle text-warning"></i>',
+        '⏱️': '<i class="bi bi-clock text-secondary"></i>',
+        '💰': '<i class="bi bi-currency-ruble text-success"></i>',
+        '✅': '<i class="bi bi-check-circle text-success"></i>',
+        '🔗': '<i class="bi bi-link text-info"></i>',
+        '💡': '<i class="bi bi-lightbulb text-warning"></i>'
+    };
+    
+    let formatted = text.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
+    Object.entries(icons).forEach(([emoji, icon]) => {
+        formatted = formatted.replace(new RegExp(emoji, 'g'), icon);
+    });
+    
+    return formatted.replace(/\n/g, '<br>');
 }
 
 function viewRuleDetails(ruleId) {
@@ -2113,21 +1975,9 @@ function addToCart(partId) {
 }
 
 function escapeHtml(text) {
-    if (text === null || text === undefined) {
-        return '';
-    }
-    
-    const map = {
-        '&': '&amp;',
-        '<': '&lt;',
-        '>': '&gt;',
-        '"': '&quot;',
-        "'": '&#039;'
-    };
-    
-    return String(text).replace(/[&<>"']/g, function(m) { 
-        return map[m]; 
-    });
+    if (!text) return '';
+    const map = {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'};
+    return String(text).replace(/[&<>"']/g, m => map[m]);
 }
 
 function showToast(message, type = 'info') {
@@ -2138,40 +1988,19 @@ function showToast(message, type = 'info') {
     
     const toastEl = document.getElementById('liveToast');
     if (toastEl) {
-        const toastBody = toastEl.querySelector('.toast-body span') || toastEl.querySelector('.toast-body');
-        if (toastBody) {
-            toastBody.textContent = message;
-        }
+        const toastBody = toastEl.querySelector('.toast-body span, .toast-body');
+        if (toastBody) toastBody.textContent = message;
         toastEl.className = `toast align-items-center text-bg-${type} border-0`;
         
         try {
-            const toast = new bootstrap.Toast(toastEl, { delay: 5000 });
-            toast.show();
+            new bootstrap.Toast(toastEl, { delay: 5000 }).show();
         } catch (e) {
             console.log('Toast error:', e);
             alert(message);
         }
     }
 }
-   window.toggleCaseForm = function() {
-    console.log('toggleCaseForm вызвана');
-    
-    // Ищем форму
-    let form = document.querySelector('#caseFormContainer, .case-form-section');
-    
-    if (!form) {
-        alert('Форма не найдена! Выполните поиск, при котором нет результатов.');
-        return;
-    }
-    
-    // Переключаем видимость
-    if (form.style.display === 'none' || getComputedStyle(form).display === 'none') {
-        form.style.display = 'block';
-        form.scrollIntoView({ behavior: 'smooth' });
-    } else {
-        form.style.display = 'none';
-    }
-};
+
 </script>
 
 <!-- Toast контейнер -->
