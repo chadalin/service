@@ -931,147 +931,7 @@
             </div>
         </div>
         
-                    <!-- СВЯЗАННЫЕ КОНСУЛЬТАЦИИ -->
-<div class="info-card mt-4">
-    <div class="info-card-header">
-        <h6 class="mb-0">
-            <i class="bi bi-chat-dots me-2"></i>
-            Консультации по данному симптому
-        </h6>
-    </div>
-    <div class="info-card-body">
-        @if($consultations && $consultations->count() > 0)
-            <div class="consultations-feed">
-                @foreach($consultations as $consultation)
-                    <div class="consultation-preview">
-                        <div class="consultation-preview-header">
-                            <div class="consultation-meta">
-                                <span class="consultation-id">
-                                    <i class="bi bi-hash"></i> Консультация #{{ $consultation->id }}
-                                </span>
-                                <span class="consultation-date">
-                                    <i class="bi bi-calendar3"></i> {{ $consultation->created_at->format('d.m.Y') }}
-                                </span>
-                                <span class="consultation-status status-{{ $consultation->status }}">
-                                    {{ $consultation->status == 'completed' ? 'Завершена' : ($consultation->status == 'in_progress' ? 'В работе' : 'Ожидает') }}
-                                </span>
-                            </div>
-                            @if($consultation->expert)
-                                <div class="consultation-expert">
-                                    <i class="bi bi-person-badge"></i>
-                                    Эксперт: {{ $consultation->expert->name ?? 'Специалист' }}
-                                </div>
-                            @endif
-                        </div>
-                        
-                        <div class="consultation-preview-body">
-                            @if($consultation->preview_images && count($consultation->preview_images) > 0)
-                                <div class="consultation-images">
-                                    @foreach(array_slice($consultation->preview_images, 0, 3) as $index => $image)
-                                        <div class="consultation-image-wrapper">
-                                            <img src="{{ Storage::url($image) }}" 
-                                                 alt="Фото консультации"
-                                                 class="consultation-image"
-                                                 onclick="openImageModal('{{ Storage::url($image) }}')">
-                                            @if($index === 2 && count($consultation->preview_images) > 3)
-                                                <div class="more-images-badge">
-                                                    +{{ count($consultation->preview_images) - 3 }}
-                                                </div>
-                                            @endif
-                                        </div>
-                                    @endforeach
-                                </div>
-                            @else
-                                <div class="no-images-placeholder">
-                                    <i class="bi bi-card-image"></i>
-                                    <span>Нет фото</span>
-                                </div>
-                            @endif
-                            
-                            <div class="consultation-content">
-                                <div class="consultation-description">
-                                    {{ $consultation->short_description }}
-                                </div>
-                                
-                                @if($consultation->customer_feedback)
-                                    <div class="consultation-feedback">
-                                        <i class="bi bi-quote"></i>
-                                        {{ Str::limit($consultation->customer_feedback, 100) }}
-                                    </div>
-                                @endif
-                                
-                                <div class="consultation-footer">
-                                    @if($consultation->case)
-                                        <div class="consultation-car-info">
-                                            <i class="bi bi-car-front"></i>
-                                            @if($consultation->case->brand)
-                                                {{ $consultation->case->brand->name ?? '' }}
-                                            @endif
-                                            @if($consultation->case->model)
-                                                {{ $consultation->case->model->name ?? '' }}
-                                            @endif
-                                            @if($consultation->case->year)
-                                                {{ $consultation->case->year }}
-                                            @endif
-                                        </div>
-                                    @endif
-                                    
-                                    <a href="{{ route('admin.diagnostic.consultations.show', $consultation->id) }}" 
-                                       class="btn-view-consultation">
-                                        Подробнее
-                                        <i class="bi bi-arrow-right"></i>
-                                    </a>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                @endforeach
-                
-                @if($consultations->count() >= 6)
-                    <div class="text-center mt-4">
-                        <a href="{{ route('admin.diagnostic.consultations.index', ['rule_id' => $rule->id]) }}" 
-                           class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-arrow-right-circle me-1"></i>
-                            Все консультации по данному симптому
-                        </a>
-                    </div>
-                @endif
-            </div>
-        @else
-            <div class="no-consultations">
-                <i class="bi bi-chat-square-text"></i>
-                <h5>Пока нет консультаций</h5>
-                <p class="text-muted">
-                    По данному симптому еще не было консультаций. 
-                    Будьте первым, кто закажет консультацию эксперта!
-                </p>
-                <div class="mt-3">
-                    <button type="button" 
-                            class="btn btn-primary btn-sm"
-                            onclick="document.querySelector('.consultation-form').scrollIntoView({ behavior: 'smooth' })">
-                        <i class="bi bi-plus-circle me-1"></i>
-                        Заказать консультацию
-                    </button>
-                </div>
-            </div>
-        @endif
-    </div>
-</div>
-
-<!-- Модальное окно для просмотра изображений -->
-<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
-    <div class="modal-dialog modal-lg modal-dialog-centered">
-        <div class="modal-content">
-            <div class="modal-header border-0">
-                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
-            </div>
-            <div class="modal-body text-center p-0">
-                <img src="" id="modalImage" class="img-fluid" alt="Просмотр изображения">
-            </div>
-        </div>
-    </div>
-</div>
-
+            
 
         <!-- Правая колонка: Форма заказа консультации -->
         <div class="col-lg-4">
@@ -1279,7 +1139,196 @@
             </div>
         </div>
     </div>
+            <!-- СВЯЗАННЫЕ КОНСУЛЬТАЦИИ -->
+<div class="info-card mt-4">
+    <div class="info-card-header">
+        <h6 class="mb-0">
+            <i class="bi bi-chat-dots me-2"></i>
+            Консультации по данному симптому
+        </h6>
+    </div>
+    <div class="info-card-body">
+        @if($consultations && $consultations->count() > 0)
+            <div class="consultations-feed">
+                @foreach($consultations as $consultation)
+                    <div class="consultation-preview">
+                        <div class="consultation-preview-header">
+                            <div class="consultation-meta">
+                                <span class="consultation-id">
+                                    <i class="bi bi-hash"></i> Консультация #{{ $consultation->id }}
+                                </span>
+                                <span class="consultation-date">
+                                    <i class="bi bi-calendar3"></i> {{ $consultation->created_at->format('d.m.Y') }}
+                                </span>
+                                <span class="consultation-status status-{{ $consultation->status }}">
+                                    {{ $consultation->status == 'completed' ? 'Завершена' : ($consultation->status == 'in_progress' ? 'В работе' : 'Ожидает') }}
+                                </span>
+                            </div>
+                            @if($consultation->expert)
+                                <div class="consultation-expert">
+                                    <i class="bi bi-person-badge"></i>
+                                    Эксперт: {{ $consultation->expert->name ?? 'Специалист' }}
+                                </div>
+                            @endif
+                        </div>
+                        
+                        <div class="consultation-preview-body">
+
+
+        <!-- Блок с фото консультации -->
+@if($consultation->preview_images && count($consultation->preview_images) > 0)
+    <div class="consultation-images">
+        @foreach($consultation->preview_images as $index => $image)
+            <div class="consultation-image-wrapper" onclick="openImageModal('{{ asset($image) }}')">
+                <img src="{{ asset($image) }}" 
+                     alt="Фото консультации"
+                     class="consultation-image"
+                     loading="lazy"
+                     onerror="this.onerror=null; this.src='{{ asset('img/no-image.jpg') }}';">
+                @if($index === 2 && count($consultation->preview_images) > 3)
+                    <div class="more-images-badge">
+                        +{{ count($consultation->preview_images) - 3 }}
+                    </div>
+                @endif
+            </div>
+        @endforeach
+    </div>
+@else
+    <div class="consultation-images">
+        <div class="no-images-placeholder">
+            <i class="bi bi-image"></i>
+            <span>Нет фото</span>
+        </div>
+    </div>
+@endif
+
+<!-- Дополнительная информация о файлах -->
+@if($consultation->case && !empty($consultation->case->uploaded_files))
+    @php
+        $files = is_string($consultation->case->uploaded_files) 
+            ? json_decode($consultation->case->uploaded_files, true) 
+            : $consultation->case->uploaded_files;
+        
+        $hasDocuments = isset($files['protocol_files']) && count($files['protocol_files']) > 0;
+        $hasVideos = isset($files['symptom_videos']) && count($files['symptom_videos']) > 0;
+    @endphp
     
+    @if($hasDocuments || $hasVideos)
+        <div class="consultation-files mt-2">
+            @if($hasDocuments)
+                <span class="file-badge">
+                    <i class="bi bi-file-earmark-text"></i>
+                    {{ count($files['protocol_files']) }} документов
+                </span>
+            @endif
+            
+            @if($hasVideos)
+                <span class="file-badge">
+                    <i class="bi bi-camera-video"></i>
+                    {{ count($files['symptom_videos']) }} видео
+                </span>
+            @endif
+        </div>
+    @endif
+@endif
+                            
+                            <div class="consultation-content">
+                                <div class="consultation-description">
+                                    {{ $consultation->short_description }}
+                                </div>
+                                
+                                @if($consultation->customer_feedback)
+                                    <div class="consultation-feedback">
+                                        <i class="bi bi-quote"></i>
+                                        {{ Str::limit($consultation->customer_feedback, 100) }}
+                                    </div>
+                                @endif
+                                
+                                <div class="consultation-footer">
+                                    @if($consultation->case)
+                                        <div class="consultation-car-info">
+                                            <i class="bi bi-car-front"></i>
+                                            @if($consultation->case->brand)
+                                                {{ $consultation->case->brand->name ?? '' }}
+                                            @endif
+                                            @if($consultation->case->model)
+                                                {{ $consultation->case->model->name ?? '' }}
+                                            @endif
+                                            @if($consultation->case->year)
+                                                {{ $consultation->case->year }}
+                                            @endif
+                                        </div>
+                                    @endif
+                                    
+                                    <a href="{{ route('admin.diagnostic.consultations.show', $consultation->id) }}" 
+                                       class="btn-view-consultation">
+                                        Подробнее
+                                        <i class="bi bi-arrow-right"></i>
+                                    </a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                @endforeach
+                
+                @if($consultations->count() >= 6)
+                    <div class="text-center mt-4">
+                        <a href="{{ route('admin.diagnostic.consultations.index', ['rule_id' => $rule->id]) }}" 
+                           class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-arrow-right-circle me-1"></i>
+                            Все консультации по данному симптому
+                        </a>
+                    </div>
+                @endif
+            </div>
+        @else
+            <div class="no-consultations">
+                <i class="bi bi-chat-square-text"></i>
+                <h5>Пока нет консультаций</h5>
+                <p class="text-muted">
+                    По данному симптому еще не было консультаций. 
+                    Будьте первым, кто закажет консультацию эксперта!
+                </p>
+                <div class="mt-3">
+                    <button type="button" 
+                            class="btn btn-primary btn-sm"
+                            onclick="document.querySelector('.consultation-form').scrollIntoView({ behavior: 'smooth' })">
+                        <i class="bi bi-plus-circle me-1"></i>
+                        Заказать консультацию
+                    </button>
+                </div>
+            </div>
+        @endif
+    </div>
+</div>
+
+<!-- Модальное окно для просмотра изображений -->
+<div class="modal fade" id="imageModal" tabindex="-1" aria-hidden="true">
+    <div class="modal-dialog modal-lg modal-dialog-centered">
+        <div class="modal-content">
+            <div class="modal-header border-0">
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
+            </div>
+            <div class="modal-body text-center p-0">
+                <img src="" id="modalImage" class="img-fluid" alt="Просмотр изображения">
+            </div>
+        </div>
+    </div>
+</div>
+
+
+@if(config('app.debug'))
+    <div class="debug-info" style="background: #f1f5f9; padding: 1rem; margin: 1rem 0; border-radius: 8px; font-size: 0.8rem;">
+        <strong>Debug:</strong>
+        <div>Symptom ID: {{ $rule->symptom_id }}</div>
+        <div>Consultations found: {{ $consultations ? $consultations->count() : 0 }}</div>
+        @if($consultations && $consultations->count() > 0)
+            <div>Consultation IDs: {{ $consultations->pluck('id')->join(', ') }}</div>
+            <div>Case IDs: {{ $consultations->pluck('case_id')->join(', ') }}</div>
+        @endif
+    </div>
+@endif
+
     <!-- Кнопки действий -->
     <div class="d-flex justify-content-between align-items-center mt-4 pt-4 border-top">
         <div>

@@ -274,5 +274,46 @@ class DiagnosticCase extends Model
     {
         return $this->consultationMessages()->exists();
     }
+
+     /**
+ * Get the uploaded files attribute.
+ */
+public function getUploadedFilesAttribute($value)
+{
+    if (empty($value)) {
+        return [];
+    }
+    
+    // Если это уже массив
+    if (is_array($value)) {
+        return $value;
+    }
+    
+    // Если это строка JSON
+    $decoded = json_decode($value, true);
+    if (is_array($decoded)) {
+        return $decoded;
+    }
+    
+    // Если это сериализованный массив
+    $unserialized = @unserialize($value);
+    if (is_array($unserialized)) {
+        return $unserialized;
+    }
+    
+    return [];
+}
+
+/**
+ * Set the uploaded files attribute.
+ */
+public function setUploadedFilesAttribute($value)
+{
+    if (is_array($value)) {
+        $this->attributes['uploaded_files'] = json_encode($value, JSON_UNESCAPED_UNICODE);
+    } else {
+        $this->attributes['uploaded_files'] = $value;
+    }
+}
     
 }

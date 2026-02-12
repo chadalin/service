@@ -143,69 +143,464 @@ class RuleController extends Controller
     /**
      * Получить консультации, связанные с правилом
      */
-    private function getRelatedConsultations(Rule $rule)
-    {
-        try {
-            // Находим кейсы, созданные по этому правилу
-            $caseIds = DiagnosticCase::where('rule_id', $rule->id)
-                ->pluck('id')
-                ->toArray();
-            
-            if (empty($caseIds)) {
-                return collect();
-            }
-            
-            // Получаем консультации с связанными данными
-            $consultations = Consultation::with(['case', 'expert', 'user'])
-                ->whereIn('case_id', $caseIds)
-                ->where('status', 'completed') // Только завершенные консультации
-                ->orWhere('status', 'in_progress') // Или в процессе
+   private function getRelatedConsultations(Rule $rule)
+{
+    try {
+        \Log::info('Getting consultations for rule', [
+            'rule_id' => $rule->id,
+            'symptom_id' => $rule->symptom_id,
+            'symptom_name' => $rule->symptom->name ?? 'Unknown'
+        ]);
+
+        // Ищем diagnostic_cases по rule_id - это точная связь!
+        $cases = DiagnosticCase::where('rule_id', $rule->id)
+            ->orderBy('created_at', 'desc')
+            ->limit(20)
+            ->get();
+        
+        \Log::info('Found cases by rule_id', [
+            'rule_id' => $rule->id,
+            'cases_count' => $cases->count(),
+            'case_ids' => $cases->pluck('id')->toArray()
+        ]);
+        
+        if ($cases->isEmpty()) {
+            // Если не нашли по rule_id, пробуем найти по symptom_id в JSON
+            $cases = DiagnosticCase::whereRaw('JSON_CONTAINS(symptoms, ?)', [json_encode($rule->symptom_id)])
+                ->orWhere('symptoms', 'like', '%"' . $rule->symptom_id . '"%')
                 ->orderBy('created_at', 'desc')
-                ->limit(6) // Показываем не более 6 консультаций
+                ->limit(20)
                 ->get();
-            
-            // Для каждой консультации пытаемся получить файлы из кейса
-            foreach ($consultations as $consultation) {
-                if ($consultation->case && !empty($consultation->case->uploaded_files)) {
-                    $files = is_string($consultation->case->uploaded_files) 
-                        ? json_decode($consultation->case->uploaded_files, true) 
-                        : $consultation->case->uploaded_files;
-                    
-                    $consultation->preview_images = $this->extractPreviewImages($files);
-                } else {
-                    $consultation->preview_images = [];
-                }
                 
-                // Сокращаем описание симптомов для превью
-                if ($consultation->case && !empty($consultation->case->description)) {
-                    $consultation->short_description = Str::limit($consultation->case->description, 120);
-                } elseif ($consultation->case && !empty($consultation->case->symptoms)) {
-                    $symptoms = is_string($consultation->case->symptoms) 
-                        ? json_decode($consultation->case->symptoms, true) 
-                        : $consultation->case->symptoms;
-                    
-                    if (is_array($symptoms) && !empty($symptoms)) {
-                        $consultation->short_description = 'Симптомы: ' . implode(', ', array_slice($symptoms, 0, 3));
-                    } else {
-                        $consultation->short_description = 'Консультация эксперта';
-                    }
-                } else {
-                    $consultation->short_description = 'Консультация по диагностике';
-                }
-            }
-            
-            return $consultations;
-            
-        } catch (\Exception $e) {
-            Log::error('Error getting related consultations', [
-                'rule_id' => $rule->id,
-                'error' => $e->getMessage()
+            \Log::info('Found cases by symptom_id as fallback', [
+                'symptom_id' => $rule->symptom_id,
+                'cases_count' => $cases->count()
             ]);
-            
+        }
+        
+        if ($cases->isEmpty()) {
             return collect();
         }
+        
+        $caseIds = $cases->pluck('id')->toArray();
+        
+        // Получаем консультации по этим кейсам
+        $consultations = Consultation::with(['case', 'expert', 'user'])
+            ->whereIn('case_id', $caseIds)
+            ->whereIn('status', ['completed', 'in_progress', 'paid', 'confirmed', 'pending'])
+            ->orderBy('created_at', 'desc')
+            ->limit(6)
+            ->get();
+        
+        \Log::info('Found consultations', [
+            'case_ids' => $caseIds,
+            'consultations_count' => $consultations->count(),
+            'consultation_ids' => $consultations->pluck('id')->toArray()
+        ]);
+        
+        // Для каждой консультации пытаемся получить файлы из кейса
+        foreach ($consultations as $consultation) {
+            $consultation->preview_images = $this->extractImagesFromCase($consultation->case);
+            $consultation->short_description = $this->getShortDescription($consultation->case);
+            $consultation->symptom_names = $this->getSymptomNames($consultation->case);
+            $consultation->matched_by_rule = true; // Отмечаем, что найдено по rule_id
+        }
+        
+        return $consultations;
+        
+    } catch (\Exception $e) {
+        \Log::error('Error getting related consultations', [
+            'rule_id' => $rule->id,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return collect();
     }
+}
 
+/**
+ * Получить названия симптомов из кейса
+ */
+private function getSymptomNames($case)
+{
+    if (!$case || empty($case->symptoms)) {
+        return [];
+    }
+    
+    try {
+        $symptomIds = is_string($case->symptoms) 
+            ? json_decode($case->symptoms, true) 
+            : $case->symptoms;
+        
+        if (empty($symptomIds) || !is_array($symptomIds)) {
+            return [];
+        }
+        
+        // Получаем названия симптомов
+        $symptoms = Symptom::whereIn('id', $symptomIds)
+            ->pluck('name', 'id')
+            ->toArray();
+        
+        return $symptoms;
+        
+    } catch (\Exception $e) {
+        \Log::warning('Error getting symptom names', ['case_id' => $case->id]);
+        return [];
+    }
+}
+
+  /**
+ * Вспомогательный метод для шаблона
+ */
+public function getImageUrl($path)
+{
+    if (empty($path)) {
+        return asset('img/no-image.jpg');
+    }
+    
+    // Если это уже полный URL
+    if (filter_var($path, FILTER_VALIDATE_URL)) {
+        return $path;
+    }
+    
+    // Если путь начинается с public/
+    if (str_starts_with($path, 'public/')) {
+        return Storage::url($path);
+    }
+    
+    // Если путь начинается с uploads/
+    if (str_starts_with($path, 'uploads/')) {
+        return asset($path);
+    }
+    
+    // Проверяем существование файла в различных директориях
+    $possiblePaths = [
+        'public/' . $path,
+        'uploads/' . $path,
+        'storage/' . $path,
+        $path
+    ];
+    
+    foreach ($possiblePaths as $possiblePath) {
+        if (Storage::exists($possiblePath)) {
+            return Storage::url($possiblePath);
+        }
+    }
+    
+    // Возвращаем заглушку если файл не найден
+    return asset('img/no-image.jpg');
+}
+
+/**
+ * Получить сокращенное описание из кейса
+ */
+private function getShortDescription($case)
+{
+    if (!$case) {
+        return 'Консультация по диагностике';
+    }
+    
+    if (!empty($case->description)) {
+        return \Illuminate\Support\Str::limit($case->description, 120);
+    }
+    
+    if (!empty($case->analysis_result)) {
+        $result = is_string($case->analysis_result) 
+            ? $case->analysis_result 
+            : (is_array($case->analysis_result) ? json_encode($case->analysis_result) : '');
+        
+        return \Illuminate\Support\Str::limit($result, 120);
+    }
+    
+    return 'Консультация по диагностике автомобиля';
+}
+
+
+ 
+/**
+ * Извлечь изображения из кейса - ИСПРАВЛЕННАЯ ВЕРСИЯ
+ */
+private function extractImagesFromCase($case)
+{
+    $images = [];
+    
+    if (!$case) {
+        return $images;
+    }
+    
+    try {
+        // Получаем uploaded_files через аксессор
+        $files = $case->uploaded_files;
+        
+        \Log::info('Extracting images from case - raw data', [
+            'case_id' => $case->id,
+            'files_exists' => !empty($files),
+            'files_type' => gettype($files),
+            'files_preview' => is_array($files) ? array_keys($files) : substr(json_encode($files), 0, 200)
+        ]);
+        
+        if (empty($files) || !is_array($files)) {
+            return $images;
+        }
+        
+        // Ищем фотографии в symptom_photos (это основное поле для фото)
+        if (isset($files['symptom_photos']) && is_array($files['symptom_photos'])) {
+            \Log::info('Found symptom_photos', [
+                'case_id' => $case->id,
+                'count' => count($files['symptom_photos']),
+                'first_item' => json_encode($files['symptom_photos'][0] ?? null)
+            ]);
+            
+            foreach ($files['symptom_photos'] as $photo) {
+                $path = $this->extractImagePath($photo);
+                if ($path) {
+                    // Формируем правильный URL для storage
+                    $imageUrl = 'storage/' . ltrim($path, '/');
+                    $images[] = $imageUrl;
+                    
+                    \Log::info('Added image from symptom_photos', [
+                        'case_id' => $case->id,
+                        'original_path' => $path,
+                        'image_url' => $imageUrl
+                    ]);
+                    
+                    if (count($images) >= 3) break;
+                }
+            }
+        }
+        
+        // Если нет symptom_photos, ищем в photos
+        if (empty($images) && isset($files['photos']) && is_array($files['photos'])) {
+            foreach ($files['photos'] as $photo) {
+                $path = $this->extractImagePath($photo);
+                if ($path) {
+                    $imageUrl = 'storage/' . ltrim($path, '/');
+                    $images[] = $imageUrl;
+                    
+                    \Log::info('Added image from photos', [
+                        'case_id' => $case->id,
+                        'path' => $path,
+                        'url' => $imageUrl
+                    ]);
+                    
+                    if (count($images) >= 3) break;
+                }
+            }
+        }
+        
+        // Ищем в protocol_files если это изображения
+        if (empty($images) && isset($files['protocol_files']) && is_array($files['protocol_files'])) {
+            foreach ($files['protocol_files'] as $file) {
+                $path = $this->extractImagePath($file);
+                if ($path && $this->isImageFile($path)) {
+                    $imageUrl = 'storage/' . ltrim($path, '/');
+                    $images[] = $imageUrl;
+                    
+                    \Log::info('Added image from protocol_files', [
+                        'case_id' => $case->id,
+                        'path' => $path,
+                        'url' => $imageUrl
+                    ]);
+                    
+                    if (count($images) >= 3) break;
+                }
+            }
+        }
+        
+        \Log::info('Final extracted images', [
+            'case_id' => $case->id,
+            'images_count' => count($images),
+            'images' => $images
+        ]);
+        
+        return $images;
+        
+    } catch (\Exception $e) {
+        \Log::error('Error extracting images from case', [
+            'case_id' => $case->id ?? null,
+            'error' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        
+        return [];
+    }
+}
+
+/**
+ * Извлечь путь к изображению из различных форматов
+ */
+private function extractImagePath($photo)
+{
+    if (empty($photo)) {
+        return null;
+    }
+    
+    // Если это строка - это путь
+    if (is_string($photo)) {
+        return $photo;
+    }
+    
+    // Если это массив
+    if (is_array($photo)) {
+        // Проверяем разные возможные ключи
+        $possibleKeys = ['path', 'filepath', 'url', 'src', 'tmp_name', 'name', 'filename'];
+        
+        foreach ($possibleKeys as $key) {
+            if (isset($photo[$key]) && !empty($photo[$key]) && is_string($photo[$key])) {
+                return $photo[$key];
+            }
+        }
+        
+        // Если ключей нет, берем первое значение
+        foreach ($photo as $value) {
+            if (is_string($value) && !empty($value)) {
+                return $value;
+            }
+            break;
+        }
+    }
+    
+    return null;
+}
+
+/**
+ * Нормализовать информацию о файле в единый формат
+ */
+private function normalizeFileInfo($file)
+{
+    if (empty($file)) {
+        return null;
+    }
+    
+    $normalized = [
+        'original_name' => null,
+        'name' => null,
+        'path' => null,
+        'filepath' => null,
+        'url' => null,
+        'size' => null,
+        'mime_type' => null,
+        'extension' => null
+    ];
+    
+    if (is_string($file)) {
+        $normalized['path'] = $file;
+        $normalized['filepath'] = $file;
+        $normalized['name'] = basename($file);
+        $normalized['original_name'] = basename($file);
+        $normalized['extension'] = pathinfo($file, PATHINFO_EXTENSION);
+        
+    } elseif (is_array($file)) {
+        // Маппинг различных ключей
+        $pathKeys = ['path', 'filepath', 'file_path', 'url', 'src', 'tmp_name'];
+        foreach ($pathKeys as $key) {
+            if (isset($file[$key]) && !empty($file[$key])) {
+                $normalized['path'] = $file[$key];
+                $normalized['filepath'] = $file[$key];
+                break;
+            }
+        }
+        
+        // Ищем имя файла
+        $nameKeys = ['original_name', 'originalName', 'name', 'filename', 'file_name'];
+        foreach ($nameKeys as $key) {
+            if (isset($file[$key]) && !empty($file[$key])) {
+                $normalized['original_name'] = $file[$key];
+                $normalized['name'] = $file[$key];
+                break;
+            }
+        }
+        
+        // Если имя не найдено, берем из пути
+        if (empty($normalized['name']) && !empty($normalized['path'])) {
+            $normalized['name'] = basename($normalized['path']);
+            $normalized['original_name'] = basename($normalized['path']);
+        }
+        
+        // Размер файла
+        if (isset($file['size'])) {
+            $normalized['size'] = $file['size'];
+        }
+        
+        // MIME тип
+        if (isset($file['mime_type'])) {
+            $normalized['mime_type'] = $file['mime_type'];
+        } elseif (isset($file['type'])) {
+            $normalized['mime_type'] = $file['type'];
+        }
+        
+        // Расширение
+        if (!empty($normalized['name'])) {
+            $normalized['extension'] = pathinfo($normalized['name'], PATHINFO_EXTENSION);
+        } elseif (!empty($normalized['path'])) {
+            $normalized['extension'] = pathinfo($normalized['path'], PATHINFO_EXTENSION);
+        }
+    }
+    
+    // Проверяем, что у нас есть хотя бы путь
+    if (empty($normalized['path'])) {
+        return null;
+    }
+    
+    return $normalized;
+}
+
+
+     /**
+ * Извлечь путь из элемента файла
+ */
+private function extractPathFromFileItem($item)
+{
+    if (empty($item)) {
+        return null;
+    }
+    
+    if (is_string($item)) {
+        return $item;
+    }
+    
+    if (is_array($item)) {
+        // Проверяем различные возможные ключи
+        $pathKeys = ['path', 'url', 'filepath', 'file_path', 'name', 'filename', 'file', 'src', 'tmp_name'];
+        
+        foreach ($pathKeys as $key) {
+            if (isset($item[$key]) && !empty($item[$key]) && is_string($item[$key])) {
+                return $item[$key];
+            }
+        }
+        
+        // Если ключей нет, берем первый элемент
+        $firstValue = reset($item);
+        if (is_string($firstValue) && !empty($firstValue)) {
+            return $firstValue;
+        }
+    }
+    
+    return null;
+}
+
+    /**
+ * Получить путь к изображению из различных форматов
+ */
+private function getImagePath($file)
+{
+    if (is_string($file)) {
+        return $file;
+    }
+    
+    if (is_array($file)) {
+        // Проверяем различные возможные ключи
+        $pathKeys = ['path', 'url', 'filepath', 'file_path', 'name', 'filename'];
+        foreach ($pathKeys as $key) {
+            if (isset($file[$key]) && !empty($file[$key])) {
+                return $file[$key];
+            }
+        }
+    }
+    
+    return null;
+}
     /**
      * Извлечь изображения для превью из загруженных файлов
      */
@@ -252,20 +647,18 @@ class RuleController extends Controller
     /**
      * Проверить, является ли файл изображением
      */
-    private function isImageFile($file)
-    {
-        if (is_string($file)) {
-            $extension = strtolower(pathinfo($file, PATHINFO_EXTENSION));
-            return in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp']);
-        }
-        
-        if (is_array($file) && isset($file['name'])) {
-            $extension = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
-            return in_array($extension, ['jpg', 'jpeg', 'png', 'gif', 'webp']);
-        }
-        
+    private function isImageFile($path)
+{
+    if (empty($path)) {
         return false;
     }
+    
+    $extension = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+    $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg', 'heic', 'heif'];
+    
+    return in_array($extension, $imageExtensions);
+}
+
 
 /**
  * Безопасный поиск связанных запчастей
