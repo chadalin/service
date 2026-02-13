@@ -1176,6 +1176,7 @@
 
 
         <!-- Блок с фото консультации -->
+<!-- Фото консультации -->
 @if($consultation->preview_images && count($consultation->preview_images) > 0)
     <div class="consultation-images">
         @foreach($consultation->preview_images as $index => $image)
@@ -1326,6 +1327,13 @@
             <div>Consultation IDs: {{ $consultations->pluck('id')->join(', ') }}</div>
             <div>Case IDs: {{ $consultations->pluck('case_id')->join(', ') }}</div>
         @endif
+    </div>
+@endif
+
+
+@if(config('app.debug') && isset($consultation->preview_images))
+    <div style="font-size: 0.7rem; color: #666; margin-top: 0.25rem;">
+        Images: {{ json_encode($consultation->preview_images) }}
     </div>
 @endif
 

@@ -12,6 +12,7 @@ use Illuminate\Http\Request;
 use App\Models\Diagnostic\DiagnosticCase;
 use App\Models\Diagnostic\Consultation;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\DB;
 
 class RuleController extends Controller
 {
@@ -143,73 +144,143 @@ class RuleController extends Controller
     /**
      * Получить консультации, связанные с правилом
      */
-   private function getRelatedConsultations(Rule $rule)
+ /**
+ * Получить консультации, связанные с правилом
+ */
+/**
+ * Получить консультации, связанные с правилом
+ */
+/**
+ * Получить консультации, связанные с правилом
+ */
+private function getRelatedConsultations(Rule $rule)
 {
     try {
-        \Log::info('Getting consultations for rule', [
+        Log::info('========== GET RELATED CONSULTATIONS START ==========');
+        Log::info('Rule data:', [
             'rule_id' => $rule->id,
-            'symptom_id' => $rule->symptom_id,
-            'symptom_name' => $rule->symptom->name ?? 'Unknown'
+            'symptom_id' => $rule->symptom_id
         ]);
 
-        // Ищем diagnostic_cases по rule_id - это точная связь!
-        $cases = DiagnosticCase::where('rule_id', $rule->id)
-            ->orderBy('created_at', 'desc')
-            ->limit(20)
-            ->get();
-        
-        \Log::info('Found cases by rule_id', [
-            'rule_id' => $rule->id,
-            'cases_count' => $cases->count(),
-            'case_ids' => $cases->pluck('id')->toArray()
-        ]);
-        
-        if ($cases->isEmpty()) {
-            // Если не нашли по rule_id, пробуем найти по symptom_id в JSON
-            $cases = DiagnosticCase::whereRaw('JSON_CONTAINS(symptoms, ?)', [json_encode($rule->symptom_id)])
-                ->orWhere('symptoms', 'like', '%"' . $rule->symptom_id . '"%')
-                ->orderBy('created_at', 'desc')
-                ->limit(20)
-                ->get();
-                
-            \Log::info('Found cases by symptom_id as fallback', [
-                'symptom_id' => $rule->symptom_id,
-                'cases_count' => $cases->count()
-            ]);
-        }
-        
-        if ($cases->isEmpty()) {
-            return collect();
-        }
-        
-        $caseIds = $cases->pluck('id')->toArray();
-        
-        // Получаем консультации по этим кейсам
-        $consultations = Consultation::with(['case', 'expert', 'user'])
-            ->whereIn('case_id', $caseIds)
-            ->whereIn('status', ['completed', 'in_progress', 'paid', 'confirmed', 'pending'])
-            ->orderBy('created_at', 'desc')
+        // 1. Прямой SQL запрос для получения консультаций
+        $consultations = DB::table('diagnostic_consultations as c')
+            ->join('diagnostic_cases as dc', 'dc.id', '=', 'c.case_id')
+            ->where('dc.rule_id', $rule->id)
+            ->whereNotNull('c.case_id')
+            ->where('c.case_id', '!=', '0')
+            ->where('c.case_id', '!=', '')
+            ->whereIn('c.status', ['completed', 'in_progress', 'paid', 'confirmed', 'pending'])
+            ->select(
+                'c.*',
+                'dc.id as case_id',
+                'dc.uploaded_files',
+                'dc.description as case_description',
+                'dc.symptoms',
+                'dc.created_at as case_created_at'
+            )
+            ->orderBy('c.created_at', 'desc')
             ->limit(6)
             ->get();
         
-        \Log::info('Found consultations', [
-            'case_ids' => $caseIds,
-            'consultations_count' => $consultations->count(),
-            'consultation_ids' => $consultations->pluck('id')->toArray()
+        Log::info('SQL Query Result:', [
+            'count' => $consultations->count(),
+            'data' => $consultations->toArray()
         ]);
         
-        // Для каждой консультации пытаемся получить файлы из кейса
-        foreach ($consultations as $consultation) {
-            $consultation->preview_images = $this->extractImagesFromCase($consultation->case);
-            $consultation->short_description = $this->getShortDescription($consultation->case);
-            $consultation->symptom_names = $this->getSymptomNames($consultation->case);
-            $consultation->matched_by_rule = true; // Отмечаем, что найдено по rule_id
+        if ($consultations->isEmpty()) {
+            Log::info('No consultations found');
+            return collect();
         }
         
-        return $consultations;
+        // 2. Преобразуем в коллекцию моделей Consultation
+        $result = collect();
+        
+        foreach ($consultations as $item) {
+            // Создаем объект Consultation
+            $consultation = new \App\Models\Diagnostic\Consultation();
+            $consultation->id = $item->id;
+            $consultation->case_id = $item->case_id;
+            $consultation->user_id = $item->user_id;
+            $consultation->expert_id = $item->expert_id;
+            $consultation->type = $item->type;
+            $consultation->price = $item->price;
+            $consultation->status = $item->status;
+            $consultation->created_at = $item->created_at;
+            
+            // Извлекаем фото из uploaded_files
+            $images = [];
+            if (!empty($item->uploaded_files)) {
+                $files = is_string($item->uploaded_files) 
+                    ? json_decode($item->uploaded_files, true) 
+                    : $item->uploaded_files;
+                
+                if (is_array($files)) {
+                    foreach ($files as $file) {
+                        if (is_array($file) && isset($file['path'])) {
+                            // Проверяем что это фото
+                            $isImage = false;
+                            if (isset($file['type']) && $file['type'] === 'photo') {
+                                $isImage = true;
+                            } elseif (isset($file['mime_type']) && str_starts_with($file['mime_type'], 'image/')) {
+                                $isImage = true;
+                            } else {
+                                $ext = pathinfo($file['path'], PATHINFO_EXTENSION);
+                                if (in_array(strtolower($ext), ['jpg', 'jpeg', 'png', 'gif', 'webp'])) {
+                                    $isImage = true;
+                                }
+                            }
+                            
+                            if ($isImage) {
+                                $path = ltrim($file['path'], '/');
+                                $path = str_replace(['public/', 'storage/'], '', $path);
+                                $images[] = 'storage/' . $path;
+                                
+                                if (count($images) >= 3) break;
+                            }
+                        }
+                    }
+                }
+            }
+            
+            $consultation->preview_images = $images;
+            $consultation->short_description = \Illuminate\Support\Str::limit(
+                $item->case_description ?? 'Консультация по диагностике', 
+                120
+            );
+            $consultation->case_created_at = $item->case_created_at;
+            
+            // Получаем названия симптомов
+            if (!empty($item->symptoms)) {
+                $symptomIds = is_string($item->symptoms) 
+                    ? json_decode($item->symptoms, true) 
+                    : $item->symptoms;
+                
+                if (is_array($symptomIds) && !empty($symptomIds)) {
+                    $symptomNames = Symptom::whereIn('id', $symptomIds)
+                        ->pluck('name', 'id')
+                        ->toArray();
+                    $consultation->symptom_names = $symptomNames;
+                }
+            }
+            
+            $result->push($consultation);
+            
+            Log::info('Added consultation:', [
+                'id' => $consultation->id,
+                'case_id' => $consultation->case_id,
+                'images' => $images
+            ]);
+        }
+        
+        Log::info('Final result:', [
+            'count' => $result->count(),
+            'ids' => $result->pluck('id')->toArray()
+        ]);
+        
+        return $result;
         
     } catch (\Exception $e) {
-        \Log::error('Error getting related consultations', [
+        Log::error('Error in getRelatedConsultations:', [
             'rule_id' => $rule->id,
             'error' => $e->getMessage(),
             'trace' => $e->getTraceAsString()
@@ -218,7 +289,6 @@ class RuleController extends Controller
         return collect();
     }
 }
-
 /**
  * Получить названия симптомов из кейса
  */
@@ -321,106 +391,103 @@ private function getShortDescription($case)
 /**
  * Извлечь изображения из кейса - ИСПРАВЛЕННАЯ ВЕРСИЯ
  */
-private function extractImagesFromCase($case)
+/**
+ * Извлечь изображения из case - ИСПРАВЛЕННАЯ ВЕРСИЯ
+ */
+private function extractImagesFromCase($caseData)
 {
     $images = [];
     
-    if (!$case) {
+    if (!$caseData || empty($caseData->uploaded_files)) {
+        Log::info('No uploaded_files for case', ['case_id' => $caseData->id ?? null]);
         return $images;
     }
     
     try {
-        // Получаем uploaded_files через аксессор
-        $files = $case->uploaded_files;
+        // Получаем файлы
+        $uploadedFiles = [];
         
-        \Log::info('Extracting images from case - raw data', [
-            'case_id' => $case->id,
-            'files_exists' => !empty($files),
-            'files_type' => gettype($files),
-            'files_preview' => is_array($files) ? array_keys($files) : substr(json_encode($files), 0, 200)
+        if (is_string($caseData->uploaded_files)) {
+            $uploadedFiles = json_decode($caseData->uploaded_files, true) ?? [];
+        } elseif (is_array($caseData->uploaded_files)) {
+            $uploadedFiles = $caseData->uploaded_files;
+        }
+        
+        Log::info('Processing uploaded_files', [
+            'case_id' => $caseData->id,
+            'files_count' => count($uploadedFiles)
         ]);
         
-        if (empty($files) || !is_array($files)) {
+        if (empty($uploadedFiles)) {
             return $images;
         }
         
-        // Ищем фотографии в symptom_photos (это основное поле для фото)
-        if (isset($files['symptom_photos']) && is_array($files['symptom_photos'])) {
-            \Log::info('Found symptom_photos', [
-                'case_id' => $case->id,
-                'count' => count($files['symptom_photos']),
-                'first_item' => json_encode($files['symptom_photos'][0] ?? null)
-            ]);
+        // Проходим по всем файлам и ищем изображения
+        foreach ($uploadedFiles as $file) {
+            if (!is_array($file)) {
+                continue;
+            }
             
-            foreach ($files['symptom_photos'] as $photo) {
-                $path = $this->extractImagePath($photo);
-                if ($path) {
-                    // Формируем правильный URL для storage
-                    $imageUrl = 'storage/' . ltrim($path, '/');
-                    $images[] = $imageUrl;
-                    
-                    \Log::info('Added image from symptom_photos', [
-                        'case_id' => $case->id,
-                        'original_path' => $path,
-                        'image_url' => $imageUrl
-                    ]);
-                    
-                    if (count($images) >= 3) break;
+            // Проверяем наличие пути
+            $filePath = $file['path'] ?? null;
+            
+            if (empty($filePath)) {
+                continue;
+            }
+            
+            // Определяем тип файла
+            $isImage = false;
+            
+            // По mime_type
+            if (isset($file['mime_type']) && str_starts_with($file['mime_type'], 'image/')) {
+                $isImage = true;
+            }
+            // По type
+            elseif (isset($file['type']) && $file['type'] === 'photo') {
+                $isImage = true;
+            }
+            // По расширению
+            else {
+                $extension = strtolower(pathinfo($filePath, PATHINFO_EXTENSION));
+                $imageExtensions = ['jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'svg'];
+                if (in_array($extension, $imageExtensions)) {
+                    $isImage = true;
                 }
+            }
+            
+            if ($isImage) {
+                // Формируем URL
+                $path = ltrim($filePath, '/');
+                $path = str_replace('public/', '', $path);
+                $path = str_replace('storage/', '', $path);
+                
+                $imageUrl = 'storage/' . $path;
+                $images[] = $imageUrl;
+                
+                Log::info('Found image', [
+                    'case_id' => $caseData->id,
+                    'path' => $filePath,
+                    'url' => $imageUrl,
+                    'type' => $file['type'] ?? 'unknown',
+                    'mime' => $file['mime_type'] ?? 'unknown'
+                ]);
+                
+                if (count($images) >= 3) break;
             }
         }
         
-        // Если нет symptom_photos, ищем в photos
-        if (empty($images) && isset($files['photos']) && is_array($files['photos'])) {
-            foreach ($files['photos'] as $photo) {
-                $path = $this->extractImagePath($photo);
-                if ($path) {
-                    $imageUrl = 'storage/' . ltrim($path, '/');
-                    $images[] = $imageUrl;
-                    
-                    \Log::info('Added image from photos', [
-                        'case_id' => $case->id,
-                        'path' => $path,
-                        'url' => $imageUrl
-                    ]);
-                    
-                    if (count($images) >= 3) break;
-                }
-            }
-        }
-        
-        // Ищем в protocol_files если это изображения
-        if (empty($images) && isset($files['protocol_files']) && is_array($files['protocol_files'])) {
-            foreach ($files['protocol_files'] as $file) {
-                $path = $this->extractImagePath($file);
-                if ($path && $this->isImageFile($path)) {
-                    $imageUrl = 'storage/' . ltrim($path, '/');
-                    $images[] = $imageUrl;
-                    
-                    \Log::info('Added image from protocol_files', [
-                        'case_id' => $case->id,
-                        'path' => $path,
-                        'url' => $imageUrl
-                    ]);
-                    
-                    if (count($images) >= 3) break;
-                }
-            }
-        }
-        
-        \Log::info('Final extracted images', [
-            'case_id' => $case->id,
-            'images_count' => count($images),
+        Log::info('Extracted images result', [
+            'case_id' => $caseData->id,
+            'images_found' => count($images),
             'images' => $images
         ]);
         
         return $images;
         
     } catch (\Exception $e) {
-        \Log::error('Error extracting images from case', [
-            'case_id' => $case->id ?? null,
-            'error' => $e->getMessage(),
-            'trace' => $e->getTraceAsString()
+        Log::error('Error extracting images from case', [
+            'case_id' => $caseData->id ?? null,
+            'error' => $e->getMessage()
         ]);
         
         return [];
@@ -664,130 +731,130 @@ private function getImagePath($file)
  * Безопасный поиск связанных запчастей
  */
 private function findMatchingPriceItemsSafely(Rule $rule)
-{
-    try {
-        // Проверяем, существует ли модель PriceItem
-        if (!class_exists(\App\Models\PriceItem::class)) {
-            Log::warning('PriceItem model not found');
-            return collect();
-        }
-        
-        // Проверяем, существует ли таблица
-        if (!\Illuminate\Support\Facades\Schema::hasTable('price_items')) {
-            Log::warning('price_items table not found');
-            return collect();
-        }
-        
-        $searchTerms = [];
-        
-        // 1. Ищем по названию симптома
-        if ($rule->symptom && !empty($rule->symptom->name)) {
-            $searchTerms[] = $rule->symptom->name;
-        }
-        
-        // 2. Ищем по возможным причинам из поля possible_causes
-        if ($rule->possible_causes && is_array($rule->possible_causes)) {
-            foreach ($rule->possible_causes as $cause) {
-                if (!empty(trim($cause))) {
-                    // Разбиваем сложные причины на отдельные слова
-                    $words = preg_split('/[\s,;]+/', $cause);
-                    foreach ($words as $word) {
-                        if (strlen($word) > 3) { // Только слова длиннее 3 символов
-                            $searchTerms[] = $word;
+    {
+        try {
+            // Проверяем, существует ли модель PriceItem
+            if (!class_exists(\App\Models\PriceItem::class)) {
+                Log::warning('PriceItem model not found');
+                return collect();
+            }
+            
+            // Проверяем, существует ли таблица
+            if (!\Illuminate\Support\Facades\Schema::hasTable('price_items')) {
+                Log::warning('price_items table not found');
+                return collect();
+            }
+            
+            $searchTerms = [];
+            
+            // 1. Ищем по названию симптома
+            if ($rule->symptom && !empty($rule->symptom->name)) {
+                $searchTerms[] = $rule->symptom->name;
+            }
+            
+            // 2. Ищем по возможным причинам из поля possible_causes
+            if ($rule->possible_causes && is_array($rule->possible_causes)) {
+                foreach ($rule->possible_causes as $cause) {
+                    if (!empty(trim($cause))) {
+                        // Разбиваем сложные причины на отдельные слова
+                        $words = preg_split('/[\s,;]+/', $cause);
+                        foreach ($words as $word) {
+                            if (strlen($word) > 3) { // Только слова длиннее 3 символов
+                                $searchTerms[] = $word;
+                            }
                         }
                     }
                 }
             }
-        }
-        
-        // 3. Ищем по описанию симптома
-        if ($rule->symptom && !empty($rule->symptom->description)) {
-            // Извлекаем ключевые слова из описания
-            preg_match_all('/\b(\w{4,})\b/', $rule->symptom->description, $matches);
-            if (!empty($matches[1])) {
-                foreach ($matches[1] as $keyword) {
-                    $searchTerms[] = $keyword;
+            
+            // 3. Ищем по описанию симптома
+            if ($rule->symptom && !empty($rule->symptom->description)) {
+                // Извлекаем ключевые слова из описания
+                preg_match_all('/\b(\w{4,})\b/', $rule->symptom->description, $matches);
+                if (!empty($matches[1])) {
+                    foreach ($matches[1] as $keyword) {
+                        $searchTerms[] = $keyword;
+                    }
                 }
             }
-        }
-        
-        // Убираем дубликаты и ограничиваем количество терминов
-        $searchTerms = array_unique($searchTerms);
-        $searchTerms = array_slice($searchTerms, 0, 10); // Не более 10 терминов
-        
-        if (empty($searchTerms)) {
+            
+            // Убираем дубликаты и ограничиваем количество терминов
+            $searchTerms = array_unique($searchTerms);
+            $searchTerms = array_slice($searchTerms, 0, 10); // Не более 10 терминов
+            
+            if (empty($searchTerms)) {
+                return collect();
+            }
+            
+            // Выполняем поиск
+            $query = \App\Models\PriceItem::query()
+                ->with(['brand'])
+                ->where('quantity', '>', 0); // Только в наличии
+            
+            // Динамическое построение запроса
+            $query->where(function($q) use ($searchTerms) {
+                foreach ($searchTerms as $term) {
+                    $term = trim($term);
+                    if (!empty($term)) {
+                        $q->orWhere('name', 'like', '%' . $term . '%')
+                          ->orWhere('description', 'like', '%' . $term . '%')
+                          ->orWhere('sku', 'like', '%' . $term . '%')
+                          ->orWhere('catalog_brand', 'like', '%' . $term . '%');
+                    }
+                }
+            });
+            
+            $priceItems = $query->limit(8)->get();
+            
+            // Если найдено мало запчастей, делаем более широкий поиск
+            if ($priceItems->count() < 3 && $rule->symptom && !empty($rule->symptom->name)) {
+                $mainTerm = $rule->symptom->name;
+                $fallbackItems = \App\Models\PriceItem::query()
+                    ->with(['brand'])
+                    ->where('quantity', '>', 0)
+                    ->where(function($q) use ($mainTerm) {
+                        $q->where('name', 'like', '%' . $mainTerm . '%')
+                          ->orWhere('description', 'like', '%' . $mainTerm . '%');
+                    })
+                    ->limit(6)
+                    ->get();
+                
+                $priceItems = $priceItems->merge($fallbackItems)->unique('id');
+            }
+            
+            // Сортируем по релевантности
+            return $priceItems->sortByDesc(function($item) use ($searchTerms) {
+                $score = 0;
+                $itemText = strtolower($item->name . ' ' . $item->description . ' ' . $item->sku);
+                
+                foreach ($searchTerms as $term) {
+                    $termLower = strtolower($term);
+                    
+                    // Полное совпадение слова дает больше баллов
+                    if (preg_match('/\b' . preg_quote($termLower, '/') . '\b/', $itemText)) {
+                        $score += 2;
+                    }
+                    // Частичное совпадение
+                    elseif (str_contains($itemText, $termLower)) {
+                        $score += 1;
+                    }
+                }
+                
+                // Дополнительные баллы за наличие и цену
+                if ($item->quantity > 10) $score += 1;
+                if ($item->price > 0) $score += 0.5;
+                
+                return $score;
+            })->take(6);
+            
+        } catch (\Exception $e) {
+            // В случае ошибки возвращаем пустую коллекцию
+            Log::error('Error finding matching price items', [
+                'rule_id' => $rule->id,
+                'error' => $e->getMessage()
+            ]);
+            
             return collect();
         }
-        
-        // Выполняем поиск
-        $query = \App\Models\PriceItem::query()
-            ->with(['brand'])
-            ->where('quantity', '>', 0); // Только в наличии
-        
-        // Динамическое построение запроса
-        $query->where(function($q) use ($searchTerms) {
-            foreach ($searchTerms as $term) {
-                $term = trim($term);
-                if (!empty($term)) {
-                    $q->orWhere('name', 'like', '%' . $term . '%')
-                      ->orWhere('description', 'like', '%' . $term . '%')
-                      ->orWhere('sku', 'like', '%' . $term . '%')
-                      ->orWhere('catalog_brand', 'like', '%' . $term . '%');
-                }
-            }
-        });
-        
-        $priceItems = $query->limit(8)->get();
-        
-        // Если найдено мало запчастей, делаем более широкий поиск
-        if ($priceItems->count() < 3 && $rule->symptom && !empty($rule->symptom->name)) {
-            $mainTerm = $rule->symptom->name;
-            $fallbackItems = \App\Models\PriceItem::query()
-                ->with(['brand'])
-                ->where('quantity', '>', 0)
-                ->where(function($q) use ($mainTerm) {
-                    $q->where('name', 'like', '%' . $mainTerm . '%')
-                      ->orWhere('description', 'like', '%' . $mainTerm . '%');
-                })
-                ->limit(6)
-                ->get();
-            
-            $priceItems = $priceItems->merge($fallbackItems)->unique('id');
-        }
-        
-        // Сортируем по релевантности
-        return $priceItems->sortByDesc(function($item) use ($searchTerms) {
-            $score = 0;
-            $itemText = strtolower($item->name . ' ' . $item->description . ' ' . $item->sku);
-            
-            foreach ($searchTerms as $term) {
-                $termLower = strtolower($term);
-                
-                // Полное совпадение слова дает больше баллов
-                if (preg_match('/\b' . preg_quote($termLower, '/') . '\b/', $itemText)) {
-                    $score += 2;
-                }
-                // Частичное совпадение
-                elseif (str_contains($itemText, $termLower)) {
-                    $score += 1;
-                }
-            }
-            
-            // Дополнительные баллы за наличие и цену
-            if ($item->quantity > 10) $score += 1;
-            if ($item->price > 0) $score += 0.5;
-            
-            return $score;
-        })->take(6);
-        
-    } catch (\Exception $e) {
-        // В случае ошибки возвращаем пустую коллекцию
-        Log::error('Error finding matching price items', [
-            'rule_id' => $rule->id,
-            'error' => $e->getMessage()
-        ]);
-        
-        return collect();
     }
-}
 }

@@ -1412,7 +1412,7 @@ public function show($id)
 
     
 
- public function store(Request $request)
+public function store(Request $request)
 {
     \Log::info('=== CONSULTATION STORE START ===');
     
@@ -1457,7 +1457,6 @@ public function show($id)
             // Проверяем тип поля id
             $caseIdInfo = DB::selectOne("SHOW COLUMNS FROM diagnostic_cases WHERE Field = 'id'");
             $caseIdType = $caseIdInfo->Type ?? '';
-            $caseIsAutoIncrement = strpos($caseIdInfo->Extra ?? '', 'auto_increment') !== false;
             
             // Готовим данные для случая
             $symptomsJson = !empty($validated['symptoms']) ? 
@@ -1469,8 +1468,12 @@ public function show($id)
             if (strpos($caseIdType, 'varchar') !== false || strpos($caseIdType, 'char') !== false) {
                 $caseId = (string) \Illuminate\Support\Str::uuid();
                 
-                $caseSql = "INSERT INTO diagnostic_cases (id, user_id, rule_id, brand_id, model_id, engine_type, year, vin, mileage, symptoms, description, status, step, price_estimate, contact_name, contact_phone, contact_email, contacted_at, created_at, updated_at) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                $caseSql = "INSERT INTO diagnostic_cases (
+                    id, user_id, rule_id, brand_id, model_id, engine_type, 
+                    year, vin, mileage, symptoms, description, status, step, 
+                    price_estimate, contact_name, contact_phone, contact_email, 
+                    contacted_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 
                 $caseParams = [
                     $caseId,
@@ -1498,8 +1501,12 @@ public function show($id)
                 
             } else {
                 // Если AUTO_INCREMENT
-                $caseSql = "INSERT INTO diagnostic_cases (user_id, rule_id, brand_id, model_id, engine_type, year, vin, mileage, symptoms, description, status, step, price_estimate, contact_name, contact_phone, contact_email, contacted_at, created_at, updated_at) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                $caseSql = "INSERT INTO diagnostic_cases (
+                    user_id, rule_id, brand_id, model_id, engine_type, 
+                    year, vin, mileage, symptoms, description, status, step, 
+                    price_estimate, contact_name, contact_phone, contact_email, 
+                    contacted_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 
                 $caseParams = [
                     Auth::id(),
@@ -1549,27 +1556,41 @@ public function show($id)
                 $this->processConsultationFiles($case, $request);
             }
             
-            // ===== 3. СОЗДАЕМ КОНСУЛЬТАЦИЮ =====
-            \Log::info('Step 3: Creating consultation...');
+            // ===== 3. СОЗДАЕМ КОНСУЛЬТАЦИЮ С ПРАВИЛЬНЫМ CASE_ID =====
+            \Log::info('Step 3: Creating consultation...', [
+                'case_id' => $caseId, 
+                'case_id_type' => gettype($caseId)
+            ]);
             
             $price = $this->calculatePrice($validated['consultation_type'], $validated['rule_id']);
             
-            // Проверяем таблицу diagnostic_consultations
+            // Проверяем тип поля case_id в diagnostic_consultations
+            $caseIdFieldInfo = DB::selectOne("SHOW COLUMNS FROM diagnostic_consultations WHERE Field = 'case_id'");
+            $caseIdFieldType = $caseIdFieldInfo->Type ?? '';
+            
+            \Log::info('Case_id field type in consultations table:', ['type' => $caseIdFieldType]);
+            
+            // Проверяем таблицу diagnostic_consultations для id
             $consultIdInfo = DB::selectOne("SHOW COLUMNS FROM diagnostic_consultations WHERE Field = 'id'");
             $consultIdType = $consultIdInfo->Type ?? '';
-            $consultIsAutoIncrement = strpos($consultIdInfo->Extra ?? '', 'auto_increment') !== false;
             
             $consultationId = null;
+            
+            // Подготавливаем case_id для вставки - ОБЯЗАТЕЛЬНО КАК СТРОКА
+            $caseIdForInsert = (string) $caseId;
             
             if (strpos($consultIdType, 'varchar') !== false || strpos($consultIdType, 'char') !== false) {
                 $consultationId = (string) \Illuminate\Support\Str::uuid();
                 
-                $consultSql = "INSERT INTO diagnostic_consultations (id, case_id, user_id, expert_id, type, price, status, payment_status, scheduled_at, duration, payment_id, paid_at, expert_notes, customer_feedback, rating, created_at, updated_at) 
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                $consultSql = "INSERT INTO diagnostic_consultations (
+                    id, case_id, user_id, expert_id, type, price, status, 
+                    payment_status, scheduled_at, duration, payment_id, paid_at, 
+                    expert_notes, customer_feedback, rating, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 
                 $consultParams = [
                     $consultationId,
-                    $caseId,
+                    $caseIdForInsert, // Явно как строка
                     Auth::id(),
                     null,
                     $validated['consultation_type'],
@@ -1586,13 +1607,22 @@ public function show($id)
                 ];
                 
                 DB::insert($consultSql, $consultParams);
+                \Log::info('Consultation created with UUID:', [
+                    'consultation_id' => $consultationId,
+                    'case_id' => $caseIdForInsert,
+                    'case_id_type' => gettype($caseIdForInsert)
+                ]);
                 
             } else {
-                $consultSql = "INSERT INTO diagnostic_consultations (case_id, user_id, expert_id, type, price, status, payment_status, scheduled_at, duration, payment_id, paid_at, expert_notes, customer_feedback, rating, created_at, updated_at) 
-                               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                // Для AUTO_INCREMENT
+                $consultSql = "INSERT INTO diagnostic_consultations (
+                    case_id, user_id, expert_id, type, price, status, 
+                    payment_status, scheduled_at, duration, payment_id, paid_at, 
+                    expert_notes, customer_feedback, rating, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 
                 $consultParams = [
-                    $caseId,
+                    $caseIdForInsert, // Явно как строка
                     Auth::id(),
                     null,
                     $validated['consultation_type'],
@@ -1610,9 +1640,41 @@ public function show($id)
                 
                 DB::insert($consultSql, $consultParams);
                 $consultationId = DB::getPdo()->lastInsertId();
+                \Log::info('Consultation created with auto-increment:', [
+                    'consultation_id' => $consultationId,
+                    'case_id' => $caseIdForInsert
+                ]);
             }
             
-            \Log::info('Consultation created:', ['id' => $consultationId]);
+            // ПРОВЕРЯЕМ, ЧТО СОХРАНИЛОСЬ ПРАВИЛЬНО
+            $savedConsultation = DB::table('diagnostic_consultations')
+                ->where('id', $consultationId)
+                ->first();
+            
+            if ($savedConsultation) {
+                \Log::info('Saved consultation check:', [
+                    'id' => $savedConsultation->id,
+                    'case_id' => $savedConsultation->case_id,
+                    'case_id_type' => gettype($savedConsultation->case_id)
+                ]);
+                
+                // ЕСЛИ CASE_ID = 0 ИЛИ ПУСТОЙ - ИСПРАВЛЯЕМ
+                if ($savedConsultation->case_id == 0 || 
+                    $savedConsultation->case_id == '0' || 
+                    empty($savedConsultation->case_id)) {
+                    
+                    \Log::warning('Case_id is 0 or empty, updating...');
+                    
+                    DB::table('diagnostic_consultations')
+                        ->where('id', $consultationId)
+                        ->update(['case_id' => $caseIdForInsert]);
+                    
+                    \Log::info('Case_id updated', [
+                        'consultation_id' => $consultationId, 
+                        'new_case_id' => $caseIdForInsert
+                    ]);
+                }
+            }
             
             // Получаем консультацию
             $consultation = \App\Models\Diagnostic\Consultation::find($consultationId);
@@ -1634,13 +1696,13 @@ public function show($id)
             // Проверяем таблицу consultation_messages
             $msgIdInfo = DB::selectOne("SHOW COLUMNS FROM consultation_messages WHERE Field = 'id'");
             $msgIdType = $msgIdInfo->Type ?? '';
-            $msgIsAutoIncrement = strpos($msgIdInfo->Extra ?? '', 'auto_increment') !== false;
             
             if (strpos($msgIdType, 'varchar') !== false || strpos($msgIdType, 'char') !== false) {
                 $messageId = (string) \Illuminate\Support\Str::uuid();
                 
-                $msgSql = "INSERT INTO consultation_messages (id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
-                           VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                $msgSql = "INSERT INTO consultation_messages (
+                    id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 
                 DB::insert($msgSql, [
                     $messageId,
@@ -1652,8 +1714,9 @@ public function show($id)
                     null,
                 ]);
             } else {
-                $msgSql = "INSERT INTO consultation_messages (consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
-                           VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
+                $msgSql = "INSERT INTO consultation_messages (
+                    consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())";
                 
                 DB::insert($msgSql, [
                     $consultationId,
@@ -1672,8 +1735,9 @@ public function show($id)
                 if (strpos($msgIdType, 'varchar') !== false || strpos($msgIdType, 'char') !== false) {
                     $additionalId = (string) \Illuminate\Support\Str::uuid();
                     
-                    DB::insert("INSERT INTO consultation_messages (id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                    DB::insert("INSERT INTO consultation_messages (
+                        id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())", [
                         $additionalId,
                         $consultationId,
                         Auth::id(),
@@ -1683,8 +1747,9 @@ public function show($id)
                         null,
                     ]);
                 } else {
-                    DB::insert("INSERT INTO consultation_messages (consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
-                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                    DB::insert("INSERT INTO consultation_messages (
+                        consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())", [
                         $consultationId,
                         Auth::id(),
                         $additionalMsg,
@@ -1707,8 +1772,9 @@ public function show($id)
                 if (strpos($msgIdType, 'varchar') !== false || strpos($msgIdType, 'char') !== false) {
                     $fileId = (string) \Illuminate\Support\Str::uuid();
                     
-                    DB::insert("INSERT INTO consultation_messages (id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
-                                VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                    DB::insert("INSERT INTO consultation_messages (
+                        id, consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, ?, NOW(), NOW())", [
                         $fileId,
                         $consultationId,
                         Auth::id(),
@@ -1718,8 +1784,9 @@ public function show($id)
                         null,
                     ]);
                 } else {
-                    DB::insert("INSERT INTO consultation_messages (consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at) 
-                                VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())", [
+                    DB::insert("INSERT INTO consultation_messages (
+                        consultation_id, user_id, message, type, metadata, read_at, created_at, updated_at
+                    ) VALUES (?, ?, ?, ?, ?, ?, NOW(), NOW())", [
                         $consultationId,
                         Auth::id(),
                         $fileMsg,
@@ -1763,7 +1830,6 @@ public function show($id)
         ], 500);
     }
 }
-
 /**
  * Получить отображаемое имя модели
  */
