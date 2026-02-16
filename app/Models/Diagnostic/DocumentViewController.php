@@ -1,6 +1,6 @@
 <?php
 
-namespace App\Http\Controllers\Document;
+namespace App\Http\Controllers\Diagnostic;
 
 use App\Http\Controllers\Controller;
 use App\Models\Document;

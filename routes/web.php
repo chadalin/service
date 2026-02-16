@@ -20,7 +20,7 @@ use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\PriceItemController;
 use App\Http\Controllers\Admin\PriceImportController;
 use App\Http\Controllers\SearchTestController;
-use App\Http\Controllers\Diagnostic\DocumentViewController;
+//use App\Http\Controllers\Diagnostic\DocumentViewController;
 use App\Http\Controllers\LinkController;
 use App\Models\Diagnostic\Consultation;
 
@@ -41,7 +41,7 @@ Route::get('/services', [HomeController::class, 'landing'])->name('services.land
 // Auth Routes
 Route::get('/login', [PinAuthController::class, 'showLoginForm'])->name('login');
 Route::post('/login/send-pin', [PinAuthController::class, 'sendPin'])->name('login.send-pin');
-Route::get('/login/verify/form', [PinAuthController::class, 'showVerifyForm'])->name('login.verify.form');
+Route::get('/login/verify', [PinAuthController::class, 'showVerifyForm'])->name('login.verify');
 Route::post('/login/verify', [PinAuthController::class, 'verifyPin'])->name('login.verify');
 Route::post('/logout', [PinAuthController::class, 'logout'])->name('logout');
 
