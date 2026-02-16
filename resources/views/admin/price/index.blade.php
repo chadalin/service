@@ -187,7 +187,43 @@
                             </tbody>
                         </table>
                     </div>
-                    
+                     @if(session('import_results'))
+    <div class="alert alert-success">
+        <h4>Импорт завершен:</h4>
+        <ul>
+            <li>Обработано: {{ session('import_results')['items_processed'] }}</li>
+            <li>Создано новых: {{ session('import_results')['items_created'] }}</li>
+            <li>Обновлено: {{ session('import_results')['items_updated'] }}</li>
+            @if(isset(session('import_results')['detailed_stats']))
+                <li>Детали обновлений:
+                    <ul>
+                        <li>Обновлено цен: {{ session('import_results')['detailed_stats']['price_updated'] }}</li>
+                        <li>Обновлено количеств: {{ session('import_results')['detailed_stats']['quantity_updated'] }}</li>
+                        <li>Обновлено описаний: {{ session('import_results')['detailed_stats']['description_updated'] }}</li>
+                        <li>Обновлено единиц: {{ session('import_results')['detailed_stats']['unit_updated'] }}</li>
+                        <li>Обновлено брендов: {{ session('import_results')['detailed_stats']['catalog_brand_updated'] }}</li>
+                        <li>Без изменений: {{ session('import_results')['detailed_stats']['no_changes'] }}</li>
+                    </ul>
+                </li>
+            @endif
+            <li>Пропущено: {{ session('import_results')['items_skipped'] }}</li>
+            @if(session('import_results')['symptoms_matched'] > 0)
+                <li>Сопоставлено с симптомами: {{ session('import_results')['symptoms_matched'] }}</li>
+            @endif
+        </ul>
+        
+        @if(!empty(session('import_results')['errors']))
+            <div class="alert alert-warning">
+                <h5>Ошибки ({{ count(session('import_results')['errors']) }}):</h5>
+                <ul>
+                    @foreach(session('import_results')['errors'] as $error)
+                        <li>{{ $error }}</li>
+                    @endforeach
+                </ul>
+            </div>
+        @endif
+    </div>
+@endif
                     <!-- Пагинация -->
                     @if($priceItems->hasPages())
                         <div class="mt-4">

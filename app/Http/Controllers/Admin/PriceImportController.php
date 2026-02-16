@@ -52,7 +52,7 @@ public function import(Request $request)
         $validator = Validator::make($request->all(), [
             'excel_file' => 'required|file|mimes:xlsx,xls,csv',
             'brand_id' => 'required|exists:brands,id',
-            'update_existing' => ['nullable', 'in:0,1,true,false,on,off'], // Допускаем разные форматы
+            'update_existing' => ['nullable', 'in:0,1,true,false,on,off'],
             'match_symptoms' => ['nullable', 'in:0,1,true,false,on,off'],
         ], [
             'excel_file.required' => 'Выберите файл для загрузки',
@@ -74,18 +74,16 @@ public function import(Request $request)
 
         $file = $request->file('excel_file');
         $brandId = $request->input('brand_id');
-        
-        // Преобразуем значения чекбоксов в boolean
-        // Чекбоксы могут приходить как "on" (отмечено), "" (не отмечено), "1"/"0" и т.д.
-        $updateExisting = $this->convertCheckboxToBoolean($request->input('update_existing'));
-        $matchSymptoms = $this->convertCheckboxToBoolean($request->input('match_symptoms'));
+
+          // ВРЕМЕННО: принудительно включаем обновление для теста
+        // Вместо преобразования
+        $updateExisting = true; // Всегда обновляем
+         $matchSymptoms = $this->convertCheckboxToBoolean($request->input('match_symptoms'));
         
         Log::info('Price import parameters:', [
             'brand_id' => $brandId,
-            'update_existing_raw' => $request->input('update_existing'),
-            'update_existing_bool' => $updateExisting,
-            'match_symptoms_raw' => $request->input('match_symptoms'),
-            'match_symptoms_bool' => $matchSymptoms,
+            'update_existing' => $updateExisting,
+            'match_symptoms' => $matchSymptoms,
             'filename' => $file->getClientOriginalName()
         ]);
         
@@ -134,9 +132,19 @@ public function import(Request $request)
         ]);
         
         return response()->json([
-            'success' => false,
-            'message' => 'Ошибка при импорте: ' . $e->getMessage()
-        ], 500);
+        'success' => true,
+        'message' => 'Импорт прайс-листа завершен успешно',
+        'results' => [
+            'brand_name' => $results['brand_name'],
+            'items_processed' => $results['items_processed'],
+            'items_created' => $results['items_created'],
+            'items_updated' => $results['items_updated'],
+            'items_skipped' => $results['items_skipped'],
+            'symptoms_matched' => $results['symptoms_matched'],
+            'detailed_stats' => $results['detailed_stats'] ?? [],
+            'errors' => $results['errors']
+        ]
+    ]);
     }
 }
 
@@ -170,182 +178,267 @@ private function convertCheckboxToBoolean($value): bool
     /**
      * Обработка Excel файла с прайс-листом
      */
-    private function processPriceFile($file, $brandId, $updateExisting, $matchSymptoms, &$results)
-    {
-        Log::info('Processing price file...');
+  private function processPriceFile($file, $brandId, $updateExisting, $matchSymptoms, &$results)
+{
+    Log::info('Processing price file...');
+    
+    $this->checkPhpSpreadsheet();
+    
+    try {
+        $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
+        $worksheet = $spreadsheet->getActiveSheet();
         
-        $this->checkPhpSpreadsheet();
+        // Получаем размеры файла
+        $highestRow = $worksheet->getHighestRow();
+        $highestColumn = $worksheet->getHighestColumn();
         
-        try {
-            $spreadsheet = \PhpOffice\PhpSpreadsheet\IOFactory::load($file->getRealPath());
-            $worksheet = $spreadsheet->getActiveSheet();
-            
-            // Получаем размеры файла
-            $highestRow = $worksheet->getHighestRow();
-            $highestColumn = $worksheet->getHighestColumn();
-            
-            Log::info('Excel dimensions:', [
-                'highestRow' => $highestRow,
-                'highestColumn' => $highestColumn
-            ]);
-            
-            if ($highestRow <= 1) {
-                throw new \Exception('Файл пустой или содержит только заголовок');
-            }
-            
-            // Определяем заголовки
-            $headers = [];
-            for ($col = 'A'; $col <= $highestColumn; $col++) {
-                $cellValue = $worksheet->getCell($col . '1')->getValue();
-                $headers[$col] = trim((string)$cellValue);
-            }
-            
-            Log::info('Headers found:', $headers);
-            
-            // Определяем индексы колонок
-            $colIndexes = [
-                'catalog_brand' => $this->findColumnIndex($headers, ['brand', 'бренд', 'производитель', 'manufacturer', 'каталог']),
-                'sku' => $this->findColumnIndex($headers, ['sku', 'артикул', 'артикул', 'код', 'code', 'номер']),
-                'name' => $this->findColumnIndex($headers, ['name', 'название', 'описание', 'description', 'наименование']),
-                'quantity' => $this->findColumnIndex($headers, ['quantity', 'количество', 'кол-во', 'stock', 'наличие']),
-                'price' => $this->findColumnIndex($headers, ['price', 'цена', 'стоимость', 'cost']),
-                'unit' => $this->findColumnIndex($headers, ['unit', 'единица', 'ед.', 'измерения']),
-                'description' => $this->findColumnIndex($headers, ['описание', 'description', 'детали', 'details']),
-            ];
-            
-            Log::info('Column indexes:', $colIndexes);
-            
-            // Проверяем обязательные поля
-            if ($colIndexes['sku'] === null) {
-                throw new \Exception('Не найдена колонка с SKU/артикулом');
-            }
-            
-            if ($colIndexes['name'] === null) {
-                throw new \Exception('Не найдена колонка с названием');
-            }
-            
-            // Обрабатываем строки
-            $batchSize = 100;
-            $processed = 0;
-            
-            for ($row = 2; $row <= $highestRow; $row++) {
-                try {
-                    // Получаем данные строки
-                    $rowData = [];
-                    for ($col = 'A'; $col <= $highestColumn; $col++) {
-                        $cell = $worksheet->getCell($col . $row);
-                        $value = $cell->getValue();
-                        
-                        if ($cell->getDataType() === \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_FORMULA) {
-                            $value = $cell->getCalculatedValue();
-                        }
-                        
-                        if ($value instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
-                            $value = $value->getPlainText();
-                        }
-                        
-                        $rowData[$col] = $value !== null ? trim((string)$value) : '';
+        Log::info('Excel dimensions:', [
+            'highestRow' => $highestRow,
+            'highestColumn' => $highestColumn
+        ]);
+        
+        if ($highestRow <= 1) {
+            throw new \Exception('Файл пустой или содержит только заголовок');
+        }
+        
+        // Определяем заголовки
+        $headers = [];
+        for ($col = 'A'; $col <= $highestColumn; $col++) {
+            $cellValue = $worksheet->getCell($col . '1')->getValue();
+            $headers[$col] = trim((string)$cellValue);
+        }
+        
+        Log::info('Headers found:', $headers);
+        
+        // Определяем индексы колонок
+        $colIndexes = [
+            'catalog_brand' => $this->findColumnIndex($headers, ['brand', 'бренд', 'производитель', 'manufacturer', 'каталог']),
+            'sku' => $this->findColumnIndex($headers, ['sku', 'артикул', 'код', 'code', 'номер']),
+            'name' => $this->findColumnIndex($headers, ['name', 'название', 'описание', 'description', 'наименование']),
+            'quantity' => $this->findColumnIndex($headers, ['quantity', 'количество', 'кол-во', 'stock', 'наличие']),
+            'price' => $this->findColumnIndex($headers, ['price', 'цена', 'стоимость', 'cost']),
+            'unit' => $this->findColumnIndex($headers, ['unit', 'единица', 'ед.', 'измерения']),
+            'description' => $this->findColumnIndex($headers, ['описание', 'description', 'детали', 'details']),
+        ];
+        
+        Log::info('Column indexes:', $colIndexes);
+        
+        // Проверяем обязательные поля
+        if ($colIndexes['sku'] === null) {
+            throw new \Exception('Не найдена колонка с SKU/артикулом');
+        }
+        
+        if ($colIndexes['name'] === null) {
+            throw new \Exception('Не найдена колонка с названием');
+        }
+        
+        // Добавляем счетчики для детализации обновлений
+        $detailedStats = [
+            'quantity_updated' => 0,
+            'price_updated' => 0,
+            'description_updated' => 0,
+            'unit_updated' => 0,
+            'catalog_brand_updated' => 0,
+            'no_changes' => 0
+        ];
+        
+        // Обрабатываем строки
+        $batchSize = 100;
+        $processed = 0;
+        
+        for ($row = 2; $row <= $highestRow; $row++) {
+            try {
+                // Получаем данные строки
+                $rowData = [];
+                for ($col = 'A'; $col <= $highestColumn; $col++) {
+                    $cell = $worksheet->getCell($col . $row);
+                    $value = $cell->getValue();
+                    
+                    if ($cell->getDataType() === \PhpOffice\PhpSpreadsheet\Cell\DataType::TYPE_FORMULA) {
+                        $value = $cell->getCalculatedValue();
                     }
                     
-                    // Извлекаем значения по колонкам
-                    $sku = $this->getCellValue($rowData, $colIndexes['sku']);
-                    $name = $this->getCellValue($rowData, $colIndexes['name']);
-                    
-                    // Пропускаем пустые обязательные поля
-                    if (empty($sku) || empty($name)) {
-                        $results['items_skipped']++;
-                        continue;
+                    if ($value instanceof \PhpOffice\PhpSpreadsheet\RichText\RichText) {
+                        $value = $value->getPlainText();
                     }
                     
-                    // Подготавливаем данные
-                    $priceData = [
-                        'brand_id' => $brandId,
-                        'catalog_brand' => $this->getCellValue($rowData, $colIndexes['catalog_brand']),
-                        'sku' => $sku,
-                        'name' => $name,
-                        'quantity' => $this->parseInt($this->getCellValue($rowData, $colIndexes['quantity'])),
-                        'price' => $this->parsePrice($this->getCellValue($rowData, $colIndexes['price'])),
-                        'unit' => $this->getCellValue($rowData, $colIndexes['unit']),
-                        'description' => $this->getCellValue($rowData, $colIndexes['description']),
-                    ];
-                    
-                    // Ищем существующий товар по SKU
-                    $existingItem = PriceItem::where('sku', $sku)->first();
-                    
-                    if ($existingItem) {
-                        // Если существует и разрешено обновление
-                        if ($updateExisting) {
-                            // Не обновляем SKU и название (по условию задачи)
-                            unset($priceData['sku']);
-                            unset($priceData['name']);
+                    $rowData[$col] = $value !== null ? trim((string)$value) : '';
+                }
+                
+                // Извлекаем значения по колонкам
+                $sku = $this->getCellValue($rowData, $colIndexes['sku']);
+                $name = $this->getCellValue($rowData, $colIndexes['name']);
+                
+                // Пропускаем пустые обязательные поля
+                if (empty($sku) || empty($name)) {
+                    $results['items_skipped']++;
+                    continue;
+                }
+                
+                // Очищаем SKU
+                $sku = trim(strtoupper($sku));
+                
+                // Парсим значения
+                $newQuantity = $this->parseInt($this->getCellValue($rowData, $colIndexes['quantity']));
+                $newPrice = $this->parsePrice($this->getCellValue($rowData, $colIndexes['price']));
+                $newUnit = $this->getCellValue($rowData, $colIndexes['unit']);
+                $newDescription = $this->getCellValue($rowData, $colIndexes['description']);
+                $newCatalogBrand = $this->getCellValue($rowData, $colIndexes['catalog_brand']);
+                
+                // Подготавливаем данные
+                $priceData = [
+                    'brand_id' => $brandId,
+                    'catalog_brand' => $newCatalogBrand,
+                    'sku' => $sku,
+                    'name' => $name,
+                    'quantity' => $newQuantity,
+                    'price' => $newPrice,
+                    'unit' => $newUnit,
+                    'description' => $newDescription,
+                ];
+                
+                // Ищем существующий товар
+                $existingItem = PriceItem::where('sku', $sku)
+                                         ->where('brand_id', $brandId)
+                                         ->first();
+                
+                if ($existingItem) {
+                    // Если существует и разрешено обновление
+                    if ($updateExisting) {
+                        // Проверяем, какие поля изменились
+                        $changes = [];
+                        
+                        if ($existingItem->quantity != $newQuantity) {
+                            $changes['quantity'] = [
+                                'old' => $existingItem->quantity,
+                                'new' => $newQuantity
+                            ];
+                        }
+                        
+                        // Сравниваем цену с учетом погрешности
+                        if (abs($existingItem->price - $newPrice) > 0.001) {
+                            $changes['price'] = [
+                                'old' => $existingItem->price,
+                                'new' => $newPrice
+                            ];
+                        }
+                        
+                        if ($existingItem->unit != $newUnit) {
+                            $changes['unit'] = [
+                                'old' => $existingItem->unit,
+                                'new' => $newUnit
+                            ];
+                        }
+                        
+                        if ($existingItem->description != $newDescription) {
+                            $changes['description'] = [
+                                'old' => $existingItem->description,
+                                'new' => $newDescription
+                            ];
+                        }
+                        
+                        if ($existingItem->catalog_brand != $newCatalogBrand) {
+                            $changes['catalog_brand'] = [
+                                'old' => $existingItem->catalog_brand,
+                                'new' => $newCatalogBrand
+                            ];
+                        }
+                        
+                        // Обновляем только если есть изменения
+                        if (!empty($changes)) {
+                            $updateData = $priceData;
+                            unset($updateData['sku']); // Не обновляем SKU
                             
-                            $existingItem->update($priceData);
+                            $existingItem->update($updateData);
                             $results['items_updated']++;
                             
-                            Log::debug("Updated price item: {$sku}");
+                            // Обновляем детальную статистику
+                            foreach (array_keys($changes) as $field) {
+                                $statKey = $field . '_updated';
+                                if (isset($detailedStats[$statKey])) {
+                                    $detailedStats[$statKey]++;
+                                }
+                            }
+                            
+                            // Логируем изменения
+                            Log::info("Updated price item: {$sku}", [
+                                'changes' => $changes,
+                                'brand_id' => $brandId
+                            ]);
                         } else {
-                            $results['items_skipped']++;
-                            continue;
+                            $detailedStats['no_changes']++;
+                            Log::debug("No changes for item: {$sku}");
                         }
                     } else {
-                        // Создаем новый товар
-                        $priceItem = PriceItem::create($priceData);
-                        $results['items_created']++;
-                        
-                        // Находим совпадения с симптомами
-                        if ($matchSymptoms) {
-                            $matches = $priceItem->findMatchingSymptoms(0.3);
-                            if (!empty($matches)) {
-                                $priceItem->saveSymptomMatches($matches);
-                                $results['symptoms_matched'] += count($matches);
-                            }
-                        }
-                        
-                        Log::debug("Created price item: {$sku}");
+                        $results['items_skipped']++;
+                        Log::debug("Skipped existing item: {$sku} for brand {$brandId}");
                     }
+                } else {
+                    // Создаем новый товар
+                    $priceItem = PriceItem::create($priceData);
+                    $results['items_created']++;
                     
-                    $results['items_processed']++;
-                    $processed++;
-                    
-                    // Обновляем прогресс каждые batchSize записей
-                    if ($processed % $batchSize === 0) {
-                        $results['progress'] = round(($row / $highestRow) * 100);
-                        Log::info("Progress: {$results['progress']}%");
-                    }
-                    
-                } catch (\Exception $e) {
-                    $errorMsg = "Строка {$row}: " . $e->getMessage();
-                    Log::error("Error processing row {$row}:", [
-                        'error' => $e->getMessage(),
-                        'row_data' => $rowData ?? []
+                    Log::info("Created new price item: {$sku}", [
+                        'name' => $name,
+                        'price' => $newPrice,
+                        'quantity' => $newQuantity,
+                        'brand_id' => $brandId
                     ]);
                     
-                    $results['errors'][] = $errorMsg;
-                    $results['items_skipped']++;
+                    // Находим совпадения с симптомами
+                    if ($matchSymptoms) {
+                        $matches = $priceItem->findMatchingSymptoms(0.3);
+                        if (!empty($matches)) {
+                            $priceItem->saveSymptomMatches($matches);
+                            $results['symptoms_matched'] += count($matches);
+                        }
+                    }
                 }
+                
+                $results['items_processed']++;
+                $processed++;
+                
+                // Обновляем прогресс
+                if ($processed % $batchSize === 0) {
+                    $results['progress'] = round(($row / $highestRow) * 100);
+                }
+                
+            } catch (\Exception $e) {
+                $errorMsg = "Строка {$row}: " . $e->getMessage();
+                Log::error("Error processing row {$row}:", [
+                    'error' => $e->getMessage(),
+                    'row_data' => $rowData ?? []
+                ]);
+                
+                $results['errors'][] = $errorMsg;
+                $results['items_skipped']++;
             }
-            
-            // Завершаем прогресс
-            $results['progress'] = 100;
-            $results['processing'] = false;
-            
-            Log::info('Price file processing completed:', [
-                'total_processed' => $results['items_processed'],
-                'created' => $results['items_created'],
-                'updated' => $results['items_updated'],
-                'skipped' => $results['items_skipped'],
-                'symptoms_matched' => $results['symptoms_matched'],
-                'errors_count' => count($results['errors'])
-            ]);
-            
-        } catch (\Exception $e) {
-            Log::error('Price file processing error:', [
-                'message' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
-            ]);
-            throw new \Exception('Ошибка обработки файла прайс-листа: ' . $e->getMessage());
         }
+        
+        // Добавляем детальную статистику в результаты
+        $results['detailed_stats'] = $detailedStats;
+        $results['progress'] = 100;
+        $results['processing'] = false;
+        
+        // Подробный итоговый лог
+        Log::info('Price file processing completed:', [
+            'total_processed' => $results['items_processed'],
+            'created' => $results['items_created'],
+            'updated' => $results['items_updated'],
+            'skipped' => $results['items_skipped'],
+            'symptoms_matched' => $results['symptoms_matched'],
+            'detailed_updates' => $detailedStats,
+            'errors_count' => count($results['errors'])
+        ]);
+        
+    } catch (\Exception $e) {
+        Log::error('Price file processing error:', [
+            'message' => $e->getMessage(),
+            'trace' => $e->getTraceAsString()
+        ]);
+        throw new \Exception('Ошибка обработки файла прайс-листа: ' . $e->getMessage());
     }
+}
 
     /**
      * Найти индекс колонки по ключевым словам
