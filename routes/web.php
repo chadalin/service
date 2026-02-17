@@ -18,11 +18,13 @@ use App\Http\Controllers\Diagnostic\EnhancedAISearchController;
 use App\Http\Controllers\Diagnostic\ReportController;
 use App\Http\Controllers\Diagnostic\ConsultationController;
 use App\Http\Controllers\Admin\PriceItemController;
-use App\Http\Controllers\Admin\PriceImportController;
+use App\Http\Controllers\Admin\EmailPriceSettingsController;
+//use App\Http\Controllers\Admin\;
 use App\Http\Controllers\SearchTestController;
-//use App\Http\Controllers\Diagnostic\DocumentViewController;
+use App\Http\Controllers\Diagnostic\DocumentViewController;
 use App\Http\Controllers\LinkController;
 use App\Models\Diagnostic\Consultation;
+
 
 
 use App\Http\Controllers\Diagnostic\Admin\SymptomController as DiagnosticSymptomController;
@@ -909,4 +911,43 @@ Route::get('/debug/consultation-photos/{id}', function($id) {
             return is_array($f) && (($f['type'] ?? '') === 'photo');
         })
     ]);
+});
+
+
+
+Route::prefix('admin')->name('admin.')->middleware(['auth'])->group(function () {
+    // Email price settings
+    Route::prefix('email-prices')->name('email-prices.')->group(function () {
+        Route::get('/', [EmailPriceSettingsController::class, 'index'])->name('index');
+        
+        // Accounts
+        Route::get('/create-account', [EmailPriceSettingsController::class, 'createAccount'])->name('create-account');
+        Route::post('/accounts', [EmailPriceSettingsController::class, 'storeAccount'])->name('store-account');
+        Route::get('/accounts/{account}/edit', [EmailPriceSettingsController::class, 'editAccount'])->name('edit-account');
+        Route::put('/accounts/{account}', [EmailPriceSettingsController::class, 'updateAccount'])->name('update-account');
+        Route::delete('/accounts/{account}', [EmailPriceSettingsController::class, 'destroyAccount'])->name('destroy-account');
+        Route::post('/check/{account}', [EmailPriceSettingsController::class, 'checkNow'])->name('check-now');
+        
+        // Rules
+        Route::get('/accounts/{account}/create-rule', [EmailPriceSettingsController::class, 'createRule'])->name('create-rule');
+        Route::post('/rules', [EmailPriceSettingsController::class, 'storeRule'])->name('store-rule');
+        Route::get('/rules/{rule}/edit', [EmailPriceSettingsController::class, 'editRule'])->name('edit-rule');
+        Route::put('/rules/{rule}', [EmailPriceSettingsController::class, 'updateRule'])->name('update-rule');
+        Route::delete('/rules/{rule}', [EmailPriceSettingsController::class, 'destroyRule'])->name('destroy-rule');
+        
+        // Logs
+        Route::get('/logs', [EmailPriceSettingsController::class, 'logs'])->name('logs');
+    });
+});
+// routes/web.php
+Route::get('/test-price-import', function() {
+    $account = App\Models\EmailAccount::first();
+    if (!$account) {
+        return 'No email account found';
+    }
+    
+    $importer = app(App\Services\EmailPriceImporter::class);
+    $result = $importer->importFromAccount($account);
+    
+    return response()->json($result);
 });
