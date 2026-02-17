@@ -951,3 +951,83 @@ Route::get('/test-price-import', function() {
     
     return response()->json($result);
 });
+
+
+Route::get('/test-imap-simple', function() {
+    $account = EmailAccount::first();
+    
+    if (!$account) {
+        return "Нет email аккаунтов в базе";
+    }
+    
+    echo "<h2>Тест подключения к {$account->name}</h2>";
+    echo "<pre>";
+    
+    try {
+        // Получаем пароль
+        try {
+            $password = decrypt($account->password);
+            echo "✓ Пароль расшифрован\n";
+        } catch (\Exception $e) {
+            $password = $account->password;
+            echo "⚠ Пароль не зашифрован, используется как есть\n";
+        }
+        
+        // Строка подключения
+        $mailbox = "{{$account->imap_host}:{$account->imap_port}/imap/{$account->imap_encryption}}{$account->mailbox}";
+        echo "Подключение: $mailbox\n";
+        echo "Пользователь: {$account->username}\n";
+        
+        // Пробуем подключиться
+        echo "Попытка подключения...\n";
+        $start = microtime(true);
+        
+        $connection = @imap_open($mailbox, $account->username, $password);
+        
+        if ($connection) {
+            $time = round((microtime(true) - $start) * 1000);
+            echo "✓ УСПЕШНО! Время: {$time}ms\n";
+            
+            // Проверяем количество писем
+            $check = imap_check($connection);
+            echo "Всего писем: {$check->Nmsgs}\n";
+            
+            // Проверяем непрочитанные
+            $unseen = imap_search($connection, 'UNSEEN');
+            if ($unseen) {
+                echo "Непрочитанных: " . count($unseen) . "\n";
+            } else {
+                echo "Непрочитанных: 0\n";
+            }
+            
+            imap_close($connection);
+        } else {
+            echo "✗ ОШИБКА: " . imap_last_error() . "\n";
+        }
+        
+    } catch (\Exception $e) {
+        echo "✗ ИСКЛЮЧЕНИЕ: " . $e->getMessage() . "\n";
+        echo $e->getTraceAsString();
+    }
+    
+    echo "</pre>";
+});
+
+
+Route::get('/check-imap-ext', function() {
+    echo "<h2>Проверка IMAP расширения PHP</h2>";
+    
+    echo "IMAP функции: " . (function_exists('imap_open') ? '✅ Доступны' : '❌ НЕ доступны') . "<br>";
+    
+    if (function_exists('imap_open')) {
+        echo "Версия IMAP: " . (phpversion('imap') ?: 'неизвестно') . "<br>";
+        
+        // Пробуем подключиться к тестовому серверу
+        $testConn = @imap_open('{imap.gmail.com:993/imap/ssl}INBOX', 'test', 'test');
+        if (!$testConn) {
+            $error = imap_last_error();
+            echo "Тестовое подключение: " . ($error ? "Ошибка (это нормально для теста)" : "OK") . "<br>";
+            echo "Последняя ошибка IMAP: " . htmlspecialchars($error) . "<br>";
+        }
+    }
+});
